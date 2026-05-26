@@ -1,0 +1,5 @@
+rust_input: crate::api
+dart_output: flutter/lib/src/rust
+rust_root: ./
+dart_format_line_length: 100
+deps_check: false
