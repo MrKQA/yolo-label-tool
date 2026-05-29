@@ -3,6 +3,22 @@
 part of 'main.dart';
 
 const _videoExtensions = {'mp4', 'avi', 'mov', 'mkv', 'webm'};
+const _mediaTypeGroup = XTypeGroup(
+  label: 'Image or video',
+  extensions: [
+    'jpg',
+    'jpeg',
+    'png',
+    'bmp',
+    'gif',
+    'webp',
+    'mp4',
+    'avi',
+    'mov',
+    'mkv',
+    'webm',
+  ],
+);
 
 /// 浏览/视频检测页面，提供播放/预测互斥、文件夹预览和键盘控制骨架。
 /// Browse/video detection page with exclusive play/predict modes, preview pane, and keyboard controls.
@@ -21,14 +37,22 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
 
   bool _playVideo = true;
   bool _predictVideo = false;
+  bool _predictAll = false;
   bool _saveResult = false;
   bool _paused = false;
+  bool _showPredictionResult = true;
   bool _previewPanelVisible = true;
   double _playbackSeconds = 0;
   double _playbackSpeed = 1;
   String? _selectedInput;
   String? _detectModelPath;
   List<String> _folderItems = const [];
+
+  bool get _selectedInputIsImage =>
+      _selectedInput != null && _isImagePath(_selectedInput!);
+
+  bool get _canSaveResult =>
+      _predictVideo || _predictAll || _selectedInputIsImage;
 
   @override
   void initState() {
@@ -43,12 +67,14 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
     super.dispose();
   }
 
-  Future<void> _chooseImage() async {
-    final file = await openFile(acceptedTypeGroups: [_imageTypeGroup]);
+  Future<void> _chooseMediaFile() async {
+    final file = await openFile(acceptedTypeGroups: const [_mediaTypeGroup]);
     if (file != null) {
       setState(() {
         _selectedInput = file.path;
         _folderItems = const [];
+        _showPredictionResult = true;
+        _saveResult = _saveResult && _canSaveForInput(file.path);
       });
     }
   }
@@ -63,25 +89,16 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
       _folderItems = items;
       _selectedInput = items.isEmpty ? folder : items.first;
       _previewPanelVisible = true;
+      _showPredictionResult = true;
+      _saveResult = _saveResult && _canSaveForInput(_selectedInput);
     });
     _schedulePreviewHide();
   }
 
-  Future<void> _chooseVideo() async {
-    final file = await openFile(
-      acceptedTypeGroups: const [
-        XTypeGroup(
-          label: 'Video',
-          extensions: ['mp4', 'avi', 'mov', 'mkv', 'webm'],
-        ),
-      ],
-    );
-    if (file != null) {
-      setState(() {
-        _selectedInput = file.path;
-        _folderItems = const [];
-      });
-    }
+  bool _canSaveForInput(String? input) {
+    return _predictVideo ||
+        _predictAll ||
+        (input != null && _isImagePath(input));
   }
 
   void _setPlayMode(bool value) {
@@ -89,9 +106,11 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
       _playVideo = value;
       if (value) {
         _predictVideo = false;
+        _predictAll = false;
       } else if (!_predictVideo) {
         _predictVideo = true;
       }
+      _saveResult = _saveResult && _canSaveResult;
     });
   }
 
@@ -109,7 +128,61 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
         _playVideo = false;
       } else if (!_playVideo) {
         _playVideo = true;
+        _predictAll = false;
       }
+      _showPredictionResult = true;
+      _saveResult = _saveResult && _canSaveResult;
+    });
+  }
+
+  Future<void> _setPredictAllMode(bool value) async {
+    if (value && _detectModelPath == null) {
+      final model = await _chooseDetectModel();
+      if (model == null) {
+        return;
+      }
+      _detectModelPath = model;
+    }
+    setState(() {
+      _predictAll = value;
+      if (value) {
+        _predictVideo = true;
+        _playVideo = false;
+      }
+      _showPredictionResult = true;
+      _saveResult = _saveResult && _canSaveResult;
+    });
+  }
+
+  void _setSaveResult(bool value) {
+    if (!_canSaveResult) {
+      return;
+    }
+    setState(() => _saveResult = value);
+  }
+
+  void _togglePredictionResult() {
+    if (!_predictVideo && !_predictAll) {
+      return;
+    }
+    setState(() => _showPredictionResult = !_showPredictionResult);
+  }
+
+  void _selectRelativeMedia(int delta) {
+    if (_folderItems.isEmpty || delta == 0) {
+      return;
+    }
+    final currentIndex = _folderItems.indexWhere(
+      (path) => _pathKey(path) == _pathKey(_selectedInput ?? ''),
+    );
+    final nextIndex = ((currentIndex < 0 ? 0 : currentIndex) + delta).clamp(
+      0,
+      _folderItems.length - 1,
+    );
+    setState(() {
+      _selectedInput = _folderItems[nextIndex];
+      _showPredictionResult = true;
+      _saveResult = _saveResult && _canSaveForInput(_selectedInput);
     });
   }
 
@@ -152,8 +225,17 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
       return KeyEventResult.ignored;
     }
     final repeated = event is KeyRepeatEvent;
+    final previewStep = repeated ? 3 : 1;
     if (event.logicalKey == LogicalKeyboardKey.space) {
       setState(() => _paused = !_paused);
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.keyA) {
+      _selectRelativeMedia(-previewStep);
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.keyD) {
+      _selectRelativeMedia(previewStep);
       return KeyEventResult.handled;
     }
     if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
@@ -197,19 +279,14 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   OutlinedButton.icon(
-                    onPressed: _chooseImage,
-                    icon: const Icon(Icons.image_outlined),
-                    label: Text(t('detect.chooseImage')),
+                    onPressed: _chooseMediaFile,
+                    icon: const Icon(Icons.perm_media_outlined),
+                    label: Text(t('detect.chooseFile')),
                   ),
                   OutlinedButton.icon(
                     onPressed: _chooseFolder,
                     icon: const Icon(Icons.folder_open),
                     label: Text(t('detect.chooseFolder')),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: _chooseVideo,
-                    icon: const Icon(Icons.video_file_outlined),
-                    label: Text(t('detect.chooseVideo')),
                   ),
                   _DetectCheckbox(
                     value: _playVideo,
@@ -222,9 +299,15 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
                     onChanged: (value) => _setPredictMode(value),
                   ),
                   _DetectCheckbox(
+                    value: _predictAll,
+                    label: t('detect.predictAll'),
+                    onChanged: (value) => _setPredictAllMode(value),
+                  ),
+                  _DetectCheckbox(
                     value: _saveResult,
                     label: t('detect.saveResult'),
-                    onChanged: (value) => setState(() => _saveResult = value),
+                    enabled: _canSaveResult,
+                    onChanged: _setSaveResult,
                   ),
                 ],
               ),
@@ -237,13 +320,13 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
                 ),
               if (widget.settings.outputPath.isNotEmpty)
                 Text(
-                  widget.settings.outputPath,
+                  '${t('path.trainingOutput')}: ${widget.settings.outputPath}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
               if (_detectModelPath != null)
                 Text(
-                  '${t('detect.model')}: ${_fileName(_detectModelPath!)}',
+                  '${t('path.model')}: ${_fileName(_detectModelPath!)}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -270,8 +353,12 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
                                 ? _DetectPreviewList(
                                     items: _folderItems,
                                     selectedInput: _selectedInput,
-                                    onSelected: (path) =>
-                                        setState(() => _selectedInput = path),
+                                    onSelected: (path) => setState(() {
+                                      _selectedInput = path;
+                                      _showPredictionResult = true;
+                                      _saveResult =
+                                          _saveResult && _canSaveForInput(path);
+                                    }),
                                   )
                                 : const SizedBox.expand(),
                           ),
@@ -288,9 +375,12 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
                           selectedInput: _selectedInput,
                           playVideo: _playVideo,
                           predictVideo: _predictVideo,
+                          predictAll: _predictAll,
+                          showPredictionResult: _showPredictionResult,
                           paused: _paused,
                           playbackSeconds: _playbackSeconds,
                           playbackSpeed: _playbackSpeed,
+                          onToggleResult: _togglePredictionResult,
                         ),
                       ),
                     ),
@@ -376,49 +466,127 @@ class _DetectPlaybackSurface extends StatelessWidget {
     required this.selectedInput,
     required this.playVideo,
     required this.predictVideo,
+    required this.predictAll,
+    required this.showPredictionResult,
     required this.paused,
     required this.playbackSeconds,
     required this.playbackSpeed,
+    required this.onToggleResult,
   });
 
   final String? selectedInput;
   final bool playVideo;
   final bool predictVideo;
+  final bool predictAll;
+  final bool showPredictionResult;
+  final bool paused;
+  final double playbackSeconds;
+  final double playbackSpeed;
+  final VoidCallback onToggleResult;
+
+  @override
+  Widget build(BuildContext context) {
+    final input = selectedInput;
+    final isPredictionMode = predictVideo || predictAll;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: isPredictionMode ? onToggleResult : null,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: Center(
+              child: input == null
+                  ? Text(t('detect.placeholder'))
+                  : _isImagePath(input)
+                  ? Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Image.file(File(input), fit: BoxFit.contain),
+                    )
+                  : _VideoPlaceholder(
+                      fileName: _fileName(input),
+                      playVideo: playVideo,
+                      predictVideo: predictVideo,
+                      predictAll: predictAll,
+                      paused: paused,
+                      playbackSeconds: playbackSeconds,
+                      playbackSpeed: playbackSpeed,
+                    ),
+            ),
+          ),
+          if (input != null && isPredictionMode)
+            Positioned(
+              right: 14,
+              top: 14,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: _controlColor(context).withAlpha(232),
+                  border: Border.all(color: _borderColor(context)),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  child: Text(
+                    showPredictionResult
+                        ? t('detect.resultVisible')
+                        : t('detect.resultHidden'),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _VideoPlaceholder extends StatelessWidget {
+  const _VideoPlaceholder({
+    required this.fileName,
+    required this.playVideo,
+    required this.predictVideo,
+    required this.predictAll,
+    required this.paused,
+    required this.playbackSeconds,
+    required this.playbackSpeed,
+  });
+
+  final String fileName;
+  final bool playVideo;
+  final bool predictVideo;
+  final bool predictAll;
   final bool paused;
   final double playbackSeconds;
   final double playbackSpeed;
 
   @override
   Widget build(BuildContext context) {
-    final input = selectedInput;
-    return Center(
-      child: input == null
-          ? Text(t('detect.placeholder'))
-          : Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  _isImagePath(input)
-                      ? Icons.image_outlined
-                      : Icons.video_file_outlined,
-                  size: 56,
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  _fileName(input),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  playVideo ? t('detect.playVideo') : t('detect.predictVideo'),
-                ),
-                Text(paused ? t('detect.paused') : t('detect.playing')),
-                Text(
-                  '${playbackSeconds.toStringAsFixed(0)}s / ${playbackSpeed.toStringAsFixed(0)}x',
-                ),
-              ],
-            ),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.video_file_outlined, size: 56),
+        const SizedBox(height: 10),
+        Text(fileName, maxLines: 1, overflow: TextOverflow.ellipsis),
+        const SizedBox(height: 8),
+        Text(
+          predictAll
+              ? t('detect.predictAll')
+              : playVideo
+              ? t('detect.playVideo')
+              : t('detect.predictVideo'),
+        ),
+        Text(paused ? t('detect.paused') : t('detect.playing')),
+        Text(
+          '${playbackSeconds.toStringAsFixed(0)}s / ${playbackSpeed.toStringAsFixed(0)}x',
+        ),
+        if (predictVideo || predictAll)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(t('detect.clickToggleResult')),
+          ),
+      ],
     );
   }
 }
@@ -428,10 +596,12 @@ class _DetectCheckbox extends StatelessWidget {
     required this.value,
     required this.label,
     required this.onChanged,
+    this.enabled = true,
   });
 
   final bool value;
   final String label;
+  final bool enabled;
   final ValueChanged<bool> onChanged;
 
   @override
@@ -439,7 +609,7 @@ class _DetectCheckbox extends StatelessWidget {
     return FilterChip(
       selected: value,
       label: Text(label),
-      onSelected: onChanged,
+      onSelected: enabled ? onChanged : null,
       avatar: Icon(value ? Icons.check_box : Icons.check_box_outline_blank),
     );
   }

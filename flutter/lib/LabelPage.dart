@@ -562,6 +562,9 @@ class _ImageCanvasState extends State<_ImageCanvas> {
   int? _resizingCornerIndex;
   bool _draggingSelection = false;
   Size? _imageSize;
+  Size? _sampleImageSize;
+  Uint8List? _sampleRgbaBytes;
+  Offset? _hoverPoint;
   String? _loadedImagePath;
   List<Offset> _segDraftPoints = [];
 
@@ -584,6 +587,9 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.image?.path != widget.image?.path) {
       _imageSize = null;
+      _sampleImageSize = null;
+      _sampleRgbaBytes = null;
+      _hoverPoint = null;
       _loadedImagePath = null;
       _segDraftPoints = [];
       _loadImageSize();
@@ -593,6 +599,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
       _draftRect = null;
       _draftClassId = null;
       _segDraftPoints = [];
+      _hoverPoint = null;
     }
   }
 
@@ -607,18 +614,49 @@ class _ImageCanvasState extends State<_ImageCanvas> {
       final completer = Completer<ui.Image>();
       ui.decodeImageFromList(bytes, completer.complete);
       final decoded = await completer.future;
+      final sample = await _decodeSampleImage(bytes);
       if (!mounted || widget.image?.path != path) {
         decoded.dispose();
+        sample?.image.dispose();
         return;
       }
       setState(() {
         _imageSize = Size(decoded.width.toDouble(), decoded.height.toDouble());
+        _sampleImageSize = sample?.size;
+        _sampleRgbaBytes = sample?.bytes;
       });
       decoded.dispose();
+      sample?.image.dispose();
     } on Object {
       if (mounted && widget.image?.path == path) {
-        setState(() => _imageSize = null);
+        setState(() {
+          _imageSize = null;
+          _sampleImageSize = null;
+          _sampleRgbaBytes = null;
+        });
       }
+    }
+  }
+
+  Future<_SampledImage?> _decodeSampleImage(Uint8List bytes) async {
+    try {
+      final codec = await ui.instantiateImageCodec(bytes, targetWidth: 64);
+      final frame = await codec.getNextFrame();
+      final image = frame.image;
+      final byteData = await image.toByteData(
+        format: ui.ImageByteFormat.rawRgba,
+      );
+      if (byteData == null) {
+        image.dispose();
+        return null;
+      }
+      return _SampledImage(
+        image: image,
+        size: Size(image.width.toDouble(), image.height.toDouble()),
+        bytes: byteData.buffer.asUint8List(),
+      );
+    } on Object {
+      return null;
     }
   }
 
@@ -661,6 +699,48 @@ class _ImageCanvasState extends State<_ImageCanvas> {
       _annotationWorkspaceHeight / 2,
     );
     return (localPoint - center) / _scale + center;
+  }
+
+  void _updateHoverPoint(Offset localPosition) {
+    if (widget.image == null || widget.activeTool != 'draw') {
+      if (_hoverPoint != null) {
+        setState(() => _hoverPoint = null);
+      }
+      return;
+    }
+    final imageRect = _imageDisplayRect();
+    final point = _toUnclampedContentPoint(localPosition);
+    final nextPoint = imageRect.contains(point) ? point : null;
+    if (_hoverPoint == nextPoint) {
+      return;
+    }
+    setState(() => _hoverPoint = nextPoint);
+  }
+
+  Color _crosshairColorFor(Offset point) {
+    final bytes = _sampleRgbaBytes;
+    final sampleSize = _sampleImageSize;
+    final imageRect = _imageDisplayRect();
+    if (bytes == null || sampleSize == null || !imageRect.contains(point)) {
+      return _isDarkMode(context) ? Colors.white : const Color(0xFF111827);
+    }
+    final nx = ((point.dx - imageRect.left) / imageRect.width).clamp(0.0, 1.0);
+    final ny = ((point.dy - imageRect.top) / imageRect.height).clamp(0.0, 1.0);
+    final sx = (nx * (sampleSize.width - 1)).round();
+    final sy = (ny * (sampleSize.height - 1)).round();
+    final index = ((sy * sampleSize.width.toInt()) + sx) * 4;
+    if (index + 3 >= bytes.length) {
+      return _isDarkMode(context) ? Colors.white : const Color(0xFF111827);
+    }
+    final r = bytes[index];
+    final g = bytes[index + 1];
+    final b = bytes[index + 2];
+    final a = bytes[index + 3];
+    if (a < 96) {
+      return _isDarkMode(context) ? Colors.white : const Color(0xFF111827);
+    }
+    final luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return luminance > 0.52 ? const Color(0xFF111827) : Colors.white;
   }
 
   _AnnotationRegion? _annotationAt(Offset point) {
@@ -932,6 +1012,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     if (widget.image == null) {
       return;
     }
+    _updateHoverPoint(event.localPosition);
     final localPoint = _toContentPoint(event.localPosition);
     final resizingId = _resizingAnnotationId;
     final resizingCorner = _resizingCornerIndex;
@@ -978,6 +1059,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
   }
 
   void _handlePointerHover(PointerHoverEvent event) {
+    _updateHoverPoint(event.localPosition);
     final start = _drawStart;
     if (widget.image == null || start == null) {
       return;
@@ -1009,6 +1091,10 @@ class _ImageCanvasState extends State<_ImageCanvas> {
   Widget build(BuildContext context) {
     final selectedAnnotation = _selectedAnnotation();
     final imageRect = _imageDisplayRect();
+    final crosshairPoint = widget.activeTool == 'draw' ? _hoverPoint : null;
+    final crosshairColor = crosshairPoint == null
+        ? null
+        : _crosshairColorFor(crosshairPoint);
     return Shortcuts(
       shortcuts: const {
         SingleActivator(LogicalKeyboardKey.escape): _CancelDraftIntent(),
@@ -1040,54 +1126,66 @@ class _ImageCanvasState extends State<_ImageCanvas> {
                 ),
               ],
             ),
-            child: Listener(
-              behavior: HitTestBehavior.opaque,
-              onPointerDown: _handlePointerDown,
-              onPointerMove: _handlePointerMove,
-              onPointerHover: _handlePointerHover,
-              onPointerUp: _handlePointerUp,
-              onPointerCancel: (_) => _cancelDraft(),
+            child: MouseRegion(
+              cursor: widget.activeTool == 'draw'
+                  ? SystemMouseCursors.precise
+                  : MouseCursor.defer,
+              onExit: (_) {
+                if (_hoverPoint != null) {
+                  setState(() => _hoverPoint = null);
+                }
+              },
               child: ClipRect(
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    CustomPaint(
-                      painter: _CanvasGridPainter(_isDarkMode(context)),
-                    ),
-                    if (widget.image == null)
-                      Center(child: Text(t('label.openPrompt')))
-                    else
-                      Center(
-                        child: Transform.scale(
-                          scale: _scale,
-                          child: SizedBox(
-                            width: _annotationWorkspaceWidth,
-                            height: _annotationWorkspaceHeight,
-                            child: Stack(
-                              fit: StackFit.expand,
-                              children: [
-                                _SelectedImageView(image: widget.image!),
-                                CustomPaint(
-                                  painter: _AnnotationPainter(
-                                    annotations: widget.annotations,
-                                    classes: widget.labelClasses,
-                                    selectedAnnotation: selectedAnnotation,
-                                    draftRect: _draftRect,
-                                    draftSegPoints: _segDraftPoints,
-                                    imageRect: imageRect,
-                                    draftMode: widget.activeMode,
-                                    draftClassId: _draftClassId,
-                                    showClassLabels: widget.showClassLabels,
-                                    scale: _scale,
-                                    darkMode: _isDarkMode(context),
+                child: Listener(
+                  behavior: HitTestBehavior.opaque,
+                  onPointerDown: _handlePointerDown,
+                  onPointerMove: _handlePointerMove,
+                  onPointerHover: _handlePointerHover,
+                  onPointerUp: _handlePointerUp,
+                  onPointerCancel: (_) => _cancelDraft(),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      CustomPaint(
+                        painter: _CanvasGridPainter(_isDarkMode(context)),
+                      ),
+                      if (widget.image == null)
+                        Center(child: Text(t('label.openPrompt')))
+                      else
+                        Center(
+                          child: Transform.scale(
+                            scale: _scale,
+                            child: SizedBox(
+                              width: _annotationWorkspaceWidth,
+                              height: _annotationWorkspaceHeight,
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  _SelectedImageView(image: widget.image!),
+                                  CustomPaint(
+                                    painter: _AnnotationPainter(
+                                      annotations: widget.annotations,
+                                      classes: widget.labelClasses,
+                                      selectedAnnotation: selectedAnnotation,
+                                      draftRect: _draftRect,
+                                      draftSegPoints: _segDraftPoints,
+                                      imageRect: imageRect,
+                                      draftMode: widget.activeMode,
+                                      draftClassId: _draftClassId,
+                                      showClassLabels: widget.showClassLabels,
+                                      scale: _scale,
+                                      darkMode: _isDarkMode(context),
+                                      crosshairPoint: crosshairPoint,
+                                      crosshairColor: crosshairColor,
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -1096,6 +1194,18 @@ class _ImageCanvasState extends State<_ImageCanvas> {
       ),
     );
   }
+}
+
+class _SampledImage {
+  const _SampledImage({
+    required this.image,
+    required this.size,
+    required this.bytes,
+  });
+
+  final ui.Image image;
+  final Size size;
+  final Uint8List bytes;
 }
 
 class _CancelDraftIntent extends Intent {
@@ -1151,6 +1261,8 @@ class _AnnotationPainter extends CustomPainter {
     required this.showClassLabels,
     required this.scale,
     required this.darkMode,
+    required this.crosshairPoint,
+    required this.crosshairColor,
   });
 
   final List<_AnnotationRegion> annotations;
@@ -1164,6 +1276,8 @@ class _AnnotationPainter extends CustomPainter {
   final bool showClassLabels;
   final double scale;
   final bool darkMode;
+  final Offset? crosshairPoint;
+  final Color? crosshairColor;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1204,6 +1318,12 @@ class _AnnotationPainter extends CustomPainter {
       final color = _classById(draftClassId)?.color ?? const Color(0xFF2563EB);
       _drawDraftSegPolygon(canvas, draftSegPoints, color);
     }
+
+    final crosshair = crosshairPoint;
+    final color = crosshairColor;
+    if (crosshair != null && color != null && imageRect.contains(crosshair)) {
+      _drawCrosshair(canvas, crosshair, color);
+    }
   }
 
   _LabelClass? _classById(int? id) {
@@ -1232,6 +1352,53 @@ class _AnnotationPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1 / scale;
     canvas.drawRect(imageRect, paint);
+  }
+
+  void _drawCrosshair(Canvas canvas, Offset point, Color color) {
+    final contrast = color.computeLuminance() > 0.5
+        ? const Color(0xFF111827)
+        : Colors.white;
+    final underlay = Paint()
+      ..color = contrast.withValues(alpha: 0.45)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3.2 / scale;
+    final paint = Paint()
+      ..color = color.withValues(alpha: 0.95)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2 / scale;
+    final horizontal = [
+      Offset(imageRect.left, point.dy),
+      Offset(imageRect.right, point.dy),
+    ];
+    final vertical = [
+      Offset(point.dx, imageRect.top),
+      Offset(point.dx, imageRect.bottom),
+    ];
+    _drawDashedLine(canvas, horizontal.first, horizontal.last, underlay);
+    _drawDashedLine(canvas, vertical.first, vertical.last, underlay);
+    _drawDashedLine(canvas, horizontal.first, horizontal.last, paint);
+    _drawDashedLine(canvas, vertical.first, vertical.last, paint);
+  }
+
+  void _drawDashedLine(Canvas canvas, Offset start, Offset end, Paint paint) {
+    final dash = 8 / scale;
+    final gap = 6 / scale;
+    final delta = end - start;
+    final distance = delta.distance;
+    if (distance <= 0) {
+      return;
+    }
+    final direction = delta / distance;
+    var current = 0.0;
+    while (current < distance) {
+      final next = math.min(current + dash, distance);
+      canvas.drawLine(
+        start + direction * current,
+        start + direction * next,
+        paint,
+      );
+      current += dash + gap;
+    }
   }
 
   void _drawDraftSegPolygon(Canvas canvas, List<Offset> points, Color color) {
@@ -1621,72 +1788,76 @@ class _AnnotationListPanel extends StatelessWidget {
         final labelClass = labelClasses
             .where((item) => item.id == annotation.classId)
             .firstOrNullValue;
-        return Material(
-          color: selected
-              ? Theme.of(context).colorScheme.primaryContainer
-              : _controlColor(context),
-          borderRadius: BorderRadius.circular(6),
-          child: InkWell(
-            onTap: () => onAnnotationSelected(annotation.id),
+        return Tooltip(
+          waitDuration: const Duration(milliseconds: 350),
+          message: _annotationCoordinateTooltip(annotation),
+          child: Material(
+            color: selected
+                ? Theme.of(context).colorScheme.primaryContainer
+                : _controlColor(context),
             borderRadius: BorderRadius.circular(6),
-            child: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: selected
-                      ? Theme.of(context).colorScheme.primary
-                      : _borderColor(context),
+            child: InkWell(
+              onTap: () => onAnnotationSelected(annotation.id),
+              borderRadius: BorderRadius.circular(6),
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: selected
+                        ? Theme.of(context).colorScheme.primary
+                        : _borderColor(context),
+                  ),
+                  borderRadius: BorderRadius.circular(6),
                 ),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        '${index + 1}. ${annotation.mode.label}',
-                        style: Theme.of(context).textTheme.labelLarge,
-                      ),
-                      const Spacer(),
-                      if (labelClass != null)
-                        DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: labelClass.color,
-                            borderRadius: BorderRadius.circular(3),
-                          ),
-                          child: const SizedBox.square(dimension: 14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          '${index + 1}. ${annotation.mode.label}',
+                          style: Theme.of(context).textTheme.labelLarge,
                         ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  DropdownButtonFormField<int>(
-                    initialValue: annotation.classId,
-                    isExpanded: true,
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 8,
-                      ),
+                        const Spacer(),
+                        if (labelClass != null)
+                          DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: labelClass.color,
+                              borderRadius: BorderRadius.circular(3),
+                            ),
+                            child: const SizedBox.square(dimension: 14),
+                          ),
+                      ],
                     ),
-                    items: [
-                      for (final labelClass in labelClasses)
-                        DropdownMenuItem(
-                          value: labelClass.id,
-                          child: Text(
-                            labelClass.name,
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                    const SizedBox(height: 6),
+                    DropdownButtonFormField<int>(
+                      initialValue: annotation.classId,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 8,
                         ),
-                    ],
-                    onChanged: (classId) {
-                      if (classId != null) {
-                        onAnnotationClassChanged(annotation.id, classId);
-                      }
-                    },
-                  ),
-                ],
+                      ),
+                      items: [
+                        for (final labelClass in labelClasses)
+                          DropdownMenuItem(
+                            value: labelClass.id,
+                            child: Text(
+                              labelClass.name,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      onChanged: (classId) {
+                        if (classId != null) {
+                          onAnnotationClassChanged(annotation.id, classId);
+                        }
+                      },
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -1695,6 +1866,36 @@ class _AnnotationListPanel extends StatelessWidget {
     );
   }
 }
+
+String _annotationCoordinateTooltip(_AnnotationRegion annotation) {
+  final rect = annotation.rect;
+  final lines = [
+    '${annotation.mode.label} 画布坐标',
+    'left=${_coord(rect.left)}, top=${_coord(rect.top)}',
+    'right=${_coord(rect.right)}, bottom=${_coord(rect.bottom)}',
+    'center=(${_coord(rect.center.dx)}, ${_coord(rect.center.dy)})',
+    'size=${_coord(rect.width)} x ${_coord(rect.height)}',
+  ];
+  if (annotation.mode == _AnnotationMode.obb) {
+    lines.add('rotation=${annotation.rotationDegrees.toStringAsFixed(1)}°');
+  }
+  if (annotation.mode == _AnnotationMode.seg && annotation.points.isNotEmpty) {
+    lines.add('points=${annotation.points.length}');
+    final previewPoints = annotation.points
+        .take(6)
+        .map((point) {
+          return '(${_coord(point.dx)}, ${_coord(point.dy)})';
+        })
+        .join(' ');
+    lines.add(previewPoints);
+    if (annotation.points.length > 6) {
+      lines.add('...');
+    }
+  }
+  return lines.join('\n');
+}
+
+String _coord(double value) => value.toStringAsFixed(1);
 
 class _ClassManager extends StatelessWidget {
   const _ClassManager({
@@ -1887,15 +2088,19 @@ class _ClassTile extends StatelessWidget {
 class _BottomControls extends StatelessWidget {
   const _BottomControls({
     required this.zoom,
+    required this.zoomLocked,
     required this.darkMode,
     required this.onZoomChanged,
+    required this.onToggleZoomLock,
     required this.onToggleThemeMode,
     required this.onOpenKeySettings,
   });
 
   final double zoom;
+  final bool zoomLocked;
   final bool darkMode;
   final ValueChanged<double> onZoomChanged;
+  final VoidCallback onToggleZoomLock;
   final VoidCallback onToggleThemeMode;
   final VoidCallback onOpenKeySettings;
 
@@ -1914,23 +2119,24 @@ class _BottomControls extends StatelessWidget {
           _SquareIconButton(
             icon: Icons.remove,
             tooltip: t('bottom.zoomOut'),
-            onPressed: () => onZoomChanged(zoom - 10),
+            onPressed: zoomLocked ? null : () => onZoomChanged(zoom - 10),
           ),
           _ZoomValue(value: '${zoom.round()}%'),
           _SquareIconButton(
-            icon: Icons.link,
+            icon: zoomLocked ? Icons.link_off : Icons.link,
             tooltip: t('bottom.lockZoom'),
-            onPressed: () {},
+            selected: zoomLocked,
+            onPressed: onToggleZoomLock,
           ),
           _SquareIconButton(
             icon: Icons.add,
             tooltip: t('bottom.zoomIn'),
-            onPressed: () => onZoomChanged(zoom + 10),
+            onPressed: zoomLocked ? null : () => onZoomChanged(zoom + 10),
           ),
           _ControlButton(
             label: t('bottom.reset'),
             width: 96,
-            onPressed: () => onZoomChanged(100),
+            onPressed: zoomLocked ? null : () => onZoomChanged(100),
           ),
           _ControlButton(
             icon: darkMode
@@ -1965,7 +2171,7 @@ class _ControlButton extends StatelessWidget {
   final IconData? icon;
   final String label;
   final double width;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -2046,11 +2252,13 @@ class _SquareIconButton extends StatelessWidget {
     required this.icon,
     required this.tooltip,
     required this.onPressed,
+    this.selected = false,
   });
 
   final IconData icon;
   final String tooltip;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
+  final bool selected;
 
   @override
   Widget build(BuildContext context) {
@@ -2064,6 +2272,12 @@ class _SquareIconButton extends StatelessWidget {
             onPressed: onPressed,
             style: OutlinedButton.styleFrom(
               padding: EdgeInsets.zero,
+              backgroundColor: selected
+                  ? Theme.of(context).colorScheme.primaryContainer
+                  : null,
+              foregroundColor: selected
+                  ? Theme.of(context).colorScheme.onPrimaryContainer
+                  : null,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(6),
               ),

@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:file_selector/file_selector.dart';
+import 'package:flex_color_picker/flex_color_picker.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -148,6 +149,8 @@ class _LanguageStrings {
     'settings.outputPath': '训练结果保存位置',
     'settings.choosePython': '选择 Python',
     'settings.chooseFolder': '选择文件夹',
+    'path.model': '模型路径',
+    'path.trainingOutput': '训练结果路径',
     'settings.cacheSize': '当前缓存大小',
     'settings.clearCacheConfirm': '确认清空历史、类别和临时标注数据？',
     'settings.saved': '设置已保存',
@@ -226,24 +229,40 @@ class _LanguageStrings {
     'train.refreshModels': '刷新模型',
     'train.chooseDataset': '选择数据集',
     'train.start': '开始训练',
+    'train.datasetPath': '数据集路径',
     'train.invalidModel': '模型文件异常，请选择 YOLO PT 模型。',
     'train.noModels': 'models 文件夹中没有可用的 YOLO PT 模型。',
     'train.datasetSummaryEmpty': '请选择 data.yaml 后显示 classes、train、val 数量。',
     'train.classes': '类别',
     'train.trainCount': 'train 数量',
     'train.valCount': 'val 数量',
+    'train.currentEpoch': '当前轮次',
+    'train.notStarted': '未开始',
+    'train.coreParameters': '核心参数',
+    'train.batchFixed': '固定批次',
+    'train.batchAuto60': '自动 60%',
+    'train.batchRatio': '显存比例',
+    'train.batchAuto60Help': '将传递 batch=-1，由 Ultralytics 自动选择约 60% CUDA 显存利用率。',
+    'train.noGpuDetected': '未检测到 NVIDIA GPU，当前使用 CPU。',
+    'train.tuningTitle': '调参说明',
+    'train.tuningTips':
+        '提升 YOLO 训练效果通常先检查数据质量和标注一致性，再调整 imgsz、batch、lr0、momentum 与增强参数。batch 越大梯度越稳定但更占显存；lr0 控制初始学习速度；momentum 控制更新惯性；imgsz 越大越利于小目标但训练更慢。',
     'train.chartPlaceholder': '训练开始后显示 loss、mAP、precision、recall 等曲线。',
     'detect.title': '浏览 / 视频检测',
     'detect.chooseImage': '选择图片',
+    'detect.chooseFile': '选择文件',
     'detect.chooseFolder': '选择文件夹',
-    'detect.chooseVideo': '选择视频',
     'detect.playVideo': '播放视频',
     'detect.predictVideo': '预测视频',
+    'detect.predictAll': '全部预测',
     'detect.saveResult': '保存结果',
     'detect.model': '检测模型',
     'detect.fileName': '文件名',
     'detect.paused': '已暂停',
     'detect.playing': '播放中',
+    'detect.resultVisible': '显示预测结果',
+    'detect.resultHidden': '隐藏预测结果',
+    'detect.clickToggleResult': '点击显示区域切换预测结果显示。',
     'detect.placeholder': '检测结果、视频播放和预测导出将在这里显示。',
     'action.reset': '重置',
     'action.close': '关闭',
@@ -480,6 +499,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   bool _darkMode = false;
   bool _shortcutDialogOpen = false;
   bool _topMenuVisible = true;
+  bool _zoomLocked = false;
   double _zoom = 100;
   int _selectedImageIndex = 0;
   String _activeSection = 'label';
@@ -584,7 +604,14 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   }
 
   void _setZoom(double value) {
+    if (_zoomLocked) {
+      return;
+    }
     setState(() => _zoom = value.clamp(25, 400).toDouble());
+  }
+
+  void _toggleZoomLock() {
+    setState(() => _zoomLocked = !_zoomLocked);
   }
 
   void _selectImage(int index) {
@@ -599,18 +626,18 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     });
   }
 
-  void _selectPreviousImage() {
+  void _selectPreviousImage({int step = 1}) {
     if (_images.isEmpty) {
       return;
     }
-    _selectImage((_selectedImageIndex - 1).clamp(0, _images.length - 1));
+    _selectImage((_selectedImageIndex - step).clamp(0, _images.length - 1));
   }
 
-  void _selectNextImage() {
+  void _selectNextImage({int step = 1}) {
     if (_images.isEmpty) {
       return;
     }
-    _selectImage((_selectedImageIndex + 1).clamp(0, _images.length - 1));
+    _selectImage((_selectedImageIndex + step).clamp(0, _images.length - 1));
   }
 
   Future<void> _openImageFile({int? insertAfterIndex}) async {
@@ -893,37 +920,30 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   }
 
   Future<void> _chooseLabelClassColor(_LabelClass labelClass) async {
-    final selected = await showDialog<Color>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(t('label.classColor')),
-        content: Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final color in _labelColorPalette)
-              InkWell(
-                onTap: () => Navigator.of(context).pop(color),
-                borderRadius: BorderRadius.circular(6),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: color,
-                    border: Border.all(
-                      color: color.toARGB32() == labelClass.colorValue
-                          ? Theme.of(context).colorScheme.onSurface
-                          : Colors.transparent,
-                      width: 2,
-                    ),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: const SizedBox.square(dimension: 32),
-                ),
-              ),
-          ],
-        ),
-      ),
+    final currentColor = labelClass.color;
+    final selected = await showColorPickerDialog(
+      context,
+      currentColor,
+      title: Text(t('label.classColor')),
+      heading: Text(t('label.classColor')),
+      subheading: Text(t('label.classColor')),
+      wheelSubheading: Text(t('label.classColor')),
+      pickersEnabled: const {
+        ColorPickerType.primary: true,
+        ColorPickerType.accent: true,
+        ColorPickerType.wheel: true,
+      },
+      enableShadesSelection: true,
+      showColorCode: true,
+      showColorName: true,
+      width: 34,
+      height: 34,
+      constraints: const BoxConstraints(maxWidth: 560, maxHeight: 680),
+      barrierDismissible: true,
+      barrierColor: Colors.black26,
+      selectedPickerTypeColor: Theme.of(context).colorScheme.primary,
     );
-    if (selected == null) {
+    if (selected.toARGB32() == currentColor.toARGB32()) {
       return;
     }
     setState(() {
@@ -1136,7 +1156,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   }
 
   void _handlePointerSignal(PointerSignalEvent event) {
-    if (_activeSection != 'label') {
+    if (_activeSection != 'label' || _zoomLocked) {
       return;
     }
     if (event is PointerScrollEvent) {
@@ -1145,13 +1165,15 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent ||
+    if ((event is! KeyDownEvent && event is! KeyRepeatEvent) ||
         _activeSection != 'label' ||
         _shortcutDialogOpen) {
       return KeyEventResult.ignored;
     }
 
     final key = event.logicalKey;
+    final repeated = event is KeyRepeatEvent;
+    final imageStep = repeated ? 3 : 1;
     if (HardwareKeyboard.instance.isControlPressed) {
       if (key == LogicalKeyboardKey.keyZ) {
         _undoAnnotationChange();
@@ -1180,11 +1202,11 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     }
 
     if (_shortcutConfig.matches(_ShortcutAction.previousImage, key)) {
-      _selectPreviousImage();
+      _selectPreviousImage(step: imageStep);
       return KeyEventResult.handled;
     }
     if (_shortcutConfig.matches(_ShortcutAction.nextImage, key)) {
-      _selectNextImage();
+      _selectNextImage(step: imageStep);
       return KeyEventResult.handled;
     }
     if (_shortcutConfig.matches(_ShortcutAction.zoomIn, key)) {
@@ -1415,8 +1437,10 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
           if (labelPage)
             _BottomControls(
               zoom: _zoom,
+              zoomLocked: _zoomLocked,
               darkMode: _darkMode,
               onZoomChanged: _setZoom,
+              onToggleZoomLock: _toggleZoomLock,
               onToggleThemeMode: _toggleThemeMode,
               onOpenKeySettings: _showKeySettings,
             ),

@@ -13,13 +13,23 @@ class _TrainPage extends StatefulWidget {
   State<_TrainPage> createState() => _TrainPageState();
 }
 
+enum _BatchMode { fixed, autoGpu60, autoGpuRatio }
+
+const _imageSizeOptions = [320, 416, 640, 800, 960, 1280];
+
+class _TrainingDeviceOption {
+  const _TrainingDeviceOption({required this.id, required this.label});
+
+  final String id;
+  final String label;
+}
+
 class _TrainPageState extends State<_TrainPage> {
   final Map<String, double> _parameters = {
     'epochs': 300,
-    'batch': 12,
     'imgsz': 640,
-    'device': 0,
-    'amp': 0,
+    'lr0': 0.01,
+    'momentum': 0.937,
     'hsv_s': 0.25,
     'hsv_v': 0.5,
     'translate': 0.1,
@@ -31,11 +41,22 @@ class _TrainPageState extends State<_TrainPage> {
   };
 
   Timer? _hideTimer;
+  Timer? _trainingTimer;
   bool _parameterPanelVisible = true;
+  bool _trainingRunning = false;
+  int _currentEpoch = 0;
   String? _modelPath;
   String? _datasetPath;
   _DatasetSummary? _datasetSummary;
   List<String> _modelOptions = const [];
+  List<_TrainingDeviceOption> _deviceOptions = const [
+    _TrainingDeviceOption(id: 'cpu', label: 'CPU'),
+  ];
+  Set<String> _selectedDeviceIds = const {'cpu'};
+  _BatchMode _batchMode = _BatchMode.fixed;
+  double _batchSize = 16;
+  double _batchRatio = 0.70;
+  bool _ampEnabled = false;
 
   bool get _validYoloModel {
     final path = _modelPath;
@@ -45,9 +66,28 @@ class _TrainPageState extends State<_TrainPage> {
     return _modelOptions.any((item) => _pathKey(item) == _pathKey(path));
   }
 
+  bool get _usingCpuDevice => _selectedDeviceIds.contains('cpu');
+
+  String get _batchArgument {
+    return switch (_batchMode) {
+      _BatchMode.fixed => _batchSize.round().toString(),
+      _BatchMode.autoGpu60 => '-1',
+      _BatchMode.autoGpuRatio => _batchRatio.toStringAsFixed(2),
+    };
+  }
+
+  String get _deviceArgument {
+    if (_usingCpuDevice || _selectedDeviceIds.isEmpty) {
+      return 'cpu';
+    }
+    final ids = _selectedDeviceIds.toList()..sort(_naturalCompare);
+    return ids.length == 1 ? ids.first : '[${ids.join(', ')}]';
+  }
+
   @override
   void initState() {
     super.initState();
+    _loadDeviceOptions();
     _loadModelOptions();
     _scheduleHide();
   }
@@ -55,6 +95,7 @@ class _TrainPageState extends State<_TrainPage> {
   @override
   void dispose() {
     _hideTimer?.cancel();
+    _trainingTimer?.cancel();
     super.dispose();
   }
 
@@ -77,6 +118,17 @@ class _TrainPageState extends State<_TrainPage> {
             ..sort(_naturalPathCompare);
       _modelPath = _modelOptions.isEmpty ? null : _modelOptions.first;
     });
+  }
+
+  void _loadDeviceOptions() {
+    final devices = _detectNvidiaDevices();
+    if (devices.isEmpty) {
+      _deviceOptions = const [_TrainingDeviceOption(id: 'cpu', label: 'CPU')];
+      _selectedDeviceIds = const {'cpu'};
+      return;
+    }
+    _deviceOptions = devices;
+    _selectedDeviceIds = {devices.first.id};
   }
 
   List<Directory> _modelsDirectoryCandidates() {
@@ -124,6 +176,42 @@ class _TrainPageState extends State<_TrainPage> {
     setState(() {
       _datasetPath = file.path;
       _datasetSummary = summary;
+    });
+  }
+
+  void _toggleTrainingDevice(String id, bool selected) {
+    setState(() {
+      final next = {..._selectedDeviceIds};
+      if (selected) {
+        next.add(id);
+      } else if (next.length > 1) {
+        next.remove(id);
+      }
+      _selectedDeviceIds = next.isEmpty ? {id} : next;
+    });
+  }
+
+  void _startTrainingPreview() {
+    if (_trainingRunning) {
+      return;
+    }
+    final totalEpochs = _parameters['epochs']?.round() ?? 1;
+    _trainingTimer?.cancel();
+    setState(() {
+      _trainingRunning = true;
+      _currentEpoch = 1;
+    });
+    _trainingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_currentEpoch >= totalEpochs) {
+        timer.cancel();
+        setState(() => _trainingRunning = false);
+        return;
+      }
+      setState(() => _currentEpoch += 1);
     });
   }
 
@@ -182,8 +270,11 @@ class _TrainPageState extends State<_TrainPage> {
                         label: Text(t('train.chooseDataset')),
                       ),
                       FilledButton.icon(
-                        onPressed: _validYoloModel && _datasetSummary != null
-                            ? () {}
+                        onPressed:
+                            _validYoloModel &&
+                                _datasetSummary != null &&
+                                !_trainingRunning
+                            ? _startTrainingPreview
                             : null,
                         icon: const Icon(Icons.play_arrow),
                         label: Text(t('train.start')),
@@ -200,7 +291,7 @@ class _TrainPageState extends State<_TrainPage> {
                     ),
                   if (_modelPath != null)
                     Text(
-                      _modelPath!,
+                      '${t('path.model')}: $_modelPath',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -213,22 +304,29 @@ class _TrainPageState extends State<_TrainPage> {
                     ),
                   if (_datasetPath != null)
                     Text(
-                      _datasetPath!,
+                      '${t('train.datasetPath')}: $_datasetPath',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                   if (widget.settings.pythonPath.isNotEmpty)
                     Text(
-                      widget.settings.pythonPath,
+                      '${t('settings.pythonPath')}: ${widget.settings.pythonPath}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                   if (widget.settings.outputPath.isNotEmpty)
                     Text(
-                      widget.settings.outputPath,
+                      '${t('path.trainingOutput')}: ${widget.settings.outputPath}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
+                  Text(
+                    _trainingRunning
+                        ? '${t('train.currentEpoch')}: $_currentEpoch / ${_parameters['epochs']?.round() ?? 1}'
+                        : '${t('train.currentEpoch')}: ${t('train.notStarted')}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                   const SizedBox(height: 16),
                   _DatasetSummaryPanel(summary: _datasetSummary),
                   const SizedBox(height: 16),
@@ -261,9 +359,30 @@ class _TrainPageState extends State<_TrainPage> {
                 child: _parameterPanelVisible
                     ? _TrainingParameterPanel(
                         parameters: _parameters,
+                        batchMode: _batchMode,
+                        batchSize: _batchSize,
+                        batchRatio: _batchRatio,
+                        ampEnabled: _ampEnabled,
+                        deviceOptions: _deviceOptions,
+                        selectedDeviceIds: _selectedDeviceIds,
+                        batchArgument: _batchArgument,
+                        deviceArgument: _deviceArgument,
                         onChanged: (key, value) {
                           setState(() => _parameters[key] = value);
                         },
+                        onBatchModeChanged: (value) {
+                          setState(() => _batchMode = value);
+                        },
+                        onBatchSizeChanged: (value) {
+                          setState(() => _batchSize = value);
+                        },
+                        onBatchRatioChanged: (value) {
+                          setState(() => _batchRatio = value);
+                        },
+                        onAmpChanged: (value) {
+                          setState(() => _ampEnabled = value);
+                        },
+                        onDeviceChanged: _toggleTrainingDevice,
                       )
                     : const SizedBox.expand(),
               ),
@@ -323,11 +442,37 @@ class _DatasetSummaryPanel extends StatelessWidget {
 class _TrainingParameterPanel extends StatelessWidget {
   const _TrainingParameterPanel({
     required this.parameters,
+    required this.batchMode,
+    required this.batchSize,
+    required this.batchRatio,
+    required this.ampEnabled,
+    required this.deviceOptions,
+    required this.selectedDeviceIds,
+    required this.batchArgument,
+    required this.deviceArgument,
     required this.onChanged,
+    required this.onBatchModeChanged,
+    required this.onBatchSizeChanged,
+    required this.onBatchRatioChanged,
+    required this.onAmpChanged,
+    required this.onDeviceChanged,
   });
 
   final Map<String, double> parameters;
+  final _BatchMode batchMode;
+  final double batchSize;
+  final double batchRatio;
+  final bool ampEnabled;
+  final List<_TrainingDeviceOption> deviceOptions;
+  final Set<String> selectedDeviceIds;
+  final String batchArgument;
+  final String deviceArgument;
   final void Function(String key, double value) onChanged;
+  final ValueChanged<_BatchMode> onBatchModeChanged;
+  final ValueChanged<double> onBatchSizeChanged;
+  final ValueChanged<double> onBatchRatioChanged;
+  final ValueChanged<bool> onAmpChanged;
+  final void Function(String id, bool selected) onDeviceChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -344,16 +489,338 @@ class _TrainingParameterPanel extends StatelessWidget {
           Expanded(
             child: ListView(
               children: [
+                _ParameterSectionTitle(title: t('train.coreParameters')),
+                _BatchParameterEditor(
+                  mode: batchMode,
+                  batchSize: batchSize,
+                  batchRatio: batchRatio,
+                  argumentValue: batchArgument,
+                  onModeChanged: onBatchModeChanged,
+                  onBatchSizeChanged: onBatchSizeChanged,
+                  onBatchRatioChanged: onBatchRatioChanged,
+                ),
+                _AmpParameterEditor(value: ampEnabled, onChanged: onAmpChanged),
+                _DeviceParameterEditor(
+                  options: deviceOptions,
+                  selectedIds: selectedDeviceIds,
+                  argumentValue: deviceArgument,
+                  onChanged: onDeviceChanged,
+                ),
                 for (final entry in parameters.entries)
                   _ParameterEditor(
                     name: entry.key,
                     value: entry.value,
                     onChanged: (value) => onChanged(entry.key, value),
                   ),
+                _ParameterSectionTitle(title: t('train.tuningTitle')),
+                _TrainingTuningTips(),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ParameterSectionTitle extends StatelessWidget {
+  const _ParameterSectionTitle({required this.title});
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 10),
+      child: Text(title, style: Theme.of(context).textTheme.titleSmall),
+    );
+  }
+}
+
+class _BatchParameterEditor extends StatelessWidget {
+  const _BatchParameterEditor({
+    required this.mode,
+    required this.batchSize,
+    required this.batchRatio,
+    required this.argumentValue,
+    required this.onModeChanged,
+    required this.onBatchSizeChanged,
+    required this.onBatchRatioChanged,
+  });
+
+  final _BatchMode mode;
+  final double batchSize;
+  final double batchRatio;
+  final String argumentValue;
+  final ValueChanged<_BatchMode> onModeChanged;
+  final ValueChanged<double> onBatchSizeChanged;
+  final ValueChanged<double> onBatchRatioChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      waitDuration: const Duration(milliseconds: 500),
+      message: _parameterHelp('batch'),
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _ParameterHeader(name: 'batch', value: 'batch=$argumentValue'),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                ChoiceChip(
+                  selected: mode == _BatchMode.fixed,
+                  label: Text(t('train.batchFixed')),
+                  onSelected: (_) => onModeChanged(_BatchMode.fixed),
+                ),
+                ChoiceChip(
+                  selected: mode == _BatchMode.autoGpu60,
+                  label: Text(t('train.batchAuto60')),
+                  onSelected: (_) => onModeChanged(_BatchMode.autoGpu60),
+                ),
+                ChoiceChip(
+                  selected: mode == _BatchMode.autoGpuRatio,
+                  label: Text(t('train.batchRatio')),
+                  onSelected: (_) => onModeChanged(_BatchMode.autoGpuRatio),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (mode == _BatchMode.fixed)
+              _CompactSlider(
+                value: batchSize,
+                min: 1,
+                max: 128,
+                divisions: 127,
+                label: batchSize.round().toString(),
+                onChanged: onBatchSizeChanged,
+              )
+            else if (mode == _BatchMode.autoGpuRatio)
+              _CompactSlider(
+                value: batchRatio,
+                min: 0.10,
+                max: 0.95,
+                divisions: 85,
+                label: batchRatio.toStringAsFixed(2),
+                onChanged: onBatchRatioChanged,
+              )
+            else
+              Text(t('train.batchAuto60Help')),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AmpParameterEditor extends StatelessWidget {
+  const _AmpParameterEditor({required this.value, required this.onChanged});
+
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      waitDuration: const Duration(milliseconds: 500),
+      message: _parameterHelp('amp'),
+      child: SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        dense: true,
+        title: const Text('amp'),
+        subtitle: Text('amp=${value ? 1 : 0}'),
+        value: value,
+        onChanged: onChanged,
+      ),
+    );
+  }
+}
+
+class _DeviceParameterEditor extends StatelessWidget {
+  const _DeviceParameterEditor({
+    required this.options,
+    required this.selectedIds,
+    required this.argumentValue,
+    required this.onChanged,
+  });
+
+  final List<_TrainingDeviceOption> options;
+  final Set<String> selectedIds;
+  final String argumentValue;
+  final void Function(String id, bool selected) onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      waitDuration: const Duration(milliseconds: 500),
+      message: _parameterHelp('device'),
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _ParameterHeader(name: 'device', value: 'device=$argumentValue'),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final option in options)
+                  FilterChip(
+                    selected: selectedIds.contains(option.id),
+                    label: Text(option.label),
+                    onSelected: (selected) => onChanged(option.id, selected),
+                    avatar: Icon(
+                      selectedIds.contains(option.id)
+                          ? Icons.check_circle
+                          : Icons.memory_outlined,
+                      size: 18,
+                    ),
+                  ),
+              ],
+            ),
+            if (options.length == 1 && options.first.id == 'cpu')
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  t('train.noGpuDetected'),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ParameterHeader extends StatelessWidget {
+  const _ParameterHeader({required this.name, required this.value});
+
+  final String name;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        SizedBox(width: 72, child: Text(name)),
+        Expanded(
+          child: Text(
+            value,
+            textAlign: TextAlign.right,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _CompactSlider extends StatelessWidget {
+  const _CompactSlider({
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.divisions,
+    required this.label,
+    required this.onChanged,
+  });
+
+  final double value;
+  final double min;
+  final double max;
+  final int divisions;
+  final String label;
+  final ValueChanged<double> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Slider(
+            value: value,
+            min: min,
+            max: max,
+            divisions: divisions,
+            label: label,
+            onChanged: onChanged,
+          ),
+        ),
+        SizedBox(width: 56, child: Text(label, textAlign: TextAlign.right)),
+      ],
+    );
+  }
+}
+
+class _TrainingTuningTips extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: _controlColor(context),
+        border: Border.all(color: _borderColor(context)),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Text(
+          t('train.tuningTips'),
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ),
+    );
+  }
+}
+
+class _ImageSizeParameterEditor extends StatelessWidget {
+  const _ImageSizeParameterEditor({
+    required this.value,
+    required this.onChanged,
+  });
+
+  final double value;
+  final ValueChanged<double> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final index = _nearestImageSizeIndex(value);
+    final currentSize = _imageSizeOptions[index];
+    return Tooltip(
+      waitDuration: const Duration(milliseconds: 500),
+      message: _parameterHelp('imgsz'),
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Row(
+          children: [
+            const SizedBox(width: 72, child: Text('imgsz')),
+            Expanded(
+              child: Slider(
+                value: index.toDouble(),
+                min: 0,
+                max: (_imageSizeOptions.length - 1).toDouble(),
+                divisions: _imageSizeOptions.length - 1,
+                label: currentSize.toString(),
+                onChanged: (sliderIndex) {
+                  final nextIndex = sliderIndex.round().clamp(
+                    0,
+                    _imageSizeOptions.length - 1,
+                  );
+                  onChanged(_imageSizeOptions[nextIndex].toDouble());
+                },
+              ),
+            ),
+            SizedBox(
+              width: 56,
+              child: Text(currentSize.toString(), textAlign: TextAlign.right),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -372,7 +839,15 @@ class _ParameterEditor extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final integerLike = {'epochs', 'batch', 'imgsz', 'device'}.contains(name);
+    if (name == 'imgsz') {
+      return _ImageSizeParameterEditor(value: value, onChanged: onChanged);
+    }
+
+    final integerLike = {'epochs', 'imgsz'}.contains(name);
+    final min = _minForParameter(name);
+    final max = _maxForParameter(name);
+    final divisions = integerLike ? (max - min).round() : 100;
+    final label = _formatParameterValue(name, value);
     return Tooltip(
       waitDuration: const Duration(milliseconds: 500),
       message: _parameterHelp(name),
@@ -384,20 +859,14 @@ class _ParameterEditor extends StatelessWidget {
             Expanded(
               child: Slider(
                 value: value,
-                min: 0,
-                max: _maxForParameter(name),
-                divisions: integerLike ? _maxForParameter(name).round() : 100,
-                label: _formatParameterValue(value, integerLike),
+                min: min,
+                max: max,
+                divisions: divisions,
+                label: label,
                 onChanged: onChanged,
               ),
             ),
-            SizedBox(
-              width: 56,
-              child: Text(
-                _formatParameterValue(value, integerLike),
-                textAlign: TextAlign.right,
-              ),
-            ),
+            SizedBox(width: 56, child: Text(label, textAlign: TextAlign.right)),
           ],
         ),
       ),
@@ -423,12 +892,12 @@ class _DatasetSummary {
     }
     final source = file.readAsStringSync();
     final root = _datasetRoot(file.parent.path, _yamlScalar(source, 'path'));
-    final trainPath = _yamlScalar(source, 'train');
-    final valPath = _yamlScalar(source, 'val');
+    final trainPaths = _yamlPathValues(source, 'train');
+    final valPaths = _yamlPathValues(source, 'val');
     return _DatasetSummary(
       classes: _yamlNames(source),
-      trainCount: _countDatasetImages(root, trainPath),
-      valCount: _countDatasetImages(root, valPath),
+      trainCount: _countDatasetImagePaths(root, trainPaths),
+      valCount: _countDatasetImagePaths(root, valPaths),
     );
   }
 }
@@ -448,6 +917,51 @@ String _datasetRoot(String yamlRoot, String? configuredRoot) {
 String? _yamlScalar(String source, String key) {
   final match = RegExp('^$key:\\s*(.+)\$', multiLine: true).firstMatch(source);
   return match?.group(1)?.trim().replaceAll('"', '').replaceAll("'", '');
+}
+
+List<String> _yamlPathValues(String source, String key) {
+  final scalar = _yamlScalar(source, key);
+  if (scalar != null && scalar.isNotEmpty) {
+    final trimmed = scalar.trim();
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      return trimmed
+          .substring(1, trimmed.length - 1)
+          .split(',')
+          .map(_cleanYamlValue)
+          .where((item) => item.isNotEmpty)
+          .toList();
+    }
+    return [_cleanYamlValue(trimmed)];
+  }
+
+  final lines = source.split(RegExp(r'\r?\n'));
+  final values = <String>[];
+  var inBlock = false;
+  for (final rawLine in lines) {
+    final line = rawLine.trimRight();
+    if (line.trim() == '$key:') {
+      inBlock = true;
+      continue;
+    }
+    if (!inBlock) {
+      continue;
+    }
+    if (line.isNotEmpty && !line.startsWith(' ') && !line.startsWith('-')) {
+      break;
+    }
+    final listMatch = RegExp(r'^\s*-\s*(.+)$').firstMatch(line);
+    if (listMatch != null) {
+      final value = _cleanYamlValue(listMatch.group(1)!);
+      if (value.isNotEmpty) {
+        values.add(value);
+      }
+    }
+  }
+  return values;
+}
+
+String _cleanYamlValue(String value) {
+  return value.split('#').first.trim().replaceAll('"', '').replaceAll("'", '');
 }
 
 List<String> _yamlNames(String source) {
@@ -509,6 +1023,13 @@ int _countDatasetImages(String yamlRoot, String? configuredPath) {
   return 0;
 }
 
+int _countDatasetImagePaths(String yamlRoot, List<String> configuredPaths) {
+  return configuredPaths.fold<int>(
+    0,
+    (count, path) => count + _countDatasetImages(yamlRoot, path),
+  );
+}
+
 FileSystemEntity _resolveDatasetPath(String yamlRoot, String value) {
   final normalized = value.trim();
   final absolute =
@@ -522,29 +1043,94 @@ FileSystemEntity _resolveDatasetPath(String yamlRoot, String value) {
   return Directory(path);
 }
 
+List<_TrainingDeviceOption> _detectNvidiaDevices() {
+  try {
+    final result = Process.runSync('nvidia-smi', [
+      '--query-gpu=index,name',
+      '--format=csv,noheader',
+    ]);
+    if (result.exitCode != 0) {
+      return const [];
+    }
+    final output = result.stdout.toString().trim();
+    if (output.isEmpty) {
+      return const [];
+    }
+    return output
+        .split(RegExp(r'\r?\n'))
+        .map((line) {
+          final parts = line.split(',');
+          final id = parts.first.trim();
+          final name = parts.length > 1
+              ? parts.sublist(1).join(',').trim()
+              : '';
+          if (id.isEmpty) {
+            return null;
+          }
+          return _TrainingDeviceOption(
+            id: id,
+            label: name.isEmpty ? 'GPU $id' : 'GPU $id - $name',
+          );
+        })
+        .whereType<_TrainingDeviceOption>()
+        .toList();
+  } on Object {
+    return const [];
+  }
+}
+
+double _minForParameter(String name) {
+  return switch (name) {
+    'epochs' => 1,
+    'imgsz' => 320,
+    'momentum' => 0.5,
+    _ => 0,
+  };
+}
+
 double _maxForParameter(String name) {
   return switch (name) {
     'epochs' => 500,
-    'batch' => 64,
     'imgsz' => 1280,
-    'device' => 8,
+    'lr0' => 0.1,
+    'momentum' => 0.99,
     'shear' => 20,
     'degrees' => 180,
     _ => 1,
   };
 }
 
-String _formatParameterValue(double value, bool integerLike) {
-  return integerLike ? value.round().toString() : value.toStringAsFixed(2);
+int _nearestImageSizeIndex(double value) {
+  var nearestIndex = 0;
+  var nearestDelta = double.infinity;
+  for (var index = 0; index < _imageSizeOptions.length; index += 1) {
+    final delta = (value - _imageSizeOptions[index]).abs();
+    if (delta < nearestDelta) {
+      nearestIndex = index;
+      nearestDelta = delta;
+    }
+  }
+  return nearestIndex;
+}
+
+String _formatParameterValue(String name, double value) {
+  return switch (name) {
+    'epochs' || 'imgsz' => value.round().toString(),
+    'lr0' => value.toStringAsFixed(4),
+    'momentum' => value.toStringAsFixed(3),
+    _ => value.toStringAsFixed(2),
+  };
 }
 
 String _parameterHelp(String name) {
   return switch (name) {
     'epochs' => '训练轮数。值越大训练越久，可能提升收敛，也更容易过拟合。',
-    'batch' => '每批图片数量。显存不足时需要降低。',
-    'imgsz' => '训练输入图像尺寸，常用 640。',
-    'device' => '训练设备编号，例如 0 表示第一张 GPU。',
-    'amp' => '自动混合精度，开启可降低显存占用，但当前默认关闭。',
+    'batch' => '批大小支持固定整数、batch=-1 自动使用约 60% 显存、或 batch=0.70 按显存比例自动调整。',
+    'imgsz' => '训练输入图像尺寸，只能选择 320、416、640、800、960、1280，且必须能被 32 整除。',
+    'device' => '训练设备编号。多选 GPU 时按 device=[0, 1] 形式传递。',
+    'amp' => '自动混合精度。关闭传 0，开启传 1；开启通常可以降低显存占用。',
+    'lr0' => '初始学习率。过大容易震荡，过小会导致训练收敛慢。',
+    'momentum' => '动量参数，影响梯度更新的平滑程度。',
     'hsv_s' => 'HSV 饱和度增强幅度，范围 0-1。',
     'hsv_v' => 'HSV 亮度增强幅度，范围 0-1。',
     'translate' => '随机平移比例，范围 0-1。',
