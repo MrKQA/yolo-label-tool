@@ -24,6 +24,7 @@ class _SettingsDialog extends StatefulWidget {
 class _SettingsDialogState extends State<_SettingsDialog> {
   late final TextEditingController _pythonController;
   late final TextEditingController _outputController;
+  late final TextEditingController _exportController;
   late int _cacheSizeBytes;
 
   @override
@@ -35,6 +36,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     _outputController = TextEditingController(
       text: widget.initialSettings.outputPath,
     );
+    _exportController = TextEditingController(
+      text: widget.initialSettings.exportPath,
+    );
     _cacheSizeBytes = widget.cacheSizeBytes;
   }
 
@@ -42,6 +46,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   void dispose() {
     _pythonController.dispose();
     _outputController.dispose();
+    _exportController.dispose();
     super.dispose();
   }
 
@@ -95,6 +100,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       _AppSettings(
         pythonPath: _pythonController.text.trim(),
         outputPath: _outputController.text.trim(),
+        exportPath: _exportController.text.trim(),
       ),
     );
     Navigator.of(context).pop();
@@ -127,6 +133,18 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               controller: _outputController,
               buttonLabel: t('settings.chooseFolder'),
               onPressed: _chooseOutputFolder,
+            ),
+            const SizedBox(height: 12),
+            _PathSettingRow(
+              label: t('settings.exportPath'),
+              controller: _exportController,
+              buttonLabel: t('settings.chooseFolder'),
+              onPressed: () async {
+                final folder = await getDirectoryPath();
+                if (folder != null) {
+                  _exportController.text = folder;
+                }
+              },
             ),
             const SizedBox(height: 16),
             Row(

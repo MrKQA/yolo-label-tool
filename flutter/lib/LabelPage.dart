@@ -39,6 +39,7 @@ class _LabelPage extends StatelessWidget {
     required this.onClassReordered,
     required this.onToggleClassLabels,
     required this.onAnnotationClassChanged,
+    this.onImageDisplaySizeChanged,
   });
 
   final _BridgeStatus status;
@@ -76,6 +77,7 @@ class _LabelPage extends StatelessWidget {
   final VoidCallback onToggleClassLabels;
   final void Function(String annotationId, int classId)
   onAnnotationClassChanged;
+  final void Function(Size imageDisplaySize)? onImageDisplaySizeChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -111,6 +113,8 @@ class _LabelPage extends StatelessWidget {
               onAnnotationUpdated: onAnnotationUpdated,
               onAnnotationDeleted: onAnnotationDeleted,
               onAnnotationDragStarted: onAnnotationDragStarted,
+              onImageDisplaySizeChanged:
+                  onImageDisplaySizeChanged,
             ),
           ),
           _AiToolbar(
@@ -320,6 +324,7 @@ class _CanvasStage extends StatelessWidget {
     required this.onAnnotationUpdated,
     required this.onAnnotationDeleted,
     required this.onAnnotationDragStarted,
+    this.onImageDisplaySizeChanged,
   });
 
   final _BridgeStatus bridgeStatus;
@@ -343,6 +348,7 @@ class _CanvasStage extends StatelessWidget {
   final ValueChanged<_AnnotationRegion> onAnnotationUpdated;
   final ValueChanged<String> onAnnotationDeleted;
   final VoidCallback onAnnotationDragStarted;
+  final void Function(Size imageDisplaySize)? onImageDisplaySizeChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -387,6 +393,8 @@ class _CanvasStage extends StatelessWidget {
                       onAnnotationUpdated: onAnnotationUpdated,
                       onAnnotationDeleted: onAnnotationDeleted,
                       onAnnotationDragStarted: onAnnotationDragStarted,
+                      onImageDisplaySizeChanged:
+                          onImageDisplaySizeChanged,
                     ),
                   ),
                 ),
@@ -528,8 +536,10 @@ class _ImageCanvas extends StatefulWidget {
     required this.onAnnotationUpdated,
     required this.onAnnotationDeleted,
     required this.onAnnotationDragStarted,
+    this.onImageDisplaySizeChanged,
   });
 
+  final void Function(Size imageDisplaySize)? onImageDisplaySizeChanged;
   final _ImageItem? image;
   final double zoom;
   final String activeTool;
@@ -567,6 +577,9 @@ class _ImageCanvasState extends State<_ImageCanvas> {
   Offset? _hoverPoint;
   String? _loadedImagePath;
   List<Offset> _segDraftPoints = [];
+  int? _hoveredCornerIndex;
+  ui.Image? _decodedImage;
+  Offset _scrollOffset = Offset.zero;
 
   double get _scale => widget.zoom / 100;
 
@@ -579,6 +592,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
   @override
   void dispose() {
     _canvasFocusNode.dispose();
+    _decodedImage?.dispose();
     super.dispose();
   }
 
@@ -589,9 +603,12 @@ class _ImageCanvasState extends State<_ImageCanvas> {
       _imageSize = null;
       _sampleImageSize = null;
       _sampleRgbaBytes = null;
+      _decodedImage?.dispose();
+      _decodedImage = null;
       _hoverPoint = null;
       _loadedImagePath = null;
       _segDraftPoints = [];
+      _scrollOffset = Offset.zero;
       _loadImageSize();
     }
     if (oldWidget.activeTool == 'draw' && widget.activeTool != 'draw') {
@@ -624,9 +641,14 @@ class _ImageCanvasState extends State<_ImageCanvas> {
         _imageSize = Size(decoded.width.toDouble(), decoded.height.toDouble());
         _sampleImageSize = sample?.size;
         _sampleRgbaBytes = sample?.bytes;
+        _decodedImage?.dispose();
+        _decodedImage = decoded;
       });
-      decoded.dispose();
       sample?.image.dispose();
+      final displayRect = _imageDisplayRect();
+      widget.onImageDisplaySizeChanged?.call(
+        Size(displayRect.width, displayRect.height),
+      );
     } on Object {
       if (mounted && widget.image?.path == path) {
         setState(() {
@@ -634,6 +656,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
           _sampleImageSize = null;
           _sampleRgbaBytes = null;
         });
+        widget.onImageDisplaySizeChanged?.call(Size.zero);
       }
     }
   }
@@ -685,15 +708,27 @@ class _ImageCanvasState extends State<_ImageCanvas> {
   }
 
   Offset _toContentPoint(Offset localPoint) {
+    final panned = localPoint - _scrollOffset;
     final center = const Offset(
       _annotationWorkspaceWidth / 2,
       _annotationWorkspaceHeight / 2,
     );
-    final scaled = (localPoint - center) / _scale + center;
-    return _clampOffset(scaled, _imageDisplayRect());
+    final scaled = (panned - center) / _scale + center;
+    return _clampOffset(scaled, _imageDisplayRect().shift(_scrollOffset));
   }
 
   Offset _toUnclampedContentPoint(Offset localPoint) {
+    final panned = localPoint - _scrollOffset;
+    final center = const Offset(
+      _annotationWorkspaceWidth / 2,
+      _annotationWorkspaceHeight / 2,
+    );
+    return (panned - center) / _scale + center;
+  }
+
+  // Raw canvas-to-content conversion without scroll offset,
+  // for the crosshair which tracks the visual mouse position.
+  Offset _visualPoint(Offset localPoint) {
     final center = const Offset(
       _annotationWorkspaceWidth / 2,
       _annotationWorkspaceHeight / 2,
@@ -708,9 +743,9 @@ class _ImageCanvasState extends State<_ImageCanvas> {
       }
       return;
     }
-    final imageRect = _imageDisplayRect();
-    final point = _toUnclampedContentPoint(localPosition);
-    final nextPoint = imageRect.contains(point) ? point : null;
+    final placedRect = _imageDisplayRect().shift(_scrollOffset);
+    final point = _visualPoint(localPosition);
+    final nextPoint = placedRect.contains(point) ? point : null;
     if (_hoverPoint == nextPoint) {
       return;
     }
@@ -720,12 +755,12 @@ class _ImageCanvasState extends State<_ImageCanvas> {
   Color _crosshairColorFor(Offset point) {
     final bytes = _sampleRgbaBytes;
     final sampleSize = _sampleImageSize;
-    final imageRect = _imageDisplayRect();
-    if (bytes == null || sampleSize == null || !imageRect.contains(point)) {
+    final placedRect = _imageDisplayRect().shift(_scrollOffset);
+    if (bytes == null || sampleSize == null || !placedRect.contains(point)) {
       return _isDarkMode(context) ? Colors.white : const Color(0xFF111827);
     }
-    final nx = ((point.dx - imageRect.left) / imageRect.width).clamp(0.0, 1.0);
-    final ny = ((point.dy - imageRect.top) / imageRect.height).clamp(0.0, 1.0);
+    final nx = ((point.dx - placedRect.left) / placedRect.width).clamp(0.0, 1.0);
+    final ny = ((point.dy - placedRect.top) / placedRect.height).clamp(0.0, 1.0);
     final sx = (nx * (sampleSize.width - 1)).round();
     final sy = (ny * (sampleSize.height - 1)).round();
     final index = ((sy * sampleSize.width.toInt()) + sx) * 4;
@@ -744,8 +779,9 @@ class _ImageCanvasState extends State<_ImageCanvas> {
   }
 
   _AnnotationRegion? _annotationAt(Offset point) {
+    final imagePoint = point - _imageDisplayRect().topLeft;
     final hits = widget.annotations
-        .where((annotation) => annotation.hitTest(point))
+        .where((annotation) => annotation.hitTest(imagePoint))
         .toList();
     if (hits.isEmpty) {
       return null;
@@ -807,9 +843,12 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     if (selected == null || selected.mode == _AnnotationMode.seg) {
       return null;
     }
+    final canvasRect = selected.rect.shift(
+      _imageDisplayRect().topLeft + _scrollOffset,
+    );
     final corners = selected.mode == _AnnotationMode.obb
-        ? _rotatedCorners(selected.rect, selected.rotationDegrees)
-        : _rectToPoints(selected.rect);
+        ? _rotatedCorners(canvasRect, selected.rotationDegrees)
+        : _rectToPoints(canvasRect);
     for (var index = 0; index < corners.length; index++) {
       if ((corners[index] - point).distance <= 8 / _scale) {
         return _ResizeHandle(selected.id, index);
@@ -823,14 +862,40 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     int cornerIndex,
     Offset point,
   ) {
-    final corners = annotation.mode == _AnnotationMode.obb
-        ? _rotatedCorners(annotation.rect, annotation.rotationDegrees)
-        : _rectToPoints(annotation.rect);
+    final imageSize = _imageDisplayRect();
+    final imageBounds = Rect.fromLTWH(0, 0, imageSize.width, imageSize.height);
+
+    if (annotation.mode == _AnnotationMode.obb) {
+      final rotatedCorners = _rotatedCorners(
+        annotation.rect,
+        annotation.rotationDegrees,
+      );
+      final opposite = rotatedCorners[(cornerIndex + 2) % 4];
+      final newCenter = Offset(
+        (point.dx + opposite.dx) / 2,
+        (point.dy + opposite.dy) / 2,
+      );
+      final halfDiagonal = point - newCenter;
+      final radians = -annotation.rotationDegrees * math.pi / 180;
+      final unrotated = _rotatePoint(
+        newCenter + halfDiagonal,
+        newCenter,
+        radians,
+      );
+      final halfSize = unrotated - newCenter;
+      final width = ((halfSize.dx.abs()) * 2).clamp(4.0, double.infinity);
+      final height = ((halfSize.dy.abs()) * 2).clamp(4.0, double.infinity);
+      final newRect = Rect.fromCenter(
+        center: newCenter,
+        width: width,
+        height: height,
+      );
+      return annotation.copyWith(rect: _normalizeRect(newRect));
+    }
+
+    final corners = _rectToPoints(annotation.rect);
     final opposite = corners[(cornerIndex + 2) % 4];
-    final rect = Rect.fromPoints(
-      opposite,
-      point,
-    ).intersect(_imageDisplayRect());
+    final rect = Rect.fromPoints(opposite, point).intersect(imageBounds);
     if (rect.width < 4 || rect.height < 4) {
       return annotation;
     }
@@ -846,9 +911,13 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     final hit = _annotationAt(localPoint);
 
     if (event.buttons == kSecondaryMouseButton) {
-      if (hit != null) {
-        widget.onAnnotationSelected(hit.id);
-        await _showAnnotationContextMenu(event.position, hit);
+      final rightHit = widget.annotations
+          .where((a) => a.hitTest(localPoint))
+          .toList()
+          .lastOrNull;
+      if (rightHit != null) {
+        widget.onAnnotationSelected(rightHit.id);
+        await _showAnnotationContextMenu(event.position, rightHit);
       }
       return;
     }
@@ -877,8 +946,9 @@ class _ImageCanvasState extends State<_ImageCanvas> {
       if (hit != null) {
         widget.onAnnotationDragStarted();
         _movingAnnotationId = hit.id;
-        _lastMovePoint = localPoint;
+        _lastMovePoint = localPoint - _imageDisplayRect().topLeft;
         _draggingSelection = true;
+        return;
       }
       return;
     }
@@ -893,7 +963,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
       final canClose =
           first != null &&
           _segDraftPoints.length >= 3 &&
-          (localPoint - first).distance <= 10 / _scale;
+          (localPoint - _imageDisplayRect().topLeft - first).distance <= 10 / _scale;
       if (canClose) {
         widget.onSegAnnotationCreated(_segDraftPoints, classId);
         setState(() {
@@ -904,7 +974,10 @@ class _ImageCanvasState extends State<_ImageCanvas> {
       }
       setState(() {
         _draftClassId = classId;
-        _segDraftPoints = [..._segDraftPoints, localPoint];
+        _segDraftPoints = [
+          ..._segDraftPoints,
+          localPoint - _imageDisplayRect().topLeft,
+        ];
       });
       return;
     }
@@ -916,10 +989,11 @@ class _ImageCanvasState extends State<_ImageCanvas> {
       }
       final start = _drawStart;
       if (start != null) {
+        final imageRect = _imageDisplayRect();
         final completedRect = Rect.fromPoints(
           start,
-          localPoint,
-        ).intersect(_imageDisplayRect());
+          localPoint - imageRect.topLeft,
+        ).intersect(Rect.fromLTWH(0, 0, imageRect.width, imageRect.height));
         widget.onAnnotationCreated(completedRect, classId);
         setState(() {
           _drawStart = null;
@@ -928,10 +1002,12 @@ class _ImageCanvasState extends State<_ImageCanvas> {
         });
         return;
       }
+      final imageRect = _imageDisplayRect();
+      final imagePoint = localPoint - imageRect.topLeft;
       setState(() {
         _draftClassId = classId;
-        _drawStart = localPoint;
-        _draftRect = Rect.fromPoints(localPoint, localPoint);
+        _drawStart = imagePoint;
+        _draftRect = Rect.fromPoints(imagePoint, imagePoint);
       });
     }
   }
@@ -991,12 +1067,22 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     }
     if (action == 'rotateLeft') {
       widget.onAnnotationDragStarted();
-      widget.onAnnotationUpdated(annotation.rotated(-5));
+      final imageRect = _imageDisplayRect();
+      widget.onAnnotationUpdated(
+        annotation
+            .rotated(-5)
+            .clampObbToImage(Size(imageRect.width, imageRect.height)),
+      );
       return;
     }
     if (action == 'rotateRight') {
       widget.onAnnotationDragStarted();
-      widget.onAnnotationUpdated(annotation.rotated(5));
+      final imageRect = _imageDisplayRect();
+      widget.onAnnotationUpdated(
+        annotation
+            .rotated(5)
+            .clampObbToImage(Size(imageRect.width, imageRect.height)),
+      );
       return;
     }
     if (action.startsWith('class:')) {
@@ -1014,6 +1100,8 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     }
     _updateHoverPoint(event.localPosition);
     final localPoint = _toContentPoint(event.localPosition);
+    final imageRect = _imageDisplayRect();
+    final imagePoint = localPoint - imageRect.topLeft;
     final resizingId = _resizingAnnotationId;
     final resizingCorner = _resizingCornerIndex;
     if (resizingId != null &&
@@ -1024,7 +1112,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
           .firstOrNullValue;
       if (current != null) {
         widget.onAnnotationUpdated(
-          _resizedAnnotation(current, resizingCorner, localPoint),
+          _resizedAnnotation(current, resizingCorner, imagePoint),
         );
       }
       return;
@@ -1036,42 +1124,58 @@ class _ImageCanvasState extends State<_ImageCanvas> {
           .firstOrNullValue;
       final last = _lastMovePoint;
       if (current != null && last != null) {
-        widget.onAnnotationUpdated(
-          current.translated(localPoint - last).clampedTo(_imageDisplayRect()),
+        final imageBounds = Rect.fromLTWH(
+          0, 0, imageRect.width, imageRect.height,
         );
-        _lastMovePoint = localPoint;
+        widget.onAnnotationUpdated(
+          current.translated(imagePoint - last).clampedTo(imageBounds),
+        );
+        _lastMovePoint = imagePoint;
       }
       return;
     }
 
     final start = _drawStart;
     if (start != null) {
+      final imageBounds = Rect.fromLTWH(
+        0, 0, imageRect.width, imageRect.height,
+      );
       setState(() {
         _draftRect = Rect.fromPoints(
           start,
           _clampOffset(
-            _toUnclampedContentPoint(event.localPosition),
-            _imageDisplayRect(),
+            _toUnclampedContentPoint(event.localPosition) - imageRect.topLeft,
+            imageBounds,
           ),
-        ).intersect(_imageDisplayRect());
+        ).intersect(imageBounds);
       });
     }
   }
 
   void _handlePointerHover(PointerHoverEvent event) {
     _updateHoverPoint(event.localPosition);
-    final start = _drawStart;
-    if (widget.image == null || start == null) {
-      return;
+
+    final handle = widget.image != null
+        ? _resizeHandleAt(_toUnclampedContentPoint(event.localPosition))
+        : null;
+    final cornerIndex = handle?.cornerIndex;
+    if (cornerIndex != _hoveredCornerIndex) {
+      setState(() => _hoveredCornerIndex = cornerIndex);
     }
+
+    final start = _drawStart;
+    if (widget.image == null || start == null) return;
+
+    final imageRect = _imageDisplayRect();
+    final imageBounds = Rect.fromLTWH(0, 0, imageRect.width, imageRect.height);
     setState(() {
       _draftRect = Rect.fromPoints(
         start,
         _clampOffset(
-          _toUnclampedContentPoint(event.localPosition),
-          _imageDisplayRect(),
+          _toUnclampedContentPoint(event.localPosition) - imageRect.topLeft,
+          imageBounds,
         ),
-      ).intersect(_imageDisplayRect());
+      ).intersect(imageBounds);
     });
   }
 
@@ -1095,7 +1199,13 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     final crosshairColor = crosshairPoint == null
         ? null
         : _crosshairColorFor(crosshairPoint);
-    return Shortcuts(
+    final maxScrollX = _scale > 1.0
+        ? _annotationWorkspaceWidth * (1 - 1 / _scale)
+        : 0.0;
+    final maxScrollY = _scale > 1.0
+        ? _annotationWorkspaceHeight * (1 - 1 / _scale)
+        : 0.0;
+    final content = Shortcuts(
       shortcuts: const {
         SingleActivator(LogicalKeyboardKey.escape): _CancelDraftIntent(),
       },
@@ -1127,13 +1237,18 @@ class _ImageCanvasState extends State<_ImageCanvas> {
               ],
             ),
             child: MouseRegion(
-              cursor: widget.activeTool == 'draw'
-                  ? SystemMouseCursors.precise
-                  : MouseCursor.defer,
+              cursor: _hoveredCornerIndex == null
+                  ? widget.activeTool == 'draw'
+                      ? SystemMouseCursors.precise
+                      : MouseCursor.defer
+                  : (_hoveredCornerIndex == 0 || _hoveredCornerIndex == 2)
+                      ? SystemMouseCursors.resizeUpLeftDownRight
+                      : SystemMouseCursors.resizeUpRightDownLeft,
               onExit: (_) {
-                if (_hoverPoint != null) {
-                  setState(() => _hoverPoint = null);
-                }
+                setState(() {
+                  _hoverPoint = null;
+                  _hoveredCornerIndex = null;
+                });
               },
               child: ClipRect(
                 child: Listener(
@@ -1161,15 +1276,16 @@ class _ImageCanvasState extends State<_ImageCanvas> {
                               child: Stack(
                                 fit: StackFit.expand,
                                 children: [
-                                  _SelectedImageView(image: widget.image!),
                                   CustomPaint(
                                     painter: _AnnotationPainter(
+                                      image: _decodedImage,
                                       annotations: widget.annotations,
                                       classes: widget.labelClasses,
                                       selectedAnnotation: selectedAnnotation,
                                       draftRect: _draftRect,
                                       draftSegPoints: _segDraftPoints,
                                       imageRect: imageRect,
+                                      imageOffset: _scrollOffset,
                                       draftMode: widget.activeMode,
                                       draftClassId: _draftClassId,
                                       showClassLabels: widget.showClassLabels,
@@ -1192,6 +1308,47 @@ class _ImageCanvasState extends State<_ImageCanvas> {
           ),
         ),
       ),
+    );
+
+    if (maxScrollX <= 0 && maxScrollY <= 0) return content;
+
+    return Stack(
+      children: [
+        content,
+        Positioned(
+          bottom: 0,
+          left: 0,
+          right: maxScrollY > 0 ? 14 : 0,
+          height: 14,
+          child: SliderTheme(
+            data: const SliderThemeData(trackHeight: 4),
+            child: Slider(
+              value: _scrollOffset.dx.clamp(-maxScrollX, maxScrollX),
+              min: -maxScrollX,
+              max: maxScrollX,
+              onChanged: (v) =>
+                  setState(() => _scrollOffset = Offset(v, _scrollOffset.dy)),
+            ),
+          ),
+        ),
+        if (maxScrollY > 0)
+          Positioned(
+            top: 0,
+            right: 0,
+            bottom: 14,
+            width: 14,
+            child: SliderTheme(
+              data: const SliderThemeData(trackHeight: 4),
+              child: Slider(
+                value: _scrollOffset.dy.clamp(-maxScrollY, maxScrollY),
+                min: -maxScrollY,
+                max: maxScrollY,
+                onChanged: (v) =>
+                    setState(() => _scrollOffset = Offset(_scrollOffset.dx, v)),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -1219,43 +1376,17 @@ class _ResizeHandle {
   final int cornerIndex;
 }
 
-/// 选中图片视图，使用 contain 适配固定显示区。
-/// Selected-image view that uses contain fitting inside the fixed display area.
-class _SelectedImageView extends StatelessWidget {
-  const _SelectedImageView({required this.image});
-
-  final _ImageItem image;
-
-  @override
-  Widget build(BuildContext context) {
-    return Image.file(
-      File(image.path),
-      fit: BoxFit.contain,
-      errorBuilder: (_, _, _) => SizedBox(
-        width: 420,
-        height: 280,
-        child: ColoredBox(
-          color: const Color(0xFF94A3B8),
-          child: Center(
-            child: Text(
-              t('label.imageError'),
-              style: const TextStyle(color: Colors.white),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 class _AnnotationPainter extends CustomPainter {
   const _AnnotationPainter({
+    this.image,
     required this.annotations,
     required this.classes,
     required this.selectedAnnotation,
     required this.draftRect,
     required this.draftSegPoints,
     required this.imageRect,
+    required this.imageOffset,
     required this.draftMode,
     required this.draftClassId,
     required this.showClassLabels,
@@ -1265,12 +1396,14 @@ class _AnnotationPainter extends CustomPainter {
     required this.crosshairColor,
   });
 
+  final ui.Image? image;
   final List<_AnnotationRegion> annotations;
   final List<_LabelClass> classes;
   final _AnnotationRegion? selectedAnnotation;
   final Rect? draftRect;
   final List<Offset> draftSegPoints;
   final Rect imageRect;
+  final Offset imageOffset;
   final _AnnotationMode draftMode;
   final int? draftClassId;
   final bool showClassLabels;
@@ -1281,12 +1414,30 @@ class _AnnotationPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final selected = selectedAnnotation;
-    if (selected != null) {
-      _drawOutsideOverlay(canvas, size, selected.rect);
+    final canvasOrigin = imageRect.topLeft + imageOffset;
+    final placedImageRect = imageRect.shift(imageOffset);
+
+    // Draw the image at the computed position
+    final img = image;
+    if (img != null) {
+      final srcRect = Rect.fromLTWH(
+        0, 0, img.width.toDouble(), img.height.toDouble(),
+      );
+      canvas.drawImageRect(img, srcRect, placedImageRect, Paint());
     }
 
-    _drawImageBounds(canvas);
+    final selected = selectedAnnotation;
+    if (selected != null) {
+      final overlayRect = selected.mode == _AnnotationMode.obb
+          ? _rotatedBoundingRect(
+              selected.rect,
+              selected.rotationDegrees,
+            ).shift(canvasOrigin)
+          : selected.rect.shift(canvasOrigin);
+      _drawOutsideOverlay(canvas, size, overlayRect);
+    }
+
+    _drawImageBounds(canvas, placedImageRect);
 
     for (final annotation in annotations) {
       final labelClass = _classById(annotation.classId);
@@ -1294,7 +1445,13 @@ class _AnnotationPainter extends CustomPainter {
       final selected = annotation.id == selectedAnnotation?.id;
       _drawAnnotation(canvas, annotation, color, selected);
       if (showClassLabels && labelClass != null) {
-        _drawLabel(canvas, annotation.rect, labelClass.name, color, selected);
+        _drawLabel(
+          canvas,
+          annotation.rect.shift(canvasOrigin),
+          labelClass.name,
+          color,
+          selected,
+        );
       }
     }
 
@@ -1316,12 +1473,16 @@ class _AnnotationPainter extends CustomPainter {
 
     if (draftSegPoints.isNotEmpty) {
       final color = _classById(draftClassId)?.color ?? const Color(0xFF2563EB);
-      _drawDraftSegPolygon(canvas, draftSegPoints, color);
+      final canvasPoints = draftSegPoints
+          .map((p) => p + canvasOrigin)
+          .toList();
+      _drawDraftSegPolygon(canvas, canvasPoints, color);
     }
 
     final crosshair = crosshairPoint;
     final color = crosshairColor;
-    if (crosshair != null && color != null && imageRect.contains(crosshair)) {
+    if (crosshair != null && color != null &&
+        placedImageRect.contains(crosshair)) {
       _drawCrosshair(canvas, crosshair, color);
     }
   }
@@ -1331,6 +1492,18 @@ class _AnnotationPainter extends CustomPainter {
       return null;
     }
     return classes.where((item) => item.id == id).firstOrNullValue;
+  }
+
+  Rect _rotatedBoundingRect(Rect rect, double degrees) {
+    final corners = _rotatedCorners(rect, degrees);
+    final xs = corners.map((p) => p.dx);
+    final ys = corners.map((p) => p.dy);
+    return Rect.fromLTRB(
+      xs.reduce(math.min),
+      ys.reduce(math.min),
+      xs.reduce(math.max),
+      ys.reduce(math.max),
+    );
   }
 
   void _drawOutsideOverlay(Canvas canvas, Size size, Rect rect) {
@@ -1346,12 +1519,12 @@ class _AnnotationPainter extends CustomPainter {
       );
   }
 
-  void _drawImageBounds(Canvas canvas) {
+  void _drawImageBounds(Canvas canvas, Rect placedRect) {
     final paint = Paint()
       ..color = darkMode ? const Color(0xFF6D5BD0) : const Color(0xFFCBD5E1)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1 / scale;
-    canvas.drawRect(imageRect, paint);
+    canvas.drawRect(placedRect, paint);
   }
 
   void _drawCrosshair(Canvas canvas, Offset point, Color color) {
@@ -1366,13 +1539,14 @@ class _AnnotationPainter extends CustomPainter {
       ..color = color.withValues(alpha: 0.95)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.2 / scale;
+    final placedRect = imageRect.shift(imageOffset);
     final horizontal = [
-      Offset(imageRect.left, point.dy),
-      Offset(imageRect.right, point.dy),
+      Offset(placedRect.left, point.dy),
+      Offset(placedRect.right, point.dy),
     ];
     final vertical = [
-      Offset(point.dx, imageRect.top),
-      Offset(point.dx, imageRect.bottom),
+      Offset(point.dx, placedRect.top),
+      Offset(point.dx, placedRect.bottom),
     ];
     _drawDashedLine(canvas, horizontal.first, horizontal.last, underlay);
     _drawDashedLine(canvas, vertical.first, vertical.last, underlay);
@@ -1430,17 +1604,21 @@ class _AnnotationPainter extends CustomPainter {
       final points = annotation.points.isEmpty
           ? _rectToPoints(annotation.rect)
           : annotation.points;
-      final path = Path()..addPolygon(points, true);
+      final canvasPoints = points
+          .map((p) => p + imageRect.topLeft + imageOffset)
+          .toList();
+      final path = Path()..addPolygon(canvasPoints, true);
       canvas.drawPath(path, paint);
       if (selected) {
-        _drawSegNodes(canvas, points);
+        _drawSegNodes(canvas, canvasPoints);
       }
       return;
     }
 
     if (annotation.mode == _AnnotationMode.obb) {
+      final center = annotation.rect.center + imageRect.topLeft + imageOffset;
       canvas.save();
-      canvas.translate(annotation.rect.center.dx, annotation.rect.center.dy);
+      canvas.translate(center.dx, center.dy);
       canvas.rotate(annotation.rotationDegrees * 3.1415926535 / 180);
       final centered = Rect.fromCenter(
         center: Offset.zero,
@@ -1455,9 +1633,15 @@ class _AnnotationPainter extends CustomPainter {
       return;
     }
 
-    canvas.drawRect(annotation.rect, paint);
+    canvas.drawRect(
+      annotation.rect.shift(imageRect.topLeft + imageOffset),
+      paint,
+    );
     if (selected) {
-      _drawCornerHandles(canvas, annotation.rect);
+      _drawCornerHandles(
+        canvas,
+        annotation.rect.shift(imageRect.topLeft + imageOffset),
+      );
     }
   }
 
@@ -1603,6 +1787,7 @@ class _AiToolbar extends StatelessWidget {
     _ToolSpec('undo', Icons.undo, 'tool.undo'),
     _ToolSpec('redo', Icons.redo, 'tool.redo'),
     _ToolSpec('delete', Icons.delete_outline, 'tool.delete'),
+    _ToolSpec('export', Icons.file_download_outlined, 'tool.export'),
   ];
 
   @override
@@ -1870,7 +2055,7 @@ class _AnnotationListPanel extends StatelessWidget {
 String _annotationCoordinateTooltip(_AnnotationRegion annotation) {
   final rect = annotation.rect;
   final lines = [
-    '${annotation.mode.label} 画布坐标',
+    '${annotation.mode.label} 图片坐标',
     'left=${_coord(rect.left)}, top=${_coord(rect.top)}',
     'right=${_coord(rect.right)}, bottom=${_coord(rect.bottom)}',
     'center=(${_coord(rect.center.dx)}, ${_coord(rect.center.dy)})',

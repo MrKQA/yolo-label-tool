@@ -9,6 +9,7 @@ import 'package:flex_color_picker/flex_color_picker.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 import 'src/rust/api.dart';
 import 'src/rust/frb_generated.dart';
@@ -16,6 +17,8 @@ import 'src/rust/frb_generated.dart';
 part 'LabelPage.dart';
 part 'TrainPage.dart';
 part 'DetectVideoPage.dart';
+part 'ExportDialog.dart';
+part 'CropPage.dart';
 part 'AnnotationModels.dart';
 part 'ConfigStore.dart';
 part 'FloatingMessage.dart';
@@ -88,8 +91,35 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   _appText = await _LanguageStrings.load(_languageCode);
   _languageStringsNotifier.value = _appText;
-  await RustLib.init();
+  await RustLib.init(externalLibrary: _openRustLibrary());
   runApp(const YoloLabelApp());
+}
+
+ExternalLibrary? _openRustLibrary() {
+  if (!Platform.isWindows) {
+    return null;
+  }
+  for (final path in _rustLibraryCandidates()) {
+    if (File(path).existsSync()) {
+      return ExternalLibrary.open(path);
+    }
+  }
+  return null;
+}
+
+List<String> _rustLibraryCandidates() {
+  final executableDirectory = File(Platform.resolvedExecutable).parent.path;
+  final current = Directory.current.path;
+  final currentParent = Directory.current.parent.path;
+  final candidates = [
+    '$executableDirectory\\yolo_label_bridge.dll',
+    '$current\\yolo_label_bridge.dll',
+    '$current\\target\\release\\yolo_label_bridge.dll',
+    '$current\\target\\debug\\yolo_label_bridge.dll',
+    '$currentParent\\target\\release\\yolo_label_bridge.dll',
+    '$currentParent\\target\\debug\\yolo_label_bridge.dll',
+  ];
+  return _dedupePaths(candidates);
 }
 
 String t(String key) => _appText.text(key);
@@ -512,6 +542,8 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   int _annotationSerial = 1;
   _AnnotationMode _activeAnnotationMode = _AnnotationMode.hbb;
   _AnnotationRegion? _copiedAnnotation;
+  Size? _imageDisplaySize;
+  final Map<String, Size> _imageDisplaySizes = {};
   _ShortcutConfig _shortcutConfig = _ShortcutConfig.defaults();
   _AppSettings _appSettings = _AppSettings.empty();
 
@@ -533,6 +565,15 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       return const [];
     }
     return _annotationsByImage[imageKey] ?? const [];
+  }
+
+  List<_AnnotationRegion> _annotationsForImagePath(String path) {
+    return _annotationsByImage[_pathKey(path)] ?? const [];
+  }
+
+  Size? _displaySizeForImagePath(String path) {
+    final key = _pathKey(path);
+    return _imageDisplaySizes[key] ?? _imageDisplaySizes[path];
   }
 
   @override
@@ -820,6 +861,10 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     }
     if (tool == 'delete') {
       _deleteSelectedAnnotation();
+      return;
+    }
+    if (tool == 'export') {
+      _showExportDialog();
       return;
     }
     setState(() => _activeTool = tool);
@@ -1126,6 +1171,202 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     });
   }
 
+  Future<void> _showExportDialog() async {
+    final config = await showDialog<_ExportConfig>(
+      context: context,
+      builder: (context) => _ExportDialog(exportPath: _appSettings.exportPath),
+    );
+    if (config == null || !mounted) return;
+    await _exportAnnotations(config);
+  }
+
+  Future<Size> _computeImageDisplaySize(String imagePath) async {
+    try {
+      final file = File(imagePath);
+      final bytes = await file.readAsBytes();
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      final image = frame.image;
+      final w = image.width.toDouble();
+      final h = image.height.toDouble();
+      image.dispose();
+      codec.dispose();
+      if (w <= 0 || h <= 0) return const Size(1, 1);
+      final scale = math.min(
+        _annotationWorkspaceWidth / w,
+        _annotationWorkspaceHeight / h,
+      );
+      final displaySize = Size(w * scale, h * scale);
+      _imageDisplaySizes[_pathKey(imagePath)] = displaySize;
+      return displaySize;
+    } on Object {
+      return const Size(1, 1);
+    }
+  }
+
+  Future<void> _exportAnnotations(_ExportConfig config) async {
+    final exportRoot = _appSettings.exportPath;
+    final baseDir = Directory('$exportRoot\\${config.folderName}');
+    if (baseDir.existsSync()) {
+      baseDir.deleteSync(recursive: true);
+    }
+
+    // Collect all annotated images
+    final entries = <_ExportEntry>[];
+    for (final image in _images) {
+      final annotations = _annotationsForImagePath(image.path);
+      if (config.skipEmpty && annotations.isEmpty) continue;
+      entries.add(_ExportEntry(image.path, annotations.toList()));
+      if (_displaySizeForImagePath(image.path) == null) {
+        await _computeImageDisplaySize(image.path);
+      }
+    }
+    if (entries.isEmpty) {
+      _showFloatingMessage(t('export.noData'));
+      return;
+    }
+
+    // Class-balanced split: track which classes each image belongs to
+    final imageClasses = <String, Set<int>>{};
+    for (final entry in entries) {
+      imageClasses[entry.path] = entry.annotations
+          .map((a) => a.classId)
+          .toSet();
+    }
+
+    // Assign each class's images to train/val/test
+    final assigned = <String>{};
+    final trainSet = <String>{};
+    final valSet = <String>{};
+    final testSet = <String>{};
+
+    // Collect all unique class IDs
+    final allClassIds = <int>{};
+    for (final entry in entries) {
+      for (final a in entry.annotations) {
+        allClassIds.add(a.classId);
+      }
+    }
+
+    for (final classId in allClassIds) {
+      final classImages = entries
+          .where((e) => e.annotations.any((a) => a.classId == classId))
+          .toList();
+      classImages.sort((a, b) => a.path.compareTo(b.path));
+
+      final total = classImages.length;
+      final valCount = (total * config.valRatio).round();
+      final testCount = (total * config.testRatio).round();
+
+      for (var i = 0; i < classImages.length; i++) {
+        final path = classImages[i].path;
+        if (assigned.contains(path)) continue;
+        if (i < total - valCount - testCount) {
+          trainSet.add(path);
+        } else if (i < total - testCount) {
+          valSet.add(path);
+        } else {
+          testSet.add(path);
+        }
+        assigned.add(path);
+      }
+    }
+
+    // Assign any remaining unassigned images to train
+    for (final entry in entries) {
+      if (!assigned.contains(entry.path)) {
+        trainSet.add(entry.path);
+      }
+    }
+
+    final splitDirs = <String, Directory>{};
+    void makeDirs(String split) {
+      splitDirs['${split}_images'] = Directory(
+        '${baseDir.path}\\$split\\images',
+      )..createSync(recursive: true);
+      splitDirs['${split}_labels'] = Directory(
+        '${baseDir.path}\\$split\\labels',
+      )..createSync(recursive: true);
+    }
+
+    makeDirs('train');
+    makeDirs('val');
+    if (testSet.isNotEmpty) makeDirs('test');
+
+    final pathToEntry = <String, _ExportEntry>{};
+    for (final entry in entries) {
+      pathToEntry[entry.path] = entry;
+    }
+
+    void writeLabels(Set<String> paths, String split) {
+      for (final path in paths) {
+        final entry = pathToEntry[path]!;
+        final baseName = _fileName(path).replaceAll(RegExp(r'\.[^.]+$'), '');
+        final labelDir = splitDirs['${split}_labels']!;
+        final labelFile = File('${labelDir.path}\\$baseName.txt');
+        final lines = <String>[];
+        for (final annotation in entry.annotations) {
+          final classIdx = _labelClasses.indexWhere(
+            (c) => c.id == annotation.classId,
+          );
+          if (classIdx < 0) continue;
+          final imageSize = _displaySizeForImagePath(path) ?? const Size(1, 1);
+          lines.add(
+            annotation.toUltralyticsLabelLine(
+              classIndex: classIdx,
+              imageSize: imageSize,
+            ),
+          );
+        }
+        if (lines.isNotEmpty || !config.skipEmpty) {
+          labelFile.writeAsStringSync('${lines.join('\n')}\n');
+        }
+      }
+    }
+
+    writeLabels(trainSet, 'train');
+    writeLabels(valSet, 'val');
+    writeLabels(testSet, 'test');
+
+    // Write data.yaml
+    final names = <String, String>{};
+    for (var i = 0; i < _labelClasses.length; i++) {
+      names['$i'] = _labelClasses[i].name;
+    }
+    final yamlLines = <String>[
+      'path: ${baseDir.path.replaceAll('\\', '/')}',
+      'train: train/images',
+      'val: val/images',
+      if (testSet.isNotEmpty) 'test: test/images',
+      '',
+      'nc: ${_labelClasses.length}',
+      'names:',
+      for (final entry in names.entries) '  ${entry.key}: ${entry.value}',
+    ];
+    File(
+      '${baseDir.path}\\data.yaml',
+    ).writeAsStringSync('${yamlLines.join('\n')}\n');
+
+    // Copy images if enabled
+    if (config.exportImages) {
+      void copyImages(Set<String> paths, String split) {
+        for (final path in paths) {
+          final name = _fileName(path);
+          final imgDir = splitDirs['${split}_images']!;
+          File(path).copySync('${imgDir.path}\\$name');
+        }
+      }
+
+      copyImages(trainSet, 'train');
+      copyImages(valSet, 'val');
+      if (testSet.isNotEmpty) copyImages(testSet, 'test');
+    }
+
+    _showFloatingMessage(
+      '${t('export.done')} (${t('export.folderName')}: ${config.folderName})',
+    );
+  }
+
   void _pasteAnnotation() {
     final imageKey = _selectedImageKey;
     final copied = _copiedAnnotation;
@@ -1152,7 +1393,13 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       return;
     }
     _pushAnnotationSnapshot();
-    _updateAnnotation(selected.rotated(deltaDegrees));
+    final rotated = selected.rotated(deltaDegrees);
+    final imageSize = _imageDisplaySize;
+    _updateAnnotation(
+      imageSize != null && imageSize != Size.zero
+          ? rotated.clampObbToImage(imageSize)
+          : rotated,
+    );
   }
 
   void _handlePointerSignal(PointerSignalEvent event) {
@@ -1426,9 +1673,18 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                     onToggleClassLabels: () =>
                         setState(() => _showClassLabels = !_showClassLabels),
                     onAnnotationClassChanged: _changeAnnotationClass,
+                    onImageDisplaySizeChanged: (size) {
+                      _imageDisplaySize = size;
+                      final key = _selectedImageKey;
+                      if (key != null && size != Size.zero) {
+                        _imageDisplaySizes[key] = size;
+                      }
+                    },
                   )
                 else if (_activeSection == 'train')
                   _TrainPage(settings: _appSettings)
+                else if (_activeSection == 'crop')
+                  _CropPage(exportPath: _appSettings.exportPath)
                 else
                   _DetectVideoPage(settings: _appSettings),
               ],
@@ -1750,6 +2006,7 @@ class _PrimarySidebar extends StatelessWidget {
     _SectionSpec('label', Icons.edit_note, 'sidebar.label'),
     _SectionSpec('train', Icons.model_training, 'sidebar.train'),
     _SectionSpec('browse', Icons.photo_library_outlined, 'sidebar.browse'),
+    _SectionSpec('crop', Icons.content_cut, 'sidebar.crop'),
   ];
 
   @override

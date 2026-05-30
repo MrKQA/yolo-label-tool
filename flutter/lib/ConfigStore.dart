@@ -26,28 +26,40 @@ class _HistoryConfig {
 /// 软件设置，先保存 Python 环境和训练结果路径。
 /// Application settings for Python environment and training output path.
 class _AppSettings {
-  const _AppSettings({required this.pythonPath, required this.outputPath});
+  const _AppSettings({
+    required this.pythonPath,
+    required this.outputPath,
+    required this.exportPath,
+  });
 
   factory _AppSettings.empty() {
     return _AppSettings(
       pythonPath: '',
       outputPath: _ConfigStore.defaultRunsDirectory.path,
+      exportPath: _ConfigStore.defaultDatasetsDirectory.path,
     );
   }
 
   final String pythonPath;
   final String outputPath;
+  final String exportPath;
 
-  _AppSettings copyWith({String? pythonPath, String? outputPath}) {
+  _AppSettings copyWith({
+    String? pythonPath,
+    String? outputPath,
+    String? exportPath,
+  }) {
     return _AppSettings(
       pythonPath: pythonPath ?? this.pythonPath,
       outputPath: outputPath ?? this.outputPath,
+      exportPath: exportPath ?? this.exportPath,
     );
   }
 
   Map<String, Object> toJson() => {
     'pythonPath': pythonPath,
     'outputPath': outputPath,
+    'exportPath': exportPath,
   };
 
   static _AppSettings fromJson(Object? value) {
@@ -55,6 +67,7 @@ class _AppSettings {
       return _AppSettings.empty();
     }
     final outputPath = value['outputPath'];
+    final exportPath = value['exportPath'];
     return _AppSettings(
       pythonPath: value['pythonPath'] is String
           ? value['pythonPath'] as String
@@ -62,6 +75,9 @@ class _AppSettings {
       outputPath: outputPath is String && outputPath.isNotEmpty
           ? outputPath
           : _ConfigStore.defaultRunsDirectory.path,
+      exportPath: exportPath is String && exportPath.isNotEmpty
+          ? exportPath
+          : _ConfigStore.defaultDatasetsDirectory.path,
     );
   }
 }
@@ -79,6 +95,9 @@ class _ConfigStore {
 
   static Directory get defaultRunsDirectory =>
       Directory('${projectDirectory.path}\\Runs');
+
+  static Directory get defaultDatasetsDirectory =>
+      Directory('${projectDirectory.path}\\datasets');
 
   static Directory get configDirectory {
     final homeDirectory =

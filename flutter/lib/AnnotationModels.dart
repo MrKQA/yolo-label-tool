@@ -124,6 +124,36 @@ class _AnnotationRegion {
     return copyWith(rotationDegrees: rotationDegrees + deltaDegrees);
   }
 
+  _AnnotationRegion clampObbToImage(Size imageSize) {
+    if (mode != _AnnotationMode.obb) {
+      return clampedTo(
+        Rect.fromLTWH(0, 0, imageSize.width, imageSize.height),
+      );
+    }
+    var result = clampedTo(
+      Rect.fromLTWH(0, 0, imageSize.width, imageSize.height),
+    );
+    final corners = _rotatedCorners(result.rect, result.rotationDegrees);
+    var dx = 0.0;
+    var dy = 0.0;
+    double minX = corners[0].dx, maxX = corners[0].dx;
+    double minY = corners[0].dy, maxY = corners[0].dy;
+    for (final c in corners) {
+      if (c.dx < minX) minX = c.dx;
+      if (c.dx > maxX) maxX = c.dx;
+      if (c.dy < minY) minY = c.dy;
+      if (c.dy > maxY) maxY = c.dy;
+    }
+    if (minX < 0) dx = -minX;
+    if (maxX > imageSize.width) dx = imageSize.width - maxX;
+    if (minY < 0) dy = -minY;
+    if (maxY > imageSize.height) dy = imageSize.height - maxY;
+    if (dx != 0 || dy != 0) {
+      result = result.copyWith(rect: result.rect.shift(Offset(dx, dy)));
+    }
+    return result;
+  }
+
   _AnnotationRegion duplicate(String newId) {
     return _AnnotationRegion(
       id: newId,
@@ -147,45 +177,56 @@ class _AnnotationRegion {
 
   String toUltralyticsLabelLine({
     required int classIndex,
-    required Rect imageRect,
+    required Size imageSize,
   }) {
     final values = switch (mode) {
-      _AnnotationMode.hbb => _hbbValues(imageRect),
-      _AnnotationMode.obb => _obbValues(imageRect),
-      _AnnotationMode.seg => _segValues(imageRect),
+      _AnnotationMode.hbb => _hbbValues(imageSize),
+      _AnnotationMode.obb => _obbValues(imageSize),
+      _AnnotationMode.seg => _segValues(imageSize),
     };
     return '$classIndex ${values.map(_formatYoloValue).join(' ')}';
   }
 
-  List<double> _hbbValues(Rect imageRect) {
-    final clipped = rect.intersect(imageRect);
-    if (clipped.isEmpty) {
+  List<double> _hbbValues(Size imageSize) {
+    final w = imageSize.width;
+    final h = imageSize.height;
+    if (w <= 0 || h <= 0) {
       return const [0, 0, 0, 0];
     }
     return [
-      _normalizeX(clipped.center.dx, imageRect),
-      _normalizeY(clipped.center.dy, imageRect),
-      _normalizeWidth(clipped.width, imageRect),
-      _normalizeHeight(clipped.height, imageRect),
+      (rect.center.dx / w).clamp(0.0, 1.0),
+      (rect.center.dy / h).clamp(0.0, 1.0),
+      (rect.width / w).clamp(0.0, 1.0),
+      (rect.height / h).clamp(0.0, 1.0),
     ];
   }
 
-  List<double> _obbValues(Rect imageRect) {
+  List<double> _obbValues(Size imageSize) {
+    final w = imageSize.width;
+    final h = imageSize.height;
+    if (w <= 0 || h <= 0) {
+      return List.filled(8, 0.0);
+    }
     final corners = _rotatedCorners(rect, rotationDegrees);
     return [
       for (final point in corners) ...[
-        _normalizeX(point.dx, imageRect),
-        _normalizeY(point.dy, imageRect),
+        (point.dx / w).clamp(0.0, 1.0),
+        (point.dy / h).clamp(0.0, 1.0),
       ],
     ];
   }
 
-  List<double> _segValues(Rect imageRect) {
+  List<double> _segValues(Size imageSize) {
+    final w = imageSize.width;
+    final h = imageSize.height;
+    if (w <= 0 || h <= 0) {
+      return [];
+    }
     final polygon = points.length >= 3 ? points : _rectToPoints(rect);
     return [
       for (final point in polygon) ...[
-        _normalizeX(point.dx, imageRect),
-        _normalizeY(point.dy, imageRect),
+        (point.dx / w).clamp(0.0, 1.0),
+        (point.dy / h).clamp(0.0, 1.0),
       ],
     ];
   }
@@ -248,22 +289,6 @@ Offset _rotatePoint(Offset point, Offset center, double radians) {
     center.dx + dx * cosValue - dy * sinValue,
     center.dy + dx * sinValue + dy * cosValue,
   );
-}
-
-double _normalizeX(double x, Rect imageRect) {
-  return ((x - imageRect.left) / imageRect.width).clamp(0.0, 1.0).toDouble();
-}
-
-double _normalizeY(double y, Rect imageRect) {
-  return ((y - imageRect.top) / imageRect.height).clamp(0.0, 1.0).toDouble();
-}
-
-double _normalizeWidth(double width, Rect imageRect) {
-  return (width / imageRect.width).clamp(0.0, 1.0).toDouble();
-}
-
-double _normalizeHeight(double height, Rect imageRect) {
-  return (height / imageRect.height).clamp(0.0, 1.0).toDouble();
 }
 
 String _formatYoloValue(double value) {

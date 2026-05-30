@@ -1,6 +1,6 @@
 # YOLO Label Tool 功能与界面说明
 
-更新时间：2026-05-29
+更新时间：2026-05-30
 
 本文档记录当前项目已经实现的功能、界面结构、模块划分、配置文件位置，以及仍处于占位或未完成状态的能力。
 
@@ -16,6 +16,8 @@
 - 快捷键模型：`flutter/lib/ShortcutModels.dart`
 - 配置读写模块：`flutter/lib/ConfigStore.dart`
 - 设置弹窗：`flutter/lib/SettingsDialog.dart`
+- 导出弹窗：`flutter/lib/ExportDialog.dart`
+- 裁剪页面：`flutter/lib/CropPage.dart`
 - 语言包目录：`flutter/lib/language/`
 - Flutter Rust Bridge 配置：`flutter_rust_bridge.yaml`
 
@@ -174,9 +176,9 @@
 
 ### 标注工作区
 
-标注工作区是中间图片显示区域。
+标注工作区是中间图片显示区域，画布逻辑尺寸为 960×620，窗口不足时通过双向滚动条查看完整画布。
 
-当前固定尺寸：
+画布逻辑尺寸：
 
 ```text
 960 x 620
@@ -184,7 +186,7 @@
 
 显示逻辑：
 
-- 标注工作区尺寸固定。
+- 画布逻辑尺寸固定为 960×620，窗口不足时通过双向滚动条查看完整画布。
 - 图片会根据自身尺寸自动按比例缩放。
 - 默认完整显示在标注工作区内。
 - 底部缩放控制会叠加在自动适配后的显示比例上。
@@ -483,12 +485,27 @@ flutter/lib/language/
 3. 设置 `"language.name"` 作为菜单中显示的语言名称。
 4. 启动程序后会自动出现在 `设置 > 语言` 中。
 
+## 已修复的问题（2026-05-30）
+
+- 标注框选中时右键无反应 → 修复 `_annotationAt` 循环命中逻辑导致已选中标注返回 null。
+- 标注区域依然会根据窗口变化而缩小，标注框会超出图片的范围 → 使用 `SingleChildScrollView` 双向滚动，窗口不足时滚动查看完整画布。
+- OBB 标注后调整框体大小有问题 → 修正 OBB 拖拽角点时正确反算旋转前的轴对齐尺寸。
+- OBB 旋转后灰色滤镜未贴合且标注点超出图片范围 → 滤镜改用旋转后包围盒；旋转后自动 clamp 到图片边界。
+- 标注框左上角坐标存在画布偏移（如 left=0 但 top=40）→ 图片改为在 `_AnnotationPainter` 中直接绘制（移除 `_SelectedImageView`），图片位置与标注坐标完全一致；新增 select 模式图片拖拽平移（未选中标注时拖动可移动图片视口，方便放大后局部标注）。
+- 标注页面添加导出按钮与弹窗 → 新增 ExportDialog 配置跳过空标注/导出图片/train-val-test 比例（默认 80/20/0），按 class 平衡分配，导出 YOLO 目录结构含 data.yaml。
+- 添加"裁剪"左侧导航页 → 新建 CropPage，支持导入视频、设置取帧间隔、保存数据集（后端帧提取待接 Rust Bridge）。
+- Ultralytics 标签格式转换接入导出 → `toUltralyticsLabelLine` 已连接导出功能，按图片显示尺寸正确归一化。
+- 导出默认路径改为 `datasets/`。
+- 选中标注框时鼠标悬停拖动方块无选中态光标 → `_handlePointerHover` 检测 resize handle 悬停，切换 `SystemMouseCursors.resizeUpLeftDownRight`。
+
 ## 需要修改的逻辑
 
 当前仍需要继续修改或接后端的逻辑：
 
+- 标注页面放大缩小图片时辅助虚线和标注框体与鼠标错位，灰色滤镜显示并未覆盖整个图像显示区域。
+- 标注页面放大图片时，标注区域滚动条改成按键来查看放大后的图片。
+- 裁剪页面视频帧提取后端（需接 Rust Bridge 或 FFmpeg）。
 - SEG 当前生成的是多边形轮廓点；轮廓点转二值掩码图还没有后端实现。
-- HBB/OBB/SEG 的 Ultralytics 标签格式转换方法已在模型层准备，但还没有接导出功能。
 - 训练页已经读取 models 文件夹、data.yaml 概览和训练参数，但还没有调用 Python/Ultralytics 开始训练。
 - 预测页已经实现播放/预测互斥、全部预测、保存结果状态和键盘控制，但还没有接入真实视频播放、推理和导出。
 

@@ -87,6 +87,18 @@ if(PLUGIN_BUNDLED_LIBRARIES)
     COMPONENT Runtime)
 endif()
 
+set(RUST_BRIDGE_RELEASE_DLL "${CMAKE_CURRENT_SOURCE_DIR}/../../target/release/yolo_label_bridge.dll")
+set(RUST_BRIDGE_DEBUG_DLL "${CMAKE_CURRENT_SOURCE_DIR}/../../target/debug/yolo_label_bridge.dll")
+if(EXISTS "${RUST_BRIDGE_RELEASE_DLL}")
+  install(FILES "${RUST_BRIDGE_RELEASE_DLL}"
+    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    COMPONENT Runtime)
+elseif(EXISTS "${RUST_BRIDGE_DEBUG_DLL}")
+  install(FILES "${RUST_BRIDGE_DEBUG_DLL}"
+    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    COMPONENT Runtime)
+endif()
+
 # Copy the native assets provided by the build.dart from all packages.
 set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/windows/")
 install(DIRECTORY "${NATIVE_ASSETS_DIR}"
