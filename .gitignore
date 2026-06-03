@@ -13,6 +13,9 @@ ffmpeg/
 .idea/
 .vscode/
 
+#models
+models/
+
 # OS
 logs/
 Thumbs.db
