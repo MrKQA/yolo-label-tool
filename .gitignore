@@ -1,2 +1,18 @@
+# Rust
 /target
+
+# Flutter
+flutter/build/
+flutter/.dart_tool/
+flutter/.flutter-plugins
+flutter/.flutter-plugins-dependencies
+# FFmpeg
+ffmpeg/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
 logs/
+Thumbs.db

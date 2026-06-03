@@ -108,8 +108,19 @@ class _SettingsDialogState extends State<_SettingsDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(t('settings.title')),
+    return Focus(
+      autofocus: true,
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent &&
+            (event.logicalKey == LogicalKeyboardKey.enter ||
+                event.logicalKey == LogicalKeyboardKey.numpadEnter)) {
+          _save();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: AlertDialog(
+        title: Text(t('settings.title')),
       content: SizedBox(
         width: 560,
         child: Column(
@@ -170,6 +181,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         ),
         TextButton(onPressed: _save, child: Text(t('action.save'))),
       ],
+      ),
     );
   }
 }

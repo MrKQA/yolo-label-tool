@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ffi' as ffi;
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -10,6 +12,8 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+import 'package:video_player/video_player.dart';
+import 'package:video_player_win/video_player_win.dart' as video_player_win;
 
 import 'src/rust/api.dart';
 import 'src/rust/frb_generated.dart';
@@ -17,6 +21,7 @@ import 'src/rust/frb_generated.dart';
 part 'LabelPage.dart';
 part 'TrainPage.dart';
 part 'DetectVideoPage.dart';
+part 'RustVideoBackend.dart';
 part 'ExportDialog.dart';
 part 'CropPage.dart';
 part 'AnnotationModels.dart';
@@ -84,11 +89,16 @@ const _imageTypeGroup = XTypeGroup(
   label: 'Images',
   extensions: ['jpg', 'jpeg', 'png', 'bmp', 'gif', 'webp'],
 );
+const _yamlTypeGroup = XTypeGroup(label: 'YAML', extensions: ['yaml', 'yml']);
+const _datasetSplits = ['train', 'val', 'test'];
 
 const _imageExtensions = {'jpg', 'jpeg', 'png', 'bmp', 'gif', 'webp'};
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (Platform.isWindows) {
+    video_player_win.WindowsVideoPlayer.registerWith();
+  }
   _appText = await _LanguageStrings.load(_languageCode);
   _languageStringsNotifier.value = _appText;
   await RustLib.init(externalLibrary: _openRustLibrary());
@@ -230,6 +240,7 @@ class _LanguageStrings {
     'tool.redo': '重做',
     'tool.delete': '删除',
     'feedback.copiedAnnotation': '已复制标注框',
+    'import.waiting': '请等待导入完成',
     'bottom.zoomOut': '缩小',
     'bottom.lockZoom': '锁定缩放',
     'bottom.zoomIn': '放大',
@@ -251,6 +262,9 @@ class _LanguageStrings {
     'shortcut.rotateObbLeft1': 'OBB 逆时针 1°',
     'shortcut.rotateObbRight1': 'OBB 顺时针 1°',
     'shortcut.rotateObbRight5': 'OBB 顺时针 5°',
+    'shortcut.videoPlayPause': '视频播放 / 暂停',
+    'shortcut.videoRewind': '视频回退',
+    'shortcut.videoFastForward': '视频三倍速快进',
     'shortcut.note': '鼠标滚轮缩放、右键图片添加/删除保持固定。',
     'shortcut.waiting': '按下键盘...',
     'train.title': '训练',
@@ -294,6 +308,9 @@ class _LanguageStrings {
     'detect.resultHidden': '隐藏预测结果',
     'detect.clickToggleResult': '点击显示区域切换预测结果显示。',
     'detect.placeholder': '检测结果、视频播放和预测导出将在这里显示。',
+    'detect.loadingVideo': '正在加载视频',
+    'detect.videoBackend': '视频后端',
+    'detect.decodeFailed': '视频解码失败',
     'action.reset': '重置',
     'action.close': '关闭',
     'action.save': '保存',
@@ -512,6 +529,7 @@ class _WorkspaceShell extends StatefulWidget {
 
 class _WorkspaceShellState extends State<_WorkspaceShell> {
   final FocusNode _keyboardFocusNode = FocusNode(debugLabel: 'workspace');
+  final _DetectVideoSession _detectVideoSession = _DetectVideoSession();
   Timer? _topMenuHideTimer;
 
   final List<_ImageItem> _images = [];
@@ -519,6 +537,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   final List<String> _recentFiles = [];
   final List<_LabelClass> _labelClasses = [];
   final Map<String, List<_AnnotationRegion>> _annotationsByImage = {};
+  final Map<String, String> _imageSplits = {};
   final List<List<_AnnotationRegion>> _undoStack = [];
   final List<List<_AnnotationRegion>> _redoStack = [];
   List<_LanguageOption> _languageOptions = const [
@@ -528,6 +547,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   bool _sidebarCollapsed = false;
   bool _darkMode = false;
   bool _shortcutDialogOpen = false;
+  bool _importingDataset = false;
   bool _topMenuVisible = true;
   bool _zoomLocked = false;
   double _zoom = 100;
@@ -546,6 +566,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   final Map<String, Size> _imageDisplaySizes = {};
   _ShortcutConfig _shortcutConfig = _ShortcutConfig.defaults();
   _AppSettings _appSettings = _AppSettings.empty();
+  _ImportedDataset? _importedDataset;
 
   _ImageItem? get _selectedImage {
     if (_images.isEmpty) {
@@ -565,6 +586,14 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       return const [];
     }
     return _annotationsByImage[imageKey] ?? const [];
+  }
+
+  String get _selectedImageSplit {
+    final image = _selectedImage;
+    if (image == null) {
+      return 'train';
+    }
+    return _imageSplits[_pathKey(image.path)] ?? 'train';
   }
 
   List<_AnnotationRegion> _annotationsForImagePath(String path) {
@@ -587,6 +616,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   @override
   void dispose() {
     _topMenuHideTimer?.cancel();
+    _detectVideoSession.dispose();
     _keyboardFocusNode.dispose();
     super.dispose();
   }
@@ -696,6 +726,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     if (_addRecent(_recentFiles, file.path)) {
       _saveHistory();
     }
+    _importedDataset = null;
     _insertImages([file.path], insertAfterIndex: insertAfterIndex);
   }
 
@@ -713,6 +744,8 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       _images
         ..clear()
         ..addAll(files.map(_ImageItem.fromPath));
+      _imageSplits.clear();
+      _importedDataset = null;
       _selectedImageIndex = 0;
       _selectedAnnotationId = null;
       _undoStack.clear();
@@ -727,6 +760,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       _selectImage(existingIndex);
       return;
     }
+    _importedDataset = null;
     _insertImages([path]);
   }
 
@@ -743,6 +777,9 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
 
     setState(() {
       _images.insertAll(insertIndex, newPaths.map(_ImageItem.fromPath));
+      for (final path in newPaths) {
+        _imageSplits.putIfAbsent(_pathKey(path), () => 'train');
+      }
       _selectedImageIndex = insertIndex;
       _selectedAnnotationId = null;
       _undoStack.clear();
@@ -762,7 +799,8 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     }
 
     setState(() {
-      _images.removeAt(index);
+      final removed = _images.removeAt(index);
+      _imageSplits.remove(_pathKey(removed.path));
       _selectedImageIndex = _images.isEmpty
           ? 0
           : _selectedImageIndex.clamp(0, _images.length - 1);
@@ -770,6 +808,14 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       _undoStack.clear();
       _redoStack.clear();
     });
+  }
+
+  void _setSelectedImageSplit(String split) {
+    final imageKey = _selectedImageKey;
+    if (imageKey == null || !_datasetSplits.contains(split)) {
+      return;
+    }
+    setState(() => _imageSplits[imageKey] = split);
   }
 
   Future<void> _showImageContextMenu(TapDownDetails details, int? index) async {
@@ -792,6 +838,167 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     } else if (action == 'delete' && index != null) {
       _deleteImage(index);
     }
+  }
+
+  Future<void> _importYoloDataset() async {
+    if (_importingDataset) {
+      return;
+    }
+    final file = await openFile(acceptedTypeGroups: [_yamlTypeGroup]);
+    if (file == null) {
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+
+    setState(() => _importingDataset = true);
+    await WidgetsBinding.instance.endOfFrame;
+    try {
+      final parsed = _parseImportYoloDataYaml(file.path);
+      final imageEntries = <_DatasetImageEntry>[];
+      for (final split in _datasetSplits) {
+        final sources = parsed.splitSources[split] ?? const [];
+        for (final source in sources) {
+          imageEntries.addAll(
+            _imagePathsFromDatasetSource(
+              parsed.rootPath,
+              source,
+            ).map((path) => _DatasetImageEntry(path: path, split: split)),
+          );
+        }
+      }
+
+      final uniqueEntries = _dedupeDatasetEntries(imageEntries);
+      if (uniqueEntries.isEmpty) {
+        _showFloatingMessage(t('import.noImages'));
+        return;
+      }
+
+      final importedClasses = <_LabelClass>[];
+      int ensureClass(int classIndex) {
+        while (importedClasses.length <= classIndex) {
+          final index = importedClasses.length;
+          final name = index < parsed.names.length
+              ? parsed.names[index]
+              : 'class_$index';
+          importedClasses.add(
+            _LabelClass(
+              id: index,
+              name: name,
+              colorValue: _labelColorPalette[index % _labelColorPalette.length]
+                  .toARGB32(),
+            ),
+          );
+        }
+        return importedClasses[classIndex].id;
+      }
+
+      final importedAnnotations = <String, List<_AnnotationRegion>>{};
+      final importedSplits = <String, String>{};
+      var annotationSerial = 1;
+      for (final entry in uniqueEntries) {
+        final displaySize = await _computeImageDisplaySize(entry.path);
+        importedSplits[_pathKey(entry.path)] = entry.split;
+        importedAnnotations[_pathKey(entry.path)] = _readYoloAnnotations(
+          imagePath: entry.path,
+          imageSize: displaySize,
+          ensureClass: ensureClass,
+          nextId: () => 'ann_${annotationSerial++}',
+        );
+      }
+
+      if (parsed.names.isNotEmpty) {
+        for (var i = 0; i < parsed.names.length; i++) {
+          ensureClass(i);
+        }
+      }
+
+      setState(() {
+        _images
+          ..clear()
+          ..addAll(
+            uniqueEntries.map((entry) => _ImageItem.fromPath(entry.path)),
+          );
+        _annotationsByImage
+          ..clear()
+          ..addAll(importedAnnotations);
+        _imageSplits
+          ..clear()
+          ..addAll(importedSplits);
+        _labelClasses
+          ..clear()
+          ..addAll(importedClasses);
+        _importedDataset = _ImportedDataset(
+          dataYamlPath: file.path,
+          rootPath: parsed.rootPath,
+          splitImageDirs: parsed.splitImageDirs,
+        );
+        _classSerial = importedClasses.length;
+        _annotationSerial = annotationSerial;
+        _activeClassId = importedClasses.isEmpty
+            ? null
+            : importedClasses.first.id;
+        _selectedImageIndex = 0;
+        _selectedAnnotationId = null;
+        _undoStack.clear();
+        _redoStack.clear();
+        _activeSection = 'label';
+      });
+      _showFloatingMessage('${t('import.done')} (${uniqueEntries.length})');
+    } on Object {
+      _showFloatingMessage(t('import.failed'));
+    } finally {
+      if (mounted) {
+        setState(() => _importingDataset = false);
+      }
+    }
+  }
+
+  List<_AnnotationRegion> _readYoloAnnotations({
+    required String imagePath,
+    required Size imageSize,
+    required int Function(int classIndex) ensureClass,
+    required String Function() nextId,
+  }) {
+    final labelFile = File(_labelPathForImagePath(imagePath));
+    if (!labelFile.existsSync()) {
+      return const [];
+    }
+    final result = <_AnnotationRegion>[];
+    for (final rawLine in labelFile.readAsLinesSync()) {
+      final line = rawLine.trim();
+      if (line.isEmpty) {
+        continue;
+      }
+      final parts = line.split(RegExp(r'\s+'));
+      if (parts.length < 5) {
+        continue;
+      }
+      final classIndex = int.tryParse(parts.first);
+      if (classIndex == null || classIndex < 0) {
+        continue;
+      }
+      final values = parts
+          .skip(1)
+          .map(double.tryParse)
+          .whereType<double>()
+          .toList(growable: false);
+      if (values.length != parts.length - 1) {
+        continue;
+      }
+      final classId = ensureClass(classIndex);
+      final annotation = _annotationFromYoloValues(
+        id: nextId(),
+        values: values,
+        classId: classId,
+        imageSize: imageSize,
+      );
+      if (annotation != null) {
+        result.add(annotation);
+      }
+    }
+    return result;
   }
 
   void _pushAnnotationSnapshot() {
@@ -1177,7 +1384,42 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       builder: (context) => _ExportDialog(exportPath: _appSettings.exportPath),
     );
     if (config == null || !mounted) return;
+    final importedDataset = _importedDataset;
+    if (importedDataset != null) {
+      final overwrite = await _confirmOverwriteImportedDataset();
+      if (overwrite == null || !mounted) {
+        return;
+      }
+      if (overwrite) {
+        await _exportImportedDataset(config, importedDataset);
+        return;
+      }
+    }
     await _exportAnnotations(config);
+  }
+
+  Future<bool?> _confirmOverwriteImportedDataset() async {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(t('export.overwriteTitle')),
+        content: Text(t('export.overwriteMessage')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(null),
+            child: Text(t('action.cancel')),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(t('export.keepNew')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(t('export.overwriteOriginal')),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<Size> _computeImageDisplaySize(String imagePath) async {
@@ -1211,11 +1453,10 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       baseDir.deleteSync(recursive: true);
     }
 
-    // Collect all annotated images
+    // Export every selected image; skipEmpty only controls empty label files.
     final entries = <_ExportEntry>[];
     for (final image in _images) {
       final annotations = _annotationsForImagePath(image.path);
-      if (config.skipEmpty && annotations.isEmpty) continue;
       entries.add(_ExportEntry(image.path, annotations.toList()));
       if (_displaySizeForImagePath(image.path) == null) {
         await _computeImageDisplaySize(image.path);
@@ -1319,7 +1560,9 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
           );
         }
         if (lines.isNotEmpty || !config.skipEmpty) {
-          labelFile.writeAsStringSync('${lines.join('\n')}\n');
+          labelFile.writeAsStringSync(
+            lines.isEmpty ? '' : '${lines.join('\n')}\n',
+          );
         }
       }
     }
@@ -1367,6 +1610,91 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     );
   }
 
+  Future<void> _exportImportedDataset(
+    _ExportConfig config,
+    _ImportedDataset dataset,
+  ) async {
+    final entries = <_ExportEntry>[
+      for (final image in _images)
+        _ExportEntry(image.path, _annotationsForImagePath(image.path).toList()),
+    ];
+    if (entries.isEmpty) {
+      _showFloatingMessage(t('export.noData'));
+      return;
+    }
+
+    for (final entry in entries) {
+      if (_displaySizeForImagePath(entry.path) == null) {
+        await _computeImageDisplaySize(entry.path);
+      }
+    }
+
+    final grouped = <String, Set<String>>{
+      for (final split in _datasetSplits) split: <String>{},
+    };
+    for (final entry in entries) {
+      final split = _imageSplits[_pathKey(entry.path)] ?? 'train';
+      grouped[_datasetSplits.contains(split) ? split : 'train']!.add(
+        entry.path,
+      );
+    }
+
+    final pathToEntry = <String, _ExportEntry>{
+      for (final entry in entries) entry.path: entry,
+    };
+
+    void writeLabels(Set<String> paths, String split) {
+      final labelDir = Directory(dataset.labelDirForSplit(split))
+        ..createSync(recursive: true);
+      for (final path in paths) {
+        final entry = pathToEntry[path]!;
+        final baseName = _baseNameWithoutExtension(path);
+        final labelFile = File('${labelDir.path}\\$baseName.txt');
+        final lines = <String>[];
+        for (final annotation in entry.annotations) {
+          final classIdx = _labelClasses.indexWhere(
+            (c) => c.id == annotation.classId,
+          );
+          if (classIdx < 0) continue;
+          final imageSize = _displaySizeForImagePath(path) ?? const Size(1, 1);
+          lines.add(
+            annotation.toUltralyticsLabelLine(
+              classIndex: classIdx,
+              imageSize: imageSize,
+            ),
+          );
+        }
+        if (lines.isNotEmpty || !config.skipEmpty) {
+          labelFile.writeAsStringSync(
+            lines.isEmpty ? '' : '${lines.join('\n')}\n',
+          );
+        }
+      }
+    }
+
+    for (final split in _datasetSplits) {
+      writeLabels(grouped[split]!, split);
+    }
+
+    if (config.exportImages) {
+      for (final split in _datasetSplits) {
+        final imageDir = Directory(dataset.imageDirForSplit(split))
+          ..createSync(recursive: true);
+        for (final path in grouped[split]!) {
+          final target = '${imageDir.path}\\${_fileName(path)}';
+          if (_pathKey(path) != _pathKey(target)) {
+            File(path).copySync(target);
+          }
+        }
+      }
+    }
+
+    File(dataset.dataYamlPath).writeAsStringSync(
+      '${_datasetYamlContent(dataset, grouped, _labelClasses)}\n',
+    );
+    _showFloatingMessage(t('export.done'));
+  }
+
   void _pasteAnnotation() {
     final imageKey = _selectedImageKey;
     final copied = _copiedAnnotation;
@@ -1412,6 +1740,12 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (_importingDataset) {
+      return event is KeyDownEvent || event is KeyRepeatEvent
+          ? KeyEventResult.handled
+          : KeyEventResult.ignored;
+    }
+
     if ((event is! KeyDownEvent && event is! KeyRepeatEvent) ||
         _activeSection != 'label' ||
         _shortcutDialogOpen) {
@@ -1583,6 +1917,8 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       _recentFiles.clear();
       _labelClasses.clear();
       _annotationsByImage.clear();
+      _imageSplits.clear();
+      _importedDataset = null;
       _undoStack.clear();
       _redoStack.clear();
       _activeClassId = null;
@@ -1600,107 +1936,166 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       focusNode: _keyboardFocusNode,
       autofocus: true,
       onKeyEvent: _handleKeyEvent,
-      child: Column(
-        children: [
-          _TopMenuBar(
-            visible: _topMenuVisible,
-            recentFolders: _recentFolders,
-            recentFiles: _recentFiles,
-            languageOptions: _languageOptions,
-            activeLanguageCode: _activeLanguageCode,
-            onOpenFile: () => _openImageFile(),
-            onOpenFolder: () => _openImageFolder(),
-            onOpenRecentFolder: _openImageFolder,
-            onOpenRecentFile: _openRecentFile,
-            onClearRecent: _clearRecentItems,
-            onExit: () => SystemNavigator.pop(),
-            onUndo: _undoAnnotationChange,
-            onRedo: _redoAnnotationChange,
-            onCopy: _copySelectedAnnotation,
-            onPaste: _pasteAnnotation,
-            onShowSettings: _showSettings,
-            onShowHelp: _showKeySettings,
-            onLanguageSelected: _changeLanguage,
-            onPointerEnter: _showTopMenu,
-            onPointerExit: _scheduleTopMenuHide,
-          ),
-          Expanded(
-            child: Row(
+      child: SizedBox.expand(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Column(
               children: [
-                _PrimarySidebar(
-                  activeSection: _activeSection,
-                  collapsed: _sidebarCollapsed,
-                  onCollapseChanged: (value) {
-                    setState(() => _sidebarCollapsed = value);
-                  },
-                  onSectionSelected: (section) {
-                    setState(() => _activeSection = section);
-                  },
+                _TopMenuBar(
+                  visible: _topMenuVisible,
+                  recentFolders: _recentFolders,
+                  recentFiles: _recentFiles,
+                  languageOptions: _languageOptions,
+                  activeLanguageCode: _activeLanguageCode,
+                  onOpenFile: () => _openImageFile(),
+                  onOpenFolder: () => _openImageFolder(),
+                  onOpenRecentFolder: _openImageFolder,
+                  onOpenRecentFile: _openRecentFile,
+                  onClearRecent: _clearRecentItems,
+                  onExit: () => SystemNavigator.pop(),
+                  onImportDataset: _importYoloDataset,
+                  onExportDataset: _showExportDialog,
+                  onUndo: _undoAnnotationChange,
+                  onRedo: _redoAnnotationChange,
+                  onCopy: _copySelectedAnnotation,
+                  onPaste: _pasteAnnotation,
+                  onShowSettings: _showSettings,
+                  onShowHelp: _showKeySettings,
+                  onLanguageSelected: _changeLanguage,
+                  onPointerEnter: _showTopMenu,
+                  onPointerExit: _scheduleTopMenuHide,
+                ),
+                Expanded(
+                  child: Row(
+                    children: [
+                      _PrimarySidebar(
+                        activeSection: _activeSection,
+                        collapsed: _sidebarCollapsed,
+                        onCollapseChanged: (value) {
+                          setState(() => _sidebarCollapsed = value);
+                        },
+                        onSectionSelected: (section) {
+                          setState(() => _activeSection = section);
+                        },
+                      ),
+                      if (labelPage)
+                        _LabelPage(
+                          status: widget.status,
+                          images: _images,
+                          selectedImage: _selectedImage,
+                          selectedImageIndex: _selectedImageIndex,
+                          zoom: _zoom,
+                          activeTool: _activeTool,
+                          activeMode: _activeAnnotationMode,
+                          imageSplit: _selectedImageSplit,
+                          activeClassId: _activeClassId,
+                          labelClasses: _labelClasses,
+                          annotations: _currentAnnotations,
+                          selectedAnnotationId: _selectedAnnotationId,
+                          showClassLabels: _showClassLabels,
+                          onImageSelected: _selectImage,
+                          onImageContextMenu: _showImageContextMenu,
+                          onPointerSignal: _handlePointerSignal,
+                          onToolSelected: _selectTool,
+                          onSelectMode: () => _selectTool('select'),
+                          onModeSelected: _activateAnnotationMode,
+                          onImageSplitChanged: _setSelectedImageSplit,
+                          onEnsureClass: _ensureActiveClass,
+                          onAnnotationCreated: _createAnnotation,
+                          onSegAnnotationCreated: _createSegAnnotation,
+                          onAnnotationSelected: _selectAnnotation,
+                          onAnnotationUpdated: _updateAnnotation,
+                          onAnnotationDeleted: _deleteAnnotation,
+                          onAnnotationDragStarted: _pushAnnotationSnapshot,
+                          onClassSelected: _selectLabelClass,
+                          onClassAdded: () => _addLabelClass(),
+                          onClassEdited: _editLabelClass,
+                          onClassColorChanged: _chooseLabelClassColor,
+                          onClassDeleted: _deleteLabelClass,
+                          onClassReordered: _reorderLabelClass,
+                          onToggleClassLabels: () => setState(
+                            () => _showClassLabels = !_showClassLabels,
+                          ),
+                          onAnnotationClassChanged: _changeAnnotationClass,
+                          onImageDisplaySizeChanged: (size) {
+                            _imageDisplaySize = size;
+                            final key = _selectedImageKey;
+                            if (key != null && size != Size.zero) {
+                              _imageDisplaySizes[key] = size;
+                            }
+                          },
+                        )
+                      else if (_activeSection == 'train')
+                        _TrainPage(settings: _appSettings)
+                      else if (_activeSection == 'crop')
+                        _CropPage(exportPath: _appSettings.exportPath)
+                      else
+                        _DetectVideoPage(
+                          settings: _appSettings,
+                          shortcutConfig: _shortcutConfig,
+                          session: _detectVideoSession,
+                        ),
+                    ],
+                  ),
                 ),
                 if (labelPage)
-                  _LabelPage(
-                    status: widget.status,
-                    images: _images,
-                    selectedImage: _selectedImage,
-                    selectedImageIndex: _selectedImageIndex,
+                  _BottomControls(
                     zoom: _zoom,
-                    activeTool: _activeTool,
-                    activeMode: _activeAnnotationMode,
-                    activeClassId: _activeClassId,
-                    labelClasses: _labelClasses,
-                    annotations: _currentAnnotations,
-                    selectedAnnotationId: _selectedAnnotationId,
-                    showClassLabels: _showClassLabels,
-                    onImageSelected: _selectImage,
-                    onImageContextMenu: _showImageContextMenu,
-                    onPointerSignal: _handlePointerSignal,
-                    onToolSelected: _selectTool,
-                    onSelectMode: () => _selectTool('select'),
-                    onModeSelected: _activateAnnotationMode,
-                    onEnsureClass: _ensureActiveClass,
-                    onAnnotationCreated: _createAnnotation,
-                    onSegAnnotationCreated: _createSegAnnotation,
-                    onAnnotationSelected: _selectAnnotation,
-                    onAnnotationUpdated: _updateAnnotation,
-                    onAnnotationDeleted: _deleteAnnotation,
-                    onAnnotationDragStarted: _pushAnnotationSnapshot,
-                    onClassSelected: _selectLabelClass,
-                    onClassAdded: () => _addLabelClass(),
-                    onClassEdited: _editLabelClass,
-                    onClassColorChanged: _chooseLabelClassColor,
-                    onClassDeleted: _deleteLabelClass,
-                    onClassReordered: _reorderLabelClass,
-                    onToggleClassLabels: () =>
-                        setState(() => _showClassLabels = !_showClassLabels),
-                    onAnnotationClassChanged: _changeAnnotationClass,
-                    onImageDisplaySizeChanged: (size) {
-                      _imageDisplaySize = size;
-                      final key = _selectedImageKey;
-                      if (key != null && size != Size.zero) {
-                        _imageDisplaySizes[key] = size;
-                      }
-                    },
-                  )
-                else if (_activeSection == 'train')
-                  _TrainPage(settings: _appSettings)
-                else if (_activeSection == 'crop')
-                  _CropPage(exportPath: _appSettings.exportPath)
-                else
-                  _DetectVideoPage(settings: _appSettings),
+                    zoomLocked: _zoomLocked,
+                    darkMode: _darkMode,
+                    onZoomChanged: _setZoom,
+                    onToggleZoomLock: _toggleZoomLock,
+                    onToggleThemeMode: _toggleThemeMode,
+                    onOpenKeySettings: _showKeySettings,
+                  ),
               ],
             ),
-          ),
-          if (labelPage)
-            _BottomControls(
-              zoom: _zoom,
-              zoomLocked: _zoomLocked,
-              darkMode: _darkMode,
-              onZoomChanged: _setZoom,
-              onToggleZoomLock: _toggleZoomLock,
-              onToggleThemeMode: _toggleThemeMode,
-              onOpenKeySettings: _showKeySettings,
+            if (_importingDataset)
+              const Positioned.fill(child: _ImportBlockingOverlay()),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ImportBlockingOverlay extends StatelessWidget {
+  const _ImportBlockingOverlay();
+
+  @override
+  Widget build(BuildContext context) {
+    return AbsorbPointer(
+      absorbing: true,
+      child: ColoredBox(
+        color: Colors.white.withValues(alpha: 0.78),
+        child: Center(
+          child: ExcludeSemantics(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 220),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(
+                    width: 42,
+                    height: 42,
+                    child: CircularProgressIndicator(strokeWidth: 3),
+                  ),
+                  const SizedBox(height: 18),
+                  Text(
+                    t('import.waiting'),
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF111827),
+                      fontFamily: _fontFamily,
+                    ),
+                  ),
+                ],
+              ),
             ),
-        ],
+          ),
+        ),
       ),
     );
   }
@@ -1719,6 +2114,8 @@ class _TopMenuBar extends StatelessWidget {
     required this.onOpenRecentFile,
     required this.onClearRecent,
     required this.onExit,
+    required this.onImportDataset,
+    required this.onExportDataset,
     required this.onUndo,
     required this.onRedo,
     required this.onCopy,
@@ -1741,6 +2138,8 @@ class _TopMenuBar extends StatelessWidget {
   final ValueChanged<String> onOpenRecentFile;
   final VoidCallback onClearRecent;
   final VoidCallback onExit;
+  final VoidCallback onImportDataset;
+  final VoidCallback onExportDataset;
   final VoidCallback onUndo;
   final VoidCallback onRedo;
   final VoidCallback onCopy;
@@ -1816,6 +2215,17 @@ class _TopMenuBar extends StatelessWidget {
                       ),
                       SubmenuButton(
                         menuChildren: [
+                          MenuItemButton(
+                            onPressed: onImportDataset,
+                            leadingIcon: const Icon(Icons.upload_file),
+                            child: Text(t('menu.import')),
+                          ),
+                          MenuItemButton(
+                            onPressed: onExportDataset,
+                            leadingIcon: const Icon(Icons.file_download),
+                            child: Text(t('menu.export')),
+                          ),
+                          const Divider(height: 1),
                           MenuItemButton(
                             onPressed: onUndo,
                             child: Text(t('menu.undo')),
@@ -2322,6 +2732,414 @@ class _CanvasGridPainter extends CustomPainter {
       oldDelegate.darkMode != darkMode;
 }
 
+class _ParsedYoloData {
+  const _ParsedYoloData({
+    required this.rootPath,
+    required this.names,
+    required this.splitSources,
+    required this.splitImageDirs,
+  });
+
+  final String rootPath;
+  final List<String> names;
+  final Map<String, List<String>> splitSources;
+  final Map<String, String> splitImageDirs;
+}
+
+class _ImportedDataset {
+  const _ImportedDataset({
+    required this.dataYamlPath,
+    required this.rootPath,
+    required this.splitImageDirs,
+  });
+
+  final String dataYamlPath;
+  final String rootPath;
+  final Map<String, String> splitImageDirs;
+
+  String imageDirForSplit(String split) {
+    return splitImageDirs[split] ?? _joinPath(rootPath, 'images\\$split');
+  }
+
+  String labelDirForSplit(String split) {
+    return _labelDirForImageDir(imageDirForSplit(split), rootPath, split);
+  }
+}
+
+class _DatasetImageEntry {
+  const _DatasetImageEntry({required this.path, required this.split});
+
+  final String path;
+  final String split;
+}
+
+_ParsedYoloData _parseImportYoloDataYaml(String yamlPath) {
+  final lines = File(yamlPath).readAsLinesSync();
+  final yamlDir = _directoryName(yamlPath);
+  final pathValue = _importYamlScalar(lines, 'path');
+  final rootPath = pathValue == null || pathValue.isEmpty
+      ? yamlDir
+      : _resolveImportDatasetPath(yamlDir, pathValue);
+  final splitSources = <String, List<String>>{};
+  final splitImageDirs = <String, String>{};
+  for (final split in _datasetSplits) {
+    final sources = _importYamlStringValues(lines, split);
+    splitSources[split] = sources;
+    if (sources.isNotEmpty) {
+      splitImageDirs[split] = _firstImageDirectoryForSplit(
+        rootPath,
+        split,
+        sources,
+      );
+    }
+  }
+  return _ParsedYoloData(
+    rootPath: rootPath,
+    names: _importYamlNames(lines),
+    splitSources: splitSources,
+    splitImageDirs: splitImageDirs,
+  );
+}
+
+String _datasetYamlContent(
+  _ImportedDataset dataset,
+  Map<String, Set<String>> grouped,
+  List<_LabelClass> labelClasses,
+) {
+  final lines = <String>[
+    'path: ${dataset.rootPath.replaceAll('\\', '/')}',
+    'train: ${_pathForDataYaml(dataset.rootPath, dataset.imageDirForSplit('train'))}',
+    'val: ${_pathForDataYaml(dataset.rootPath, dataset.imageDirForSplit('val'))}',
+    if ((grouped['test']?.isNotEmpty ?? false) ||
+        dataset.splitImageDirs.containsKey('test'))
+      'test: ${_pathForDataYaml(dataset.rootPath, dataset.imageDirForSplit('test'))}',
+    '',
+    'nc: ${labelClasses.length}',
+    'names:',
+    for (var i = 0; i < labelClasses.length; i++)
+      '  $i: ${labelClasses[i].name}',
+  ];
+  return lines.join('\n');
+}
+
+List<_DatasetImageEntry> _dedupeDatasetEntries(
+  List<_DatasetImageEntry> entries,
+) {
+  final seen = <String>{};
+  final result = <_DatasetImageEntry>[];
+  for (final entry in entries) {
+    if (seen.add(_pathKey(entry.path))) {
+      result.add(entry);
+    }
+  }
+  return result;
+}
+
+List<String> _imagePathsFromDatasetSource(String rootPath, String source) {
+  final resolved = _resolveImportDatasetSourcePath(rootPath, source);
+  final directory = Directory(resolved);
+  if (directory.existsSync()) {
+    final paths = directory
+        .listSync(recursive: true)
+        .whereType<File>()
+        .map<String>((file) => file.path)
+        .where((path) => _isImagePath(path))
+        .toList();
+    paths.sort(_naturalPathCompare);
+    return paths;
+  }
+
+  final file = File(resolved);
+  if (!file.existsSync()) {
+    return [];
+  }
+  if (_isImagePath(file.path)) {
+    return [file.path];
+  }
+
+  final parent = _directoryName(file.path);
+  final paths = file
+      .readAsLinesSync()
+      .map((line) => line.trim())
+      .where((line) => line.isNotEmpty && !line.startsWith('#'))
+      .map<String>((line) => _resolveImportDatasetSourcePath(parent, line))
+      .where((path) => _isImagePath(path))
+      .where((path) => File(path).existsSync())
+      .toList();
+  paths.sort(_naturalPathCompare);
+  return paths;
+}
+
+_AnnotationRegion? _annotationFromYoloValues({
+  required String id,
+  required List<double> values,
+  required int classId,
+  required Size imageSize,
+}) {
+  final w = imageSize.width;
+  final h = imageSize.height;
+  if (w <= 0 || h <= 0) {
+    return null;
+  }
+  if (values.length == 4) {
+    final cx = values[0] * w;
+    final cy = values[1] * h;
+    final bw = values[2] * w;
+    final bh = values[3] * h;
+    return _AnnotationRegion.fromRect(
+      id: id,
+      mode: _AnnotationMode.hbb,
+      rect: Rect.fromCenter(center: Offset(cx, cy), width: bw, height: bh),
+      classId: classId,
+    ).clampedTo(Rect.fromLTWH(0, 0, w, h));
+  }
+  if (values.length == 8) {
+    final points = _normalizedPairsToPoints(values, imageSize);
+    final width = (points[1] - points[0]).distance;
+    final height = (points[2] - points[1]).distance;
+    if (width <= 0 || height <= 0) {
+      return null;
+    }
+    final center = points.reduce((a, b) => a + b) / points.length.toDouble();
+    final rotation =
+        math.atan2(points[1].dy - points[0].dy, points[1].dx - points[0].dx) *
+        180 /
+        math.pi;
+    return _AnnotationRegion(
+      id: id,
+      mode: _AnnotationMode.obb,
+      rect: Rect.fromCenter(center: center, width: width, height: height),
+      classId: classId,
+      rotationDegrees: rotation,
+    ).clampObbToImage(imageSize);
+  }
+  if (values.length >= 6 && values.length.isEven) {
+    final points = _normalizedPairsToPoints(values, imageSize);
+    final xs = points.map((point) => point.dx);
+    final ys = points.map((point) => point.dy);
+    final bounds = Rect.fromLTRB(
+      xs.reduce(math.min),
+      ys.reduce(math.min),
+      xs.reduce(math.max),
+      ys.reduce(math.max),
+    );
+    return _AnnotationRegion(
+      id: id,
+      mode: _AnnotationMode.seg,
+      rect: bounds,
+      classId: classId,
+      points: [
+        for (final point in points)
+          _clampOffset(point, Rect.fromLTWH(0, 0, w, h)),
+      ],
+    );
+  }
+  return null;
+}
+
+List<Offset> _normalizedPairsToPoints(List<double> values, Size imageSize) {
+  return [
+    for (var i = 0; i + 1 < values.length; i += 2)
+      Offset(
+        (values[i] * imageSize.width).clamp(0.0, imageSize.width).toDouble(),
+        (values[i + 1] * imageSize.height)
+            .clamp(0.0, imageSize.height)
+            .toDouble(),
+      ),
+  ];
+}
+
+String _labelPathForImagePath(String imagePath) {
+  final normalized = imagePath.replaceAll('\\', '/');
+  final parts = normalized.split('/');
+  for (var i = parts.length - 2; i >= 0; i--) {
+    if (parts[i].toLowerCase() == 'images') {
+      parts[i] = 'labels';
+      return _replaceExtension(parts.join('\\'), '.txt');
+    }
+  }
+  return _joinPath(
+    _directoryName(imagePath),
+    '${_baseNameWithoutExtension(imagePath)}.txt',
+  );
+}
+
+String _labelDirForImageDir(String imageDir, String rootPath, String split) {
+  final normalized = imageDir.replaceAll('\\', '/');
+  final parts = normalized.split('/');
+  for (var i = parts.length - 1; i >= 0; i--) {
+    if (parts[i].toLowerCase() == 'images') {
+      parts[i] = 'labels';
+      return parts.join('\\');
+    }
+  }
+  return _joinPath(rootPath, 'labels\\$split');
+}
+
+String _firstImageDirectoryForSplit(
+  String rootPath,
+  String split,
+  List<String> sources,
+) {
+  for (final source in sources) {
+    final resolved = _resolveImportDatasetSourcePath(rootPath, source);
+    if (Directory(resolved).existsSync()) {
+      return resolved;
+    }
+  }
+  return _joinPath(rootPath, 'images\\$split');
+}
+
+String? _importYamlScalar(List<String> lines, String key) {
+  for (final rawLine in lines) {
+    final line = _stripImportYamlComment(rawLine).trimRight();
+    if (!line.startsWith('$key:')) {
+      continue;
+    }
+    final value = line.substring(key.length + 1).trim();
+    return value.isEmpty ? null : _unquoteImportYamlValue(value);
+  }
+  return null;
+}
+
+List<String> _importYamlStringValues(List<String> lines, String key) {
+  for (var i = 0; i < lines.length; i++) {
+    final raw = _stripImportYamlComment(lines[i]);
+    final line = raw.trimRight();
+    final trimmed = line.trimLeft();
+    if (!trimmed.startsWith('$key:')) {
+      continue;
+    }
+    final value = trimmed.substring(key.length + 1).trim();
+    if (value.isNotEmpty) {
+      return _parseImportYamlValueList(value);
+    }
+    final result = <String>[];
+    for (var j = i + 1; j < lines.length; j++) {
+      final childRaw = _stripImportYamlComment(lines[j]);
+      if (childRaw.trim().isEmpty) {
+        continue;
+      }
+      if (!_hasImportYamlIndent(childRaw)) {
+        break;
+      }
+      final child = childRaw.trim();
+      if (child.startsWith('-')) {
+        final item = child.substring(1).trim();
+        if (item.isNotEmpty) {
+          result.add(_unquoteImportYamlValue(item));
+        }
+      }
+    }
+    return result;
+  }
+  return const [];
+}
+
+List<String> _importYamlNames(List<String> lines) {
+  for (var i = 0; i < lines.length; i++) {
+    final raw = _stripImportYamlComment(lines[i]);
+    final trimmed = raw.trimLeft();
+    if (!trimmed.startsWith('names:')) {
+      continue;
+    }
+    final value = trimmed.substring('names:'.length).trim();
+    if (value.isNotEmpty) {
+      return _parseImportYamlValueList(value);
+    }
+    final byIndex = <int, String>{};
+    final list = <String>[];
+    for (var j = i + 1; j < lines.length; j++) {
+      final childRaw = _stripImportYamlComment(lines[j]);
+      if (childRaw.trim().isEmpty) {
+        continue;
+      }
+      if (!_hasImportYamlIndent(childRaw)) {
+        break;
+      }
+      final child = childRaw.trim();
+      if (child.startsWith('-')) {
+        list.add(_unquoteImportYamlValue(child.substring(1).trim()));
+        continue;
+      }
+      final colon = child.indexOf(':');
+      if (colon > 0) {
+        final index = int.tryParse(child.substring(0, colon).trim());
+        final name = _unquoteImportYamlValue(child.substring(colon + 1).trim());
+        if (index != null && name.isNotEmpty) {
+          byIndex[index] = name;
+        }
+      }
+    }
+    if (byIndex.isNotEmpty) {
+      final maxIndex = byIndex.keys.reduce(math.max);
+      return [
+        for (var index = 0; index <= maxIndex; index++)
+          byIndex[index] ?? 'class_$index',
+      ];
+    }
+    return list;
+  }
+  return const [];
+}
+
+List<String> _parseImportYamlValueList(String value) {
+  final trimmed = value.trim();
+  if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+    final content = trimmed.substring(1, trimmed.length - 1);
+    return content
+        .split(',')
+        .map((item) => _unquoteImportYamlValue(item.trim()))
+        .where((item) => item.isNotEmpty)
+        .toList();
+  }
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    final content = trimmed.substring(1, trimmed.length - 1);
+    final indexed = <int, String>{};
+    for (final pair in content.split(',')) {
+      final colon = pair.indexOf(':');
+      if (colon < 0) {
+        continue;
+      }
+      final index = int.tryParse(pair.substring(0, colon).trim());
+      final name = _unquoteImportYamlValue(pair.substring(colon + 1).trim());
+      if (index != null && name.isNotEmpty) {
+        indexed[index] = name;
+      }
+    }
+    if (indexed.isEmpty) {
+      return const [];
+    }
+    final maxIndex = indexed.keys.reduce(math.max);
+    return [
+      for (var index = 0; index <= maxIndex; index++)
+        indexed[index] ?? 'class_$index',
+    ];
+  }
+  return [_unquoteImportYamlValue(trimmed)];
+}
+
+String _stripImportYamlComment(String line) {
+  final index = line.indexOf('#');
+  return index < 0 ? line : line.substring(0, index);
+}
+
+bool _hasImportYamlIndent(String line) {
+  return line.startsWith(' ') || line.startsWith('\t');
+}
+
+String _unquoteImportYamlValue(String value) {
+  final trimmed = value.trim();
+  if (trimmed.length >= 2) {
+    final first = trimmed[0];
+    final last = trimmed[trimmed.length - 1];
+    if ((first == '"' && last == '"') || (first == "'" && last == "'")) {
+      return trimmed.substring(1, trimmed.length - 1);
+    }
+  }
+  return trimmed;
+}
+
 List<String> _imageFilesInDirectory(String folderPath) {
   final directory = Directory(folderPath);
   if (!directory.existsSync()) {
@@ -2449,6 +3267,104 @@ String _fileName(String path) {
   return slashIndex < 0 ? normalized : normalized.substring(slashIndex + 1);
 }
 
+String _directoryName(String path) {
+  final normalized = path.replaceAll('\\', '/');
+  final slashIndex = normalized.lastIndexOf('/');
+  if (slashIndex < 0) {
+    return '.';
+  }
+  return normalized.substring(0, slashIndex).replaceAll('/', '\\');
+}
+
+String _baseNameWithoutExtension(String path) {
+  final name = _fileName(path);
+  final dotIndex = name.lastIndexOf('.');
+  return dotIndex < 0 ? name : name.substring(0, dotIndex);
+}
+
+String _replaceExtension(String path, String extension) {
+  final dotIndex = path.lastIndexOf('.');
+  if (dotIndex < 0) {
+    return '$path$extension';
+  }
+  return path.substring(0, dotIndex) + extension;
+}
+
+String _resolveImportDatasetPath(String rootPath, String value) {
+  final path = value.replaceAll('/', '\\');
+  if (_isAbsolutePath(path)) {
+    return path;
+  }
+  return _joinPath(rootPath, path);
+}
+
+String _resolveImportDatasetSourcePath(String rootPath, String value) {
+  final direct = _resolveImportDatasetPath(rootPath, value);
+  if (_fileSystemPathExists(direct)) {
+    return direct;
+  }
+
+  final roboflowPath = _resolveRoboflowDatasetSourcePath(rootPath, value);
+  if (roboflowPath != null && _fileSystemPathExists(roboflowPath)) {
+    return roboflowPath;
+  }
+  return direct;
+}
+
+String? _resolveRoboflowDatasetSourcePath(String rootPath, String value) {
+  if (_isAbsolutePath(value)) {
+    return null;
+  }
+  var normalized = value.replaceAll('\\', '/').trim();
+  var strippedAnyParent = false;
+  while (normalized.startsWith('../')) {
+    normalized = normalized.substring(3);
+    strippedAnyParent = true;
+  }
+  if (!strippedAnyParent || normalized.isEmpty) {
+    return null;
+  }
+  return _resolveImportDatasetPath(rootPath, normalized);
+}
+
+bool _fileSystemPathExists(String path) {
+  return Directory(path).existsSync() || File(path).existsSync();
+}
+
+String _pathForDataYaml(String rootPath, String path) {
+  final root = rootPath.replaceAll('/', '\\');
+  final normalized = path.replaceAll('/', '\\');
+  final rootWithSlash = root.endsWith('\\') ? root : '$root\\';
+  if (_pathKey(normalized).startsWith(_pathKey(rootWithSlash))) {
+    return normalized.substring(rootWithSlash.length).replaceAll('\\', '/');
+  }
+  return normalized.replaceAll('\\', '/');
+}
+
+String _joinPath(String left, String right) {
+  final normalizedLeft = left.replaceAll('/', '\\');
+  final normalizedRight = right.replaceAll('/', '\\');
+  if (normalizedLeft.endsWith('\\')) {
+    return '$normalizedLeft$normalizedRight';
+  }
+  return '$normalizedLeft\\$normalizedRight';
+}
+
+bool _isAbsolutePath(String path) {
+  if (path.startsWith('\\\\') || path.startsWith('\\')) {
+    return true;
+  }
+  return path.length >= 3 &&
+      _isAsciiLetter(path.codeUnitAt(0)) &&
+      path.codeUnitAt(1) == 58 &&
+      (path.codeUnitAt(2) == 92 || path.codeUnitAt(2) == 47);
+}
+
+bool _isAsciiLetter(int codeUnit) {
+  return (codeUnit >= 65 && codeUnit <= 90) ||
+      (codeUnit >= 97 && codeUnit <= 122);
+}
+
 String _pathKey(String path) => path.replaceAll('/', '\\').toLowerCase();
 
 List<String> _stringListFromJson(Object? value) {
@@ -2480,6 +3396,11 @@ extension _FirstOrNullExtension<T> on Iterable<T> {
 }
 
 String _keyboardLabel(LogicalKeyboardKey key) {
+  if (key == LogicalKeyboardKey.space) return 'Space';
+  if (key == LogicalKeyboardKey.arrowLeft) return '←';
+  if (key == LogicalKeyboardKey.arrowRight) return '→';
+  if (key == LogicalKeyboardKey.arrowUp) return '↑';
+  if (key == LogicalKeyboardKey.arrowDown) return '↓';
   if (key.keyLabel.isNotEmpty) {
     return key.keyLabel.toUpperCase();
   }

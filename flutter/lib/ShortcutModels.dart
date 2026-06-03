@@ -18,6 +18,9 @@ enum _ShortcutAction {
   rotateObbLeft1,
   rotateObbRight1,
   rotateObbRight5,
+  videoPlayPause,
+  videoRewind,
+  videoFastForward,
 }
 
 extension _ShortcutActionLabel on _ShortcutAction {
@@ -35,6 +38,9 @@ extension _ShortcutActionLabel on _ShortcutAction {
     _ShortcutAction.rotateObbLeft1 => 'shortcut.rotateObbLeft1',
     _ShortcutAction.rotateObbRight1 => 'shortcut.rotateObbRight1',
     _ShortcutAction.rotateObbRight5 => 'shortcut.rotateObbRight5',
+    _ShortcutAction.videoPlayPause => 'shortcut.videoPlayPause',
+    _ShortcutAction.videoRewind => 'shortcut.videoRewind',
+    _ShortcutAction.videoFastForward => 'shortcut.videoFastForward',
   };
 }
 
@@ -126,6 +132,15 @@ class _ShortcutConfig {
       ),
       _ShortcutAction.rotateObbRight5: _ShortcutBinding.fromKey(
         LogicalKeyboardKey.keyV,
+      ),
+      _ShortcutAction.videoPlayPause: _ShortcutBinding.fromKey(
+        LogicalKeyboardKey.space,
+      ),
+      _ShortcutAction.videoRewind: _ShortcutBinding.fromKey(
+        LogicalKeyboardKey.arrowLeft,
+      ),
+      _ShortcutAction.videoFastForward: _ShortcutBinding.fromKey(
+        LogicalKeyboardKey.arrowRight,
       ),
     });
   }

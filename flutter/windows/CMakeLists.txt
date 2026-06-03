@@ -63,58 +63,80 @@ include(flutter/generated_plugins.cmake)
 # run in place. This is done instead of making a separate bundle (as on Linux)
 # so that building and running from within Visual Studio will work.
 set(BUILD_BUNDLE_DIR "$<TARGET_FILE_DIR:${BINARY_NAME}>")
-# Make the "install" step default, as it's required to run.
-set(CMAKE_VS_INCLUDE_INSTALL_TO_DEFAULT_BUILD 1)
+# Runtime files are copied by the custom install script below. Keeping INSTALL
+# out of the default Visual Studio build avoids duplicate runtime copy steps.
+set(CMAKE_VS_INCLUDE_INSTALL_TO_DEFAULT_BUILD 0)
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
   set(CMAKE_INSTALL_PREFIX "${BUILD_BUNDLE_DIR}" CACHE PATH "..." FORCE)
 endif()
 
 set(INSTALL_BUNDLE_DATA_DIR "${CMAKE_INSTALL_PREFIX}/data")
 set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}")
+set(RUNTIME_BUNDLE_DIR "${CMAKE_CURRENT_BINARY_DIR}/runner/\${CMAKE_INSTALL_CONFIG_NAME}")
 
-install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
-  COMPONENT Runtime)
+# Flutter builds the INSTALL target on Windows. Use checked cmake -E copy
+# commands instead of install(FILES), because file(INSTALL) can fail on locked
+# Windows files while trying to reset permissions.
+set(RUNTIME_INSTALL_CODE [=[
+function(runtime_copy)
+  execute_process(COMMAND ${ARGV} RESULT_VARIABLE result)
+  if(NOT result EQUAL 0)
+    string(REPLACE ";" " " command_line "${ARGV}")
+    message(FATAL_ERROR "Runtime copy failed: ${command_line}")
+  endif()
+endfunction()
 
-install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
-  COMPONENT Runtime)
-
-install(FILES "${FLUTTER_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
-  COMPONENT Runtime)
+message(STATUS "Copying runtime files without permission reset.")
+file(MAKE_DIRECTORY "@RUNTIME_BUNDLE_DIR@/data")
+runtime_copy("@CMAKE_COMMAND@" -E copy_if_different
+  "@FLUTTER_ICU_DATA_FILE@"
+  "@RUNTIME_BUNDLE_DIR@/data/icudtl.dat")
+runtime_copy("@CMAKE_COMMAND@" -E copy_if_different
+  "@FLUTTER_LIBRARY@"
+  "@RUNTIME_BUNDLE_DIR@/flutter_windows.dll")
+]=])
+string(CONFIGURE "${RUNTIME_INSTALL_CODE}" RUNTIME_INSTALL_CODE @ONLY)
 
 if(PLUGIN_BUNDLED_LIBRARIES)
-  install(FILES "${PLUGIN_BUNDLED_LIBRARIES}"
-    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
-    COMPONENT Runtime)
+  foreach(PLUGIN_BUNDLED_LIBRARY IN LISTS PLUGIN_BUNDLED_LIBRARIES)
+    string(APPEND RUNTIME_INSTALL_CODE
+      "set(plugin_source \"${PLUGIN_BUNDLED_LIBRARY}\")\n"
+      "get_filename_component(plugin_name \"\${plugin_source}\" NAME)\n"
+      "runtime_copy(\"${CMAKE_COMMAND}\" -E copy_if_different \"\${plugin_source}\" \"${RUNTIME_BUNDLE_DIR}/\${plugin_name}\")\n")
+  endforeach()
 endif()
 
 set(RUST_BRIDGE_RELEASE_DLL "${CMAKE_CURRENT_SOURCE_DIR}/../../target/release/yolo_label_bridge.dll")
 set(RUST_BRIDGE_DEBUG_DLL "${CMAKE_CURRENT_SOURCE_DIR}/../../target/debug/yolo_label_bridge.dll")
-if(EXISTS "${RUST_BRIDGE_RELEASE_DLL}")
-  install(FILES "${RUST_BRIDGE_RELEASE_DLL}"
-    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
-    COMPONENT Runtime)
-elseif(EXISTS "${RUST_BRIDGE_DEBUG_DLL}")
-  install(FILES "${RUST_BRIDGE_DEBUG_DLL}"
-    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
-    COMPONENT Runtime)
+string(APPEND RUNTIME_INSTALL_CODE "
+if(EXISTS \"${RUST_BRIDGE_RELEASE_DLL}\")
+  runtime_copy(\"${CMAKE_COMMAND}\" -E copy_if_different \"${RUST_BRIDGE_RELEASE_DLL}\" \"${RUNTIME_BUNDLE_DIR}/yolo_label_bridge.dll\")
+elseif(EXISTS \"${RUST_BRIDGE_DEBUG_DLL}\")
+  runtime_copy(\"${CMAKE_COMMAND}\" -E copy_if_different \"${RUST_BRIDGE_DEBUG_DLL}\" \"${RUNTIME_BUNDLE_DIR}/yolo_label_bridge.dll\")
 endif()
+")
 
 # Copy the native assets provided by the build.dart from all packages.
 set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/windows/")
-install(DIRECTORY "${NATIVE_ASSETS_DIR}"
-   DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
-   COMPONENT Runtime)
+string(APPEND RUNTIME_INSTALL_CODE "
+if(EXISTS \"${NATIVE_ASSETS_DIR}\")
+  runtime_copy(\"${CMAKE_COMMAND}\" -E copy_directory \"${NATIVE_ASSETS_DIR}\" \"${RUNTIME_BUNDLE_DIR}\")
+endif()
+")
 
 # Fully re-copy the assets directory on each build to avoid having stale files
 # from a previous install.
 set(FLUTTER_ASSET_DIR_NAME "flutter_assets")
-install(CODE "
-  file(REMOVE_RECURSE \"${INSTALL_BUNDLE_DATA_DIR}/${FLUTTER_ASSET_DIR_NAME}\")
-  " COMPONENT Runtime)
-install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
-  DESTINATION "${INSTALL_BUNDLE_DATA_DIR}" COMPONENT Runtime)
+string(APPEND RUNTIME_INSTALL_CODE "
+runtime_copy(\"${CMAKE_COMMAND}\" -E rm -rf \"${RUNTIME_BUNDLE_DIR}/data/${FLUTTER_ASSET_DIR_NAME}\")
+runtime_copy(\"${CMAKE_COMMAND}\" -E copy_directory \"${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}\" \"${RUNTIME_BUNDLE_DIR}/data/${FLUTTER_ASSET_DIR_NAME}\")
+")
 
 # Install the AOT library on non-Debug builds only.
-install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
-  CONFIGURATIONS Profile;Release
-  COMPONENT Runtime)
+string(APPEND RUNTIME_INSTALL_CODE "
+if(EXISTS \"${AOT_LIBRARY}\")
+  runtime_copy(\"${CMAKE_COMMAND}\" -E copy_if_different \"${AOT_LIBRARY}\" \"${RUNTIME_BUNDLE_DIR}/data/app.so\")
+endif()
+")
+
+install(CODE "${RUNTIME_INSTALL_CODE}")

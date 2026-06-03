@@ -54,10 +54,35 @@ class _ExportDialogState extends State<_ExportDialog> {
     super.dispose();
   }
 
+  void _confirm() {
+    final name = _folderNameController.text.trim();
+    Navigator.of(context).pop(
+      _ExportConfig(
+        skipEmpty: _skipEmpty,
+        exportImages: _exportImages,
+        trainRatio: (100 - _valPercent - _testPercent).clamp(0, 100) / 100,
+        valRatio: _valPercent / 100,
+        testRatio: _testPercent / 100,
+        folderName: name.isEmpty ? 'dataset' : name,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final trainPercent = (100 - _valPercent - _testPercent).clamp(0, 100);
-    return AlertDialog(
+    return Focus(
+      autofocus: true,
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent &&
+            (event.logicalKey == LogicalKeyboardKey.enter ||
+                event.logicalKey == LogicalKeyboardKey.numpadEnter)) {
+          _confirm();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: AlertDialog(
       title: Text(t('export.title')),
       content: SizedBox(
         width: 480,
@@ -141,22 +166,11 @@ class _ExportDialogState extends State<_ExportDialog> {
           child: Text(t('action.cancel')),
         ),
         FilledButton(
-          onPressed: () {
-            final name = _folderNameController.text.trim();
-            Navigator.of(context).pop(
-              _ExportConfig(
-                skipEmpty: _skipEmpty,
-                exportImages: _exportImages,
-                trainRatio: trainPercent / 100,
-                valRatio: _valPercent / 100,
-                testRatio: _testPercent / 100,
-                folderName: name.isEmpty ? 'dataset' : name,
-              ),
-            );
-          },
+          onPressed: _confirm,
           child: Text(t('export.export')),
         ),
       ],
+      ),
     );
   }
 }
