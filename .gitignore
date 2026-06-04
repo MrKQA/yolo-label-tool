@@ -16,6 +16,9 @@ ffmpeg/
 # models
 models/
 
+#runs
+Runs/
+
 # OS
 logs/
 Thumbs.db
