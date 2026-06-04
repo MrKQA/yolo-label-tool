@@ -25,6 +25,86 @@ class _HistoryConfig {
 
 /// 软件设置，先保存 Python 环境和训练结果路径。
 /// Application settings for Python environment and training output path.
+enum _TrainingHistoryAction { start, resume, stop }
+
+class _TrainingHistoryEntry {
+  const _TrainingHistoryEntry({
+    required this.action,
+    required this.timestamp,
+    required this.modelPath,
+    required this.datasetPath,
+    required this.epoch,
+    required this.targetEpochs,
+    required this.resume,
+  });
+
+  final _TrainingHistoryAction action;
+  final DateTime timestamp;
+  final String modelPath;
+  final String datasetPath;
+  final int epoch;
+  final int targetEpochs;
+  final bool resume;
+
+  Map<String, Object> toJson() => {
+    'action': action.name,
+    'timestamp': timestamp.toIso8601String(),
+    'modelPath': modelPath,
+    'datasetPath': datasetPath,
+    'epoch': epoch,
+    'targetEpochs': targetEpochs,
+    'resume': resume,
+  };
+
+  static _TrainingHistoryEntry? fromJson(Object? value) {
+    if (value is! Map) {
+      return null;
+    }
+    final action = _TrainingHistoryAction.values
+        .where((item) => item.name == value['action'])
+        .firstOrNullValue;
+    final timestamp = DateTime.tryParse('${value['timestamp'] ?? ''}');
+    if (action == null || timestamp == null) {
+      return null;
+    }
+    return _TrainingHistoryEntry(
+      action: action,
+      timestamp: timestamp,
+      modelPath: value['modelPath'] is String ? value['modelPath'] as String : '',
+      datasetPath: value['datasetPath'] is String
+          ? value['datasetPath'] as String
+          : '',
+      epoch: value['epoch'] is num ? (value['epoch'] as num).round() : 0,
+      targetEpochs: value['targetEpochs'] is num
+          ? (value['targetEpochs'] as num).round()
+          : 0,
+      resume: value['resume'] == true,
+    );
+  }
+}
+
+class _TrainingHistoryConfig {
+  const _TrainingHistoryConfig({required this.entries});
+
+  final List<_TrainingHistoryEntry> entries;
+
+  Map<String, Object> toJson() => {
+    'entries': [for (final entry in entries.take(40)) entry.toJson()],
+  };
+
+  static _TrainingHistoryConfig fromJson(Object? value) {
+    if (value is! Map || value['entries'] is! List) {
+      return const _TrainingHistoryConfig(entries: []);
+    }
+    final entries = (value['entries'] as List)
+        .map(_TrainingHistoryEntry.fromJson)
+        .whereType<_TrainingHistoryEntry>()
+        .take(40)
+        .toList();
+    return _TrainingHistoryConfig(entries: entries);
+  }
+}
+
 class _AppSettings {
   const _AppSettings({
     required this.pythonPath,
@@ -99,6 +179,8 @@ class _ConfigStore {
   static Directory get defaultDatasetsDirectory =>
       Directory('${projectDirectory.path}\\datasets');
 
+  static Directory get logsDirectory => Directory('${projectDirectory.path}\\logs');
+
   static Directory get configDirectory {
     final homeDirectory =
         Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'];
@@ -117,6 +199,9 @@ class _ConfigStore {
   static File get _settingsFile =>
       File('${configDirectory.path}\\$_settingsFileName');
 
+  static File get _trainingHistoryFile =>
+      File('${configDirectory.path}\\$_trainingHistoryFileName');
+
   static _HistoryConfig loadHistory() {
     return _HistoryConfig.fromJson(_readJson(_historyFile));
   }
@@ -129,6 +214,10 @@ class _ConfigStore {
     return _AppSettings.fromJson(_readJson(_settingsFile));
   }
 
+  static _TrainingHistoryConfig loadTrainingHistory() {
+    return _TrainingHistoryConfig.fromJson(_readJson(_trainingHistoryFile));
+  }
+
   static void saveHistory(_HistoryConfig value) {
     _writeJson(_historyFile, value.toJson());
   }
@@ -139,6 +228,10 @@ class _ConfigStore {
 
   static void saveSettings(_AppSettings value) {
     _writeJson(_settingsFile, value.toJson());
+  }
+
+  static void saveTrainingHistory(_TrainingHistoryConfig value) {
+    _writeJson(_trainingHistoryFile, value.toJson());
   }
 
   static int cacheSizeInBytes() {

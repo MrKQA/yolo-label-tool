@@ -3,11 +3,213 @@
 
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
+import 'api/training_mod.dart';
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
+// These functions are ignored because they are not marked as `pub`: `count_images_with_prefix`, `decode_video_frame_with_args`, `detect_best_hardware_decoder`, `detect_best_nvidia_gpu`, `ensure_existing_video`, `error_json`, `ffmpeg_hwaccels`, `find_ffmpeg_near_project`, `find_ffmpeg_on_path`, `find_ffmpeg`, `find_ffprobe_near_project`, `find_ffprobe_next_to_ffmpeg`, `find_ffprobe_on_path`, `find_ffprobe`, `finite_json_number`, `has_intel_gpu`, `jpeg_quality_to_qscale`, `json_escape`, `parse_frame_rate`, `parse_nvidia_gpu_line`, `parse_positive_f64`, `probe_video_playback_info`, `sanitize_file_stem`, `sanitize_output_dir`, `string_from_ffi`, `vec_into_ffi_buffer`, `video_playback_info_json`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `HardwareDecoder`, `NvidiaGpuInfo`, `RustLabelByteBuffer`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These functions are ignored (category: IgnoreBecauseExplicitAttribute): `rust_label_decode_video_frame_png`, `rust_label_free_byte_buffer`, `rust_label_video_info_json`
+
+/// Smoke-test function exposed to Flutter through flutter_rust_bridge.
 Future<String> rustGreeting({required String name}) =>
     RustLib.instance.api.crateApiRustGreeting(name: name);
 
+/// Annotation modes planned for the first version of the labeling tool.
 Future<List<String>> supportedAnnotationModes() =>
     RustLib.instance.api.crateApiSupportedAnnotationModes();
+
+/// Check whether an FFmpeg executable can be found by the backend.
+Future<String?> ffmpegPath() => RustLib.instance.api.crateApiFfmpegPath();
+
+/// Read video metadata through Rust + FFprobe for the browse/player page.
+Future<VideoPlaybackInfo> videoPlaybackInfo({required String videoPath}) =>
+    RustLib.instance.api.crateApiVideoPlaybackInfo(videoPath: videoPath);
+
+/// Decode one video frame through Rust + FFmpeg.
+///
+/// The returned bytes are PNG data, so Flutter can display them with
+/// `Image.memory` without doing native pixel-format conversion on the Dart side.
+Future<DecodedVideoFrame> decodeVideoFrame({
+  required String videoPath,
+  required double timestampSeconds,
+  required int maxWidth,
+}) => RustLib.instance.api.crateApiDecodeVideoFrame(
+  videoPath: videoPath,
+  timestampSeconds: timestampSeconds,
+  maxWidth: maxWidth,
+);
+
+/// Extract frames from videos with FFmpeg.
+///
+/// `frame_interval` means "keep one frame every N input frames". A value of 1
+/// exports every frame. When `lossless` is true, PNG files are generated;
+/// otherwise JPEG files are generated with an FFmpeg qscale derived from
+/// `image_quality`.
+Future<FrameExtractionResult> extractVideoFrames({
+  required List<String> videoPaths,
+  required String outputRoot,
+  required String folderName,
+  required int frameInterval,
+  required int imageQuality,
+  required bool lossless,
+}) => RustLib.instance.api.crateApiExtractVideoFrames(
+  videoPaths: videoPaths,
+  outputRoot: outputRoot,
+  folderName: folderName,
+  frameInterval: frameInterval,
+  imageQuality: imageQuality,
+  lossless: lossless,
+);
+
+/// Start a YOLO training run via Python/Ultralytics.
+///
+/// Spawns a Python subprocess that runs `model.train(...)`.
+/// Returns the experiment run directory path on success.
+Future<String> startYoloTraining({
+  required String pythonPath,
+  required String modelPath,
+  required String dataYamlPath,
+  required String projectDir,
+  required String experimentName,
+  required int epochs,
+  required int imgsz,
+  required String batch,
+  required String device,
+  required double lr0,
+  required double momentum,
+  required double hsvS,
+  required double hsvV,
+  required double translate,
+  required double scale,
+  required double shear,
+  required double flipud,
+  required double fliplr,
+  required double degrees,
+  required int workers,
+  required bool amp,
+  required bool resume,
+  required double clsPw,
+}) => RustLib.instance.api.crateApiStartYoloTraining(
+  pythonPath: pythonPath,
+  modelPath: modelPath,
+  dataYamlPath: dataYamlPath,
+  projectDir: projectDir,
+  experimentName: experimentName,
+  epochs: epochs,
+  imgsz: imgsz,
+  batch: batch,
+  device: device,
+  lr0: lr0,
+  momentum: momentum,
+  hsvS: hsvS,
+  hsvV: hsvV,
+  translate: translate,
+  scale: scale,
+  shear: shear,
+  flipud: flipud,
+  fliplr: fliplr,
+  degrees: degrees,
+  workers: workers,
+  amp: amp,
+  resume: resume,
+  clsPw: clsPw,
+);
+
+/// Poll training progress from the results.csv written by Ultralytics.
+Future<TrainingProgress?> pollYoloTrainingProgress() =>
+    RustLib.instance.api.crateApiPollYoloTrainingProgress();
+
+/// Stop the active YOLO training process.
+Future<String> stopYoloTraining() => RustLib.instance.api.crateApiStopYoloTraining();
+
+/// One decoded video frame returned as PNG bytes.
+class DecodedVideoFrame {
+  final double timestampSeconds;
+  final Uint8List pngBytes;
+  final String decoderLabel;
+
+  const DecodedVideoFrame({
+    required this.timestampSeconds,
+    required this.pngBytes,
+    required this.decoderLabel,
+  });
+
+  @override
+  int get hashCode => timestampSeconds.hashCode ^ pngBytes.hashCode ^ decoderLabel.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DecodedVideoFrame &&
+          runtimeType == other.runtimeType &&
+          timestampSeconds == other.timestampSeconds &&
+          pngBytes == other.pngBytes &&
+          decoderLabel == other.decoderLabel;
+}
+
+/// Result returned after FFmpeg extracts still images from one or more videos.
+class FrameExtractionResult {
+  final String ffmpegPath;
+  final String outputDir;
+  final int frameCount;
+
+  const FrameExtractionResult({
+    required this.ffmpegPath,
+    required this.outputDir,
+    required this.frameCount,
+  });
+
+  @override
+  int get hashCode => ffmpegPath.hashCode ^ outputDir.hashCode ^ frameCount.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FrameExtractionResult &&
+          runtimeType == other.runtimeType &&
+          ffmpegPath == other.ffmpegPath &&
+          outputDir == other.outputDir &&
+          frameCount == other.frameCount;
+}
+
+/// Metadata needed by the Flutter video browser/player.
+class VideoPlaybackInfo {
+  final int width;
+  final int height;
+  final double durationSeconds;
+  final double fps;
+  final int frameCount;
+  final String decoderLabel;
+
+  const VideoPlaybackInfo({
+    required this.width,
+    required this.height,
+    required this.durationSeconds,
+    required this.fps,
+    required this.frameCount,
+    required this.decoderLabel,
+  });
+
+  @override
+  int get hashCode =>
+      width.hashCode ^
+      height.hashCode ^
+      durationSeconds.hashCode ^
+      fps.hashCode ^
+      frameCount.hashCode ^
+      decoderLabel.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is VideoPlaybackInfo &&
+          runtimeType == other.runtimeType &&
+          width == other.width &&
+          height == other.height &&
+          durationSeconds == other.durationSeconds &&
+          fps == other.fps &&
+          frameCount == other.frameCount &&
+          decoderLabel == other.decoderLabel;
+}

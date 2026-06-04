@@ -4,11 +4,11 @@
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
 import 'api.dart';
+import 'api/training_mod.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'frb_generated.dart';
-import 'frb_generated.io.dart'
-    if (dart.library.js_interop) 'frb_generated.web.dart';
+import 'frb_generated.io.dart' if (dart.library.js_interop) 'frb_generated.web.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 /// Main entrypoint of the Rust API
@@ -46,12 +46,10 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   static void dispose() => instance.disposeImpl();
 
   @override
-  ApiImplConstructor<RustLibApiImpl, RustLibWire> get apiImplConstructor =>
-      RustLibApiImpl.new;
+  ApiImplConstructor<RustLibApiImpl, RustLibWire> get apiImplConstructor => RustLibApiImpl.new;
 
   @override
-  WireConstructor<RustLibWire> get wireConstructor =>
-      RustLibWire.fromExternalLibrary;
+  WireConstructor<RustLibWire> get wireConstructor => RustLibWire.fromExternalLibrary;
 
   @override
   Future<void> executeRustInitializers() async {}
@@ -64,20 +62,74 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => -556608953;
+  int get rustContentHash => -547362702;
 
-  static const kDefaultExternalLibraryLoaderConfig =
-      ExternalLibraryLoaderConfig(
-        stem: 'yolo_label_bridge',
-        ioDirectory: '../target/release/',
-        webPrefix: 'pkg/',
-      );
+  static const kDefaultExternalLibraryLoaderConfig = ExternalLibraryLoaderConfig(
+    stem: 'yolo_label_bridge',
+    ioDirectory: '../target/release/',
+    webPrefix: 'pkg/',
+  );
 }
 
 abstract class RustLibApi extends BaseApi {
+  Future<DecodedVideoFrame> crateApiDecodeVideoFrame({
+    required String videoPath,
+    required double timestampSeconds,
+    required int maxWidth,
+  });
+
+  Future<FrameExtractionResult> crateApiExtractVideoFrames({
+    required List<String> videoPaths,
+    required String outputRoot,
+    required String folderName,
+    required int frameInterval,
+    required int imageQuality,
+    required bool lossless,
+  });
+
+  Future<String?> crateApiFfmpegPath();
+
+  Future<TrainingProgress?> crateApiTrainingModPollTrainingProgress();
+
+  Future<TrainingProgress?> crateApiPollYoloTrainingProgress();
+
   Future<String> crateApiRustGreeting({required String name});
 
+  Future<String> crateApiTrainingModStartTraining({required TrainingConfig config});
+
+  Future<String> crateApiStartYoloTraining({
+    required String pythonPath,
+    required String modelPath,
+    required String dataYamlPath,
+    required String projectDir,
+    required String experimentName,
+    required int epochs,
+    required int imgsz,
+    required String batch,
+    required String device,
+    required double lr0,
+    required double momentum,
+    required double hsvS,
+    required double hsvV,
+    required double translate,
+    required double scale,
+    required double shear,
+    required double flipud,
+    required double fliplr,
+    required double degrees,
+    required int workers,
+    required bool amp,
+    required bool resume,
+    required double clsPw,
+  });
+
+  Future<String> crateApiTrainingModStopTraining();
+
+  Future<String> crateApiStopYoloTraining();
+
   Future<List<String>> crateApiSupportedAnnotationModes();
+
+  Future<VideoPlaybackInfo> crateApiVideoPlaybackInfo({required String videoPath});
 }
 
 class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
@@ -89,23 +141,153 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   });
 
   @override
+  Future<DecodedVideoFrame> crateApiDecodeVideoFrame({
+    required String videoPath,
+    required double timestampSeconds,
+    required int maxWidth,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(videoPath, serializer);
+          sse_encode_f_64(timestampSeconds, serializer);
+          sse_encode_u_32(maxWidth, serializer);
+          pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 1, port: port_);
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_decoded_video_frame,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiDecodeVideoFrameConstMeta,
+        argValues: [videoPath, timestampSeconds, maxWidth],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiDecodeVideoFrameConstMeta => const TaskConstMeta(
+    debugName: "decode_video_frame",
+    argNames: ["videoPath", "timestampSeconds", "maxWidth"],
+  );
+
+  @override
+  Future<FrameExtractionResult> crateApiExtractVideoFrames({
+    required List<String> videoPaths,
+    required String outputRoot,
+    required String folderName,
+    required int frameInterval,
+    required int imageQuality,
+    required bool lossless,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_list_String(videoPaths, serializer);
+          sse_encode_String(outputRoot, serializer);
+          sse_encode_String(folderName, serializer);
+          sse_encode_u_32(frameInterval, serializer);
+          sse_encode_u_8(imageQuality, serializer);
+          sse_encode_bool(lossless, serializer);
+          pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 2, port: port_);
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_frame_extraction_result,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiExtractVideoFramesConstMeta,
+        argValues: [videoPaths, outputRoot, folderName, frameInterval, imageQuality, lossless],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiExtractVideoFramesConstMeta => const TaskConstMeta(
+    debugName: "extract_video_frames",
+    argNames: [
+      "videoPaths",
+      "outputRoot",
+      "folderName",
+      "frameInterval",
+      "imageQuality",
+      "lossless",
+    ],
+  );
+
+  @override
+  Future<String?> crateApiFfmpegPath() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 3, port: port_);
+        },
+        codec: SseCodec(decodeSuccessData: sse_decode_opt_String, decodeErrorData: null),
+        constMeta: kCrateApiFfmpegPathConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiFfmpegPathConstMeta =>
+      const TaskConstMeta(debugName: "ffmpeg_path", argNames: []);
+
+  @override
+  Future<TrainingProgress?> crateApiTrainingModPollTrainingProgress() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 4, port: port_);
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_opt_box_autoadd_training_progress,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiTrainingModPollTrainingProgressConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiTrainingModPollTrainingProgressConstMeta =>
+      const TaskConstMeta(debugName: "poll_training_progress", argNames: []);
+
+  @override
+  Future<TrainingProgress?> crateApiPollYoloTrainingProgress() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 5, port: port_);
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_opt_box_autoadd_training_progress,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiPollYoloTrainingProgressConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiPollYoloTrainingProgressConstMeta =>
+      const TaskConstMeta(debugName: "poll_yolo_training_progress", argNames: []);
+
+  @override
   Future<String> crateApiRustGreeting({required String name}) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(name, serializer);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 1,
-            port: port_,
-          );
+          pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 6, port: port_);
         },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_String,
-          decodeErrorData: null,
-        ),
+        codec: SseCodec(decodeSuccessData: sse_decode_String, decodeErrorData: null),
         constMeta: kCrateApiRustGreetingConstMeta,
         argValues: [name],
         apiImpl: this,
@@ -117,22 +299,188 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "rust_greeting", argNames: ["name"]);
 
   @override
+  Future<String> crateApiTrainingModStartTraining({required TrainingConfig config}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_box_autoadd_training_config(config, serializer);
+          pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 7, port: port_);
+        },
+        codec: SseCodec(decodeSuccessData: sse_decode_String, decodeErrorData: sse_decode_String),
+        constMeta: kCrateApiTrainingModStartTrainingConstMeta,
+        argValues: [config],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiTrainingModStartTrainingConstMeta =>
+      const TaskConstMeta(debugName: "start_training", argNames: ["config"]);
+
+  @override
+  Future<String> crateApiStartYoloTraining({
+    required String pythonPath,
+    required String modelPath,
+    required String dataYamlPath,
+    required String projectDir,
+    required String experimentName,
+    required int epochs,
+    required int imgsz,
+    required String batch,
+    required String device,
+    required double lr0,
+    required double momentum,
+    required double hsvS,
+    required double hsvV,
+    required double translate,
+    required double scale,
+    required double shear,
+    required double flipud,
+    required double fliplr,
+    required double degrees,
+    required int workers,
+    required bool amp,
+    required bool resume,
+    required double clsPw,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(pythonPath, serializer);
+          sse_encode_String(modelPath, serializer);
+          sse_encode_String(dataYamlPath, serializer);
+          sse_encode_String(projectDir, serializer);
+          sse_encode_String(experimentName, serializer);
+          sse_encode_u_32(epochs, serializer);
+          sse_encode_u_32(imgsz, serializer);
+          sse_encode_String(batch, serializer);
+          sse_encode_String(device, serializer);
+          sse_encode_f_64(lr0, serializer);
+          sse_encode_f_64(momentum, serializer);
+          sse_encode_f_64(hsvS, serializer);
+          sse_encode_f_64(hsvV, serializer);
+          sse_encode_f_64(translate, serializer);
+          sse_encode_f_64(scale, serializer);
+          sse_encode_f_64(shear, serializer);
+          sse_encode_f_64(flipud, serializer);
+          sse_encode_f_64(fliplr, serializer);
+          sse_encode_f_64(degrees, serializer);
+          sse_encode_u_32(workers, serializer);
+          sse_encode_bool(amp, serializer);
+          sse_encode_bool(resume, serializer);
+          sse_encode_f_64(clsPw, serializer);
+          pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 8, port: port_);
+        },
+        codec: SseCodec(decodeSuccessData: sse_decode_String, decodeErrorData: sse_decode_String),
+        constMeta: kCrateApiStartYoloTrainingConstMeta,
+        argValues: [
+          pythonPath,
+          modelPath,
+          dataYamlPath,
+          projectDir,
+          experimentName,
+          epochs,
+          imgsz,
+          batch,
+          device,
+          lr0,
+          momentum,
+          hsvS,
+          hsvV,
+          translate,
+          scale,
+          shear,
+          flipud,
+          fliplr,
+          degrees,
+          workers,
+          amp,
+          resume,
+          clsPw,
+        ],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiStartYoloTrainingConstMeta => const TaskConstMeta(
+    debugName: "start_yolo_training",
+    argNames: [
+      "pythonPath",
+      "modelPath",
+      "dataYamlPath",
+      "projectDir",
+      "experimentName",
+      "epochs",
+      "imgsz",
+      "batch",
+      "device",
+      "lr0",
+      "momentum",
+      "hsvS",
+      "hsvV",
+      "translate",
+      "scale",
+      "shear",
+      "flipud",
+      "fliplr",
+      "degrees",
+      "workers",
+      "amp",
+      "resume",
+      "clsPw",
+    ],
+  );
+
+  @override
+  Future<String> crateApiTrainingModStopTraining() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 9, port: port_);
+        },
+        codec: SseCodec(decodeSuccessData: sse_decode_String, decodeErrorData: sse_decode_String),
+        constMeta: kCrateApiTrainingModStopTrainingConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiTrainingModStopTrainingConstMeta =>
+      const TaskConstMeta(debugName: "stop_training", argNames: []);
+
+  @override
+  Future<String> crateApiStopYoloTraining() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 10, port: port_);
+        },
+        codec: SseCodec(decodeSuccessData: sse_decode_String, decodeErrorData: sse_decode_String),
+        constMeta: kCrateApiStopYoloTrainingConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiStopYoloTrainingConstMeta =>
+      const TaskConstMeta(debugName: "stop_yolo_training", argNames: []);
+
+  @override
   Future<List<String>> crateApiSupportedAnnotationModes() {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 2,
-            port: port_,
-          );
+          pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 11, port: port_);
         },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_list_String,
-          decodeErrorData: null,
-        ),
+        codec: SseCodec(decodeSuccessData: sse_decode_list_String, decodeErrorData: null),
         constMeta: kCrateApiSupportedAnnotationModesConstMeta,
         argValues: [],
         apiImpl: this,
@@ -141,15 +489,89 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   TaskConstMeta get kCrateApiSupportedAnnotationModesConstMeta =>
-      const TaskConstMeta(
-        debugName: "supported_annotation_modes",
-        argNames: [],
-      );
+      const TaskConstMeta(debugName: "supported_annotation_modes", argNames: []);
+
+  @override
+  Future<VideoPlaybackInfo> crateApiVideoPlaybackInfo({required String videoPath}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(videoPath, serializer);
+          pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 12, port: port_);
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_video_playback_info,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiVideoPlaybackInfoConstMeta,
+        argValues: [videoPath],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiVideoPlaybackInfoConstMeta =>
+      const TaskConstMeta(debugName: "video_playback_info", argNames: ["videoPath"]);
 
   @protected
   String dco_decode_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as String;
+  }
+
+  @protected
+  bool dco_decode_bool(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as bool;
+  }
+
+  @protected
+  double dco_decode_box_autoadd_f_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as double;
+  }
+
+  @protected
+  TrainingConfig dco_decode_box_autoadd_training_config(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_training_config(raw);
+  }
+
+  @protected
+  TrainingProgress dco_decode_box_autoadd_training_progress(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_training_progress(raw);
+  }
+
+  @protected
+  DecodedVideoFrame dco_decode_decoded_video_frame(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3) throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return DecodedVideoFrame(
+      timestampSeconds: dco_decode_f_64(arr[0]),
+      pngBytes: dco_decode_list_prim_u_8_strict(arr[1]),
+      decoderLabel: dco_decode_String(arr[2]),
+    );
+  }
+
+  @protected
+  double dco_decode_f_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as double;
+  }
+
+  @protected
+  FrameExtractionResult dco_decode_frame_extraction_result(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3) throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return FrameExtractionResult(
+      ffmpegPath: dco_decode_String(arr[0]),
+      outputDir: dco_decode_String(arr[1]),
+      frameCount: dco_decode_u_32(arr[2]),
+    );
   }
 
   @protected
@@ -165,6 +587,83 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  String? dco_decode_opt_String(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_String(raw);
+  }
+
+  @protected
+  double? dco_decode_opt_box_autoadd_f_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_f_64(raw);
+  }
+
+  @protected
+  TrainingProgress? dco_decode_opt_box_autoadd_training_progress(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_training_progress(raw);
+  }
+
+  @protected
+  TrainingConfig dco_decode_training_config(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 23) throw Exception('unexpected arr length: expect 23 but see ${arr.length}');
+    return TrainingConfig(
+      pythonPath: dco_decode_String(arr[0]),
+      modelPath: dco_decode_String(arr[1]),
+      dataYamlPath: dco_decode_String(arr[2]),
+      projectDir: dco_decode_String(arr[3]),
+      experimentName: dco_decode_String(arr[4]),
+      epochs: dco_decode_u_32(arr[5]),
+      imgsz: dco_decode_u_32(arr[6]),
+      batch: dco_decode_String(arr[7]),
+      device: dco_decode_String(arr[8]),
+      lr0: dco_decode_f_64(arr[9]),
+      momentum: dco_decode_f_64(arr[10]),
+      hsvS: dco_decode_f_64(arr[11]),
+      hsvV: dco_decode_f_64(arr[12]),
+      translate: dco_decode_f_64(arr[13]),
+      scale: dco_decode_f_64(arr[14]),
+      shear: dco_decode_f_64(arr[15]),
+      flipud: dco_decode_f_64(arr[16]),
+      fliplr: dco_decode_f_64(arr[17]),
+      degrees: dco_decode_f_64(arr[18]),
+      workers: dco_decode_u_32(arr[19]),
+      amp: dco_decode_bool(arr[20]),
+      resume: dco_decode_bool(arr[21]),
+      clsPw: dco_decode_f_64(arr[22]),
+    );
+  }
+
+  @protected
+  TrainingProgress dco_decode_training_progress(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 12) throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
+    return TrainingProgress(
+      currentEpoch: dco_decode_u_32(arr[0]),
+      totalEpochs: dco_decode_u_32(arr[1]),
+      status: dco_decode_String(arr[2]),
+      trainLoss: dco_decode_opt_box_autoadd_f_64(arr[3]),
+      valLoss: dco_decode_opt_box_autoadd_f_64(arr[4]),
+      map50: dco_decode_opt_box_autoadd_f_64(arr[5]),
+      map5095: dco_decode_opt_box_autoadd_f_64(arr[6]),
+      precision: dco_decode_opt_box_autoadd_f_64(arr[7]),
+      recall: dco_decode_opt_box_autoadd_f_64(arr[8]),
+      lr: dco_decode_opt_box_autoadd_f_64(arr[9]),
+      elapsedSeconds: dco_decode_f_64(arr[10]),
+      estimatedRemainingSeconds: dco_decode_f_64(arr[11]),
+    );
+  }
+
+  @protected
+  int dco_decode_u_32(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as int;
+  }
+
+  @protected
   int dco_decode_u_8(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as int;
@@ -177,10 +676,81 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  VideoPlaybackInfo dco_decode_video_playback_info(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 6) throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    return VideoPlaybackInfo(
+      width: dco_decode_u_32(arr[0]),
+      height: dco_decode_u_32(arr[1]),
+      durationSeconds: dco_decode_f_64(arr[2]),
+      fps: dco_decode_f_64(arr[3]),
+      frameCount: dco_decode_u_32(arr[4]),
+      decoderLabel: dco_decode_String(arr[5]),
+    );
+  }
+
+  @protected
   String sse_decode_String(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var inner = sse_decode_list_prim_u_8_strict(deserializer);
     return utf8.decoder.convert(inner);
+  }
+
+  @protected
+  bool sse_decode_bool(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getUint8() != 0;
+  }
+
+  @protected
+  double sse_decode_box_autoadd_f_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_f_64(deserializer));
+  }
+
+  @protected
+  TrainingConfig sse_decode_box_autoadd_training_config(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_training_config(deserializer));
+  }
+
+  @protected
+  TrainingProgress sse_decode_box_autoadd_training_progress(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_training_progress(deserializer));
+  }
+
+  @protected
+  DecodedVideoFrame sse_decode_decoded_video_frame(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_timestampSeconds = sse_decode_f_64(deserializer);
+    var var_pngBytes = sse_decode_list_prim_u_8_strict(deserializer);
+    var var_decoderLabel = sse_decode_String(deserializer);
+    return DecodedVideoFrame(
+      timestampSeconds: var_timestampSeconds,
+      pngBytes: var_pngBytes,
+      decoderLabel: var_decoderLabel,
+    );
+  }
+
+  @protected
+  double sse_decode_f_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getFloat64();
+  }
+
+  @protected
+  FrameExtractionResult sse_decode_frame_extraction_result(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_ffmpegPath = sse_decode_String(deserializer);
+    var var_outputDir = sse_decode_String(deserializer);
+    var var_frameCount = sse_decode_u_32(deserializer);
+    return FrameExtractionResult(
+      ffmpegPath: var_ffmpegPath,
+      outputDir: var_outputDir,
+      frameCount: var_frameCount,
+    );
   }
 
   @protected
@@ -203,6 +773,129 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  String? sse_decode_opt_String(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_String(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  double? sse_decode_opt_box_autoadd_f_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_f_64(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  TrainingProgress? sse_decode_opt_box_autoadd_training_progress(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_training_progress(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  TrainingConfig sse_decode_training_config(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_pythonPath = sse_decode_String(deserializer);
+    var var_modelPath = sse_decode_String(deserializer);
+    var var_dataYamlPath = sse_decode_String(deserializer);
+    var var_projectDir = sse_decode_String(deserializer);
+    var var_experimentName = sse_decode_String(deserializer);
+    var var_epochs = sse_decode_u_32(deserializer);
+    var var_imgsz = sse_decode_u_32(deserializer);
+    var var_batch = sse_decode_String(deserializer);
+    var var_device = sse_decode_String(deserializer);
+    var var_lr0 = sse_decode_f_64(deserializer);
+    var var_momentum = sse_decode_f_64(deserializer);
+    var var_hsvS = sse_decode_f_64(deserializer);
+    var var_hsvV = sse_decode_f_64(deserializer);
+    var var_translate = sse_decode_f_64(deserializer);
+    var var_scale = sse_decode_f_64(deserializer);
+    var var_shear = sse_decode_f_64(deserializer);
+    var var_flipud = sse_decode_f_64(deserializer);
+    var var_fliplr = sse_decode_f_64(deserializer);
+    var var_degrees = sse_decode_f_64(deserializer);
+    var var_workers = sse_decode_u_32(deserializer);
+    var var_amp = sse_decode_bool(deserializer);
+    var var_resume = sse_decode_bool(deserializer);
+    var var_clsPw = sse_decode_f_64(deserializer);
+    return TrainingConfig(
+      pythonPath: var_pythonPath,
+      modelPath: var_modelPath,
+      dataYamlPath: var_dataYamlPath,
+      projectDir: var_projectDir,
+      experimentName: var_experimentName,
+      epochs: var_epochs,
+      imgsz: var_imgsz,
+      batch: var_batch,
+      device: var_device,
+      lr0: var_lr0,
+      momentum: var_momentum,
+      hsvS: var_hsvS,
+      hsvV: var_hsvV,
+      translate: var_translate,
+      scale: var_scale,
+      shear: var_shear,
+      flipud: var_flipud,
+      fliplr: var_fliplr,
+      degrees: var_degrees,
+      workers: var_workers,
+      amp: var_amp,
+      resume: var_resume,
+      clsPw: var_clsPw,
+    );
+  }
+
+  @protected
+  TrainingProgress sse_decode_training_progress(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_currentEpoch = sse_decode_u_32(deserializer);
+    var var_totalEpochs = sse_decode_u_32(deserializer);
+    var var_status = sse_decode_String(deserializer);
+    var var_trainLoss = sse_decode_opt_box_autoadd_f_64(deserializer);
+    var var_valLoss = sse_decode_opt_box_autoadd_f_64(deserializer);
+    var var_map50 = sse_decode_opt_box_autoadd_f_64(deserializer);
+    var var_map5095 = sse_decode_opt_box_autoadd_f_64(deserializer);
+    var var_precision = sse_decode_opt_box_autoadd_f_64(deserializer);
+    var var_recall = sse_decode_opt_box_autoadd_f_64(deserializer);
+    var var_lr = sse_decode_opt_box_autoadd_f_64(deserializer);
+    var var_elapsedSeconds = sse_decode_f_64(deserializer);
+    var var_estimatedRemainingSeconds = sse_decode_f_64(deserializer);
+    return TrainingProgress(
+      currentEpoch: var_currentEpoch,
+      totalEpochs: var_totalEpochs,
+      status: var_status,
+      trainLoss: var_trainLoss,
+      valLoss: var_valLoss,
+      map50: var_map50,
+      map5095: var_map5095,
+      precision: var_precision,
+      recall: var_recall,
+      lr: var_lr,
+      elapsedSeconds: var_elapsedSeconds,
+      estimatedRemainingSeconds: var_estimatedRemainingSeconds,
+    );
+  }
+
+  @protected
+  int sse_decode_u_32(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getUint32();
+  }
+
+  @protected
   int sse_decode_u_8(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getUint8();
@@ -214,21 +907,80 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  VideoPlaybackInfo sse_decode_video_playback_info(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_width = sse_decode_u_32(deserializer);
+    var var_height = sse_decode_u_32(deserializer);
+    var var_durationSeconds = sse_decode_f_64(deserializer);
+    var var_fps = sse_decode_f_64(deserializer);
+    var var_frameCount = sse_decode_u_32(deserializer);
+    var var_decoderLabel = sse_decode_String(deserializer);
+    return VideoPlaybackInfo(
+      width: var_width,
+      height: var_height,
+      durationSeconds: var_durationSeconds,
+      fps: var_fps,
+      frameCount: var_frameCount,
+      decoderLabel: var_decoderLabel,
+    );
+  }
+
+  @protected
   int sse_decode_i_32(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getInt32();
   }
 
   @protected
-  bool sse_decode_bool(SseDeserializer deserializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return deserializer.buffer.getUint8() != 0;
-  }
-
-  @protected
   void sse_encode_String(String self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_list_prim_u_8_strict(utf8.encoder.convert(self), serializer);
+  }
+
+  @protected
+  void sse_encode_bool(bool self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putUint8(self ? 1 : 0);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_f_64(double self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_f_64(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_training_config(TrainingConfig self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_training_config(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_training_progress(TrainingProgress self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_training_progress(self, serializer);
+  }
+
+  @protected
+  void sse_encode_decoded_video_frame(DecodedVideoFrame self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_f_64(self.timestampSeconds, serializer);
+    sse_encode_list_prim_u_8_strict(self.pngBytes, serializer);
+    sse_encode_String(self.decoderLabel, serializer);
+  }
+
+  @protected
+  void sse_encode_f_64(double self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putFloat64(self);
+  }
+
+  @protected
+  void sse_encode_frame_extraction_result(FrameExtractionResult self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.ffmpegPath, serializer);
+    sse_encode_String(self.outputDir, serializer);
+    sse_encode_u_32(self.frameCount, serializer);
   }
 
   @protected
@@ -241,13 +993,94 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_list_prim_u_8_strict(
-    Uint8List self,
-    SseSerializer serializer,
-  ) {
+  void sse_encode_list_prim_u_8_strict(Uint8List self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
     serializer.buffer.putUint8List(self);
+  }
+
+  @protected
+  void sse_encode_opt_String(String? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_String(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_f_64(double? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_f_64(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_training_progress(
+    TrainingProgress? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_training_progress(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_training_config(TrainingConfig self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.pythonPath, serializer);
+    sse_encode_String(self.modelPath, serializer);
+    sse_encode_String(self.dataYamlPath, serializer);
+    sse_encode_String(self.projectDir, serializer);
+    sse_encode_String(self.experimentName, serializer);
+    sse_encode_u_32(self.epochs, serializer);
+    sse_encode_u_32(self.imgsz, serializer);
+    sse_encode_String(self.batch, serializer);
+    sse_encode_String(self.device, serializer);
+    sse_encode_f_64(self.lr0, serializer);
+    sse_encode_f_64(self.momentum, serializer);
+    sse_encode_f_64(self.hsvS, serializer);
+    sse_encode_f_64(self.hsvV, serializer);
+    sse_encode_f_64(self.translate, serializer);
+    sse_encode_f_64(self.scale, serializer);
+    sse_encode_f_64(self.shear, serializer);
+    sse_encode_f_64(self.flipud, serializer);
+    sse_encode_f_64(self.fliplr, serializer);
+    sse_encode_f_64(self.degrees, serializer);
+    sse_encode_u_32(self.workers, serializer);
+    sse_encode_bool(self.amp, serializer);
+    sse_encode_bool(self.resume, serializer);
+    sse_encode_f_64(self.clsPw, serializer);
+  }
+
+  @protected
+  void sse_encode_training_progress(TrainingProgress self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_32(self.currentEpoch, serializer);
+    sse_encode_u_32(self.totalEpochs, serializer);
+    sse_encode_String(self.status, serializer);
+    sse_encode_opt_box_autoadd_f_64(self.trainLoss, serializer);
+    sse_encode_opt_box_autoadd_f_64(self.valLoss, serializer);
+    sse_encode_opt_box_autoadd_f_64(self.map50, serializer);
+    sse_encode_opt_box_autoadd_f_64(self.map5095, serializer);
+    sse_encode_opt_box_autoadd_f_64(self.precision, serializer);
+    sse_encode_opt_box_autoadd_f_64(self.recall, serializer);
+    sse_encode_opt_box_autoadd_f_64(self.lr, serializer);
+    sse_encode_f_64(self.elapsedSeconds, serializer);
+    sse_encode_f_64(self.estimatedRemainingSeconds, serializer);
+  }
+
+  @protected
+  void sse_encode_u_32(int self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putUint32(self);
   }
 
   @protected
@@ -262,14 +1095,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_i_32(int self, SseSerializer serializer) {
+  void sse_encode_video_playback_info(VideoPlaybackInfo self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    serializer.buffer.putInt32(self);
+    sse_encode_u_32(self.width, serializer);
+    sse_encode_u_32(self.height, serializer);
+    sse_encode_f_64(self.durationSeconds, serializer);
+    sse_encode_f_64(self.fps, serializer);
+    sse_encode_u_32(self.frameCount, serializer);
+    sse_encode_String(self.decoderLabel, serializer);
   }
 
   @protected
-  void sse_encode_bool(bool self, SseSerializer serializer) {
+  void sse_encode_i_32(int self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    serializer.buffer.putUint8(self ? 1 : 0);
+    serializer.buffer.putInt32(self);
   }
 }

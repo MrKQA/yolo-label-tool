@@ -518,7 +518,7 @@ flutter/lib/language/
 当前仍需要继续修改或接后端的逻辑：
 
 - SEG 当前生成的是多边形轮廓点；轮廓点转二值掩码图还没有后端实现。
-- 训练页已经读取 models 文件夹、data.yaml 概览和训练参数，但还没有调用 Python/Ultralytics 开始训练。
+- 训练页已经读取 models 文件夹、data.yaml 概览和训练参数，但还没有调用 Python/Ultralytics 开始训练。使用PyO3进行调用python进行训练。
 
 
 ## 当前占位或未完成能力

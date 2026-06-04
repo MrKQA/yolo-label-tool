@@ -1,4 +1,4 @@
-// ignore_for_file: file_names, unused_element
+// ignore_for_file: file_names, unused_element, invalid_use_of_internal_member
 
 part of 'main.dart';
 
@@ -10,6 +10,62 @@ class _RustVideoBackend {
   static Future<_RustVideoInfo> loadInfo(String videoPath) {
     return Isolate.run(() => _loadInfoSync(videoPath));
   }
+
+  static Future<String> startYoloTraining({
+    required String pythonPath,
+    required String modelPath,
+    required String dataYamlPath,
+    required String projectDir,
+    required String experimentName,
+    required int epochs,
+    required int imgsz,
+    required String batch,
+    required String device,
+    required double lr0,
+    required double momentum,
+    required double hsvS,
+    required double hsvV,
+    required double translate,
+    required double scale,
+    required double shear,
+    required double flipud,
+    required double fliplr,
+    required double degrees,
+    required int workers,
+    required bool amp,
+    required bool resume,
+    required double clsPw,
+  }) => RustLib.instance.api.crateApiStartYoloTraining(
+    pythonPath: pythonPath,
+    modelPath: modelPath,
+    dataYamlPath: dataYamlPath,
+    projectDir: projectDir,
+    experimentName: experimentName,
+    epochs: epochs,
+    imgsz: imgsz,
+    batch: batch,
+    device: device,
+    lr0: lr0,
+    momentum: momentum,
+    hsvS: hsvS,
+    hsvV: hsvV,
+    translate: translate,
+    scale: scale,
+    shear: shear,
+    flipud: flipud,
+    fliplr: fliplr,
+    degrees: degrees,
+    workers: workers,
+    amp: amp,
+    resume: resume,
+    clsPw: clsPw,
+  );
+
+  static Future<TrainingProgress?> pollYoloTrainingProgress() =>
+      RustLib.instance.api.crateApiPollYoloTrainingProgress();
+
+  static Future<String> stopYoloTraining() =>
+      RustLib.instance.api.crateApiStopYoloTraining();
 
   static Future<Uint8List> decodeFrame({
     required String videoPath,
@@ -93,7 +149,15 @@ class _RustVideoInfo {
   final int frameCount;
   final String decoderLabel;
 
-  double get safeDurationSeconds => durationSeconds > 0 ? durationSeconds : 0;
+  double get safeDurationSeconds {
+    if (durationSeconds.isFinite && durationSeconds > 0) {
+      return durationSeconds;
+    }
+    if (frameCount > 0 && safeFps > 0) {
+      return frameCount / safeFps;
+    }
+    return 0;
+  }
   double get safeFps =>
       fps.isFinite && fps > 0 ? fps.clamp(1, 60).toDouble() : 25;
 }

@@ -5,6 +5,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::slice;
 
+#[path = "training.rs"]
+pub mod training_mod;
+
+use training_mod::{TrainingConfig, TrainingProgress};
+
 /// Smoke-test function exposed to Flutter through flutter_rust_bridge.
 #[frb]
 pub fn rust_greeting(name: String) -> String {
@@ -61,12 +66,16 @@ struct NvidiaGpuInfo {
 }
 
 /// FFI byte buffer used by the Flutter video player fallback.
+#[frb(ignore)]
 #[repr(C)]
 pub struct RustLabelByteBuffer {
     pub ptr: *mut u8,
     pub len: usize,
     pub cap: usize,
 }
+
+unsafe impl Send for RustLabelByteBuffer {}
+unsafe impl Sync for RustLabelByteBuffer {}
 
 /// Check whether an FFmpeg executable can be found by the backend.
 #[frb]
@@ -134,6 +143,7 @@ pub fn decode_video_frame(
 }
 
 /// C ABI: return video metadata JSON for Flutter's manual FFI player.
+#[frb(ignore)]
 #[no_mangle]
 pub unsafe extern "C" fn rust_label_video_info_json(
     path_ptr: *const u8,
@@ -147,6 +157,7 @@ pub unsafe extern "C" fn rust_label_video_info_json(
 }
 
 /// C ABI: decode one timestamp into PNG bytes for Flutter's manual FFI player.
+#[frb(ignore)]
 #[no_mangle]
 pub unsafe extern "C" fn rust_label_decode_video_frame_png(
     path_ptr: *const u8,
@@ -162,6 +173,7 @@ pub unsafe extern "C" fn rust_label_decode_video_frame_png(
 }
 
 /// C ABI: free buffers returned by `rust_label_*` FFI functions.
+#[frb(ignore)]
 #[no_mangle]
 pub unsafe extern "C" fn rust_label_free_byte_buffer(buffer: RustLabelByteBuffer) {
     if buffer.ptr.is_null() || buffer.len == 0 {
@@ -367,9 +379,11 @@ fn probe_video_playback_info(ffprobe: &Path, video: &Path) -> Result<VideoPlayba
         .arg("-select_streams")
         .arg("v:0")
         .arg("-show_entries")
-        .arg("stream=width,height,avg_frame_rate,r_frame_rate,duration,nb_frames:format=duration")
+        .arg(
+            "stream=width,height,avg_frame_rate,r_frame_rate,duration,duration_ts,time_base,nb_frames:format=duration",
+        )
         .arg("-of")
-        .arg("default=noprint_wrappers=1")
+        .arg("default=noprint_wrappers=0")
         .arg(video)
         .output()
         .map_err(|error| format!("Failed to start FFprobe: {error}"))?;
@@ -385,26 +399,55 @@ fn probe_video_playback_info(ffprobe: &Path, video: &Path) -> Result<VideoPlayba
     let mut height = 0_u32;
     let mut fps = 0.0_f64;
     let mut duration = 0.0_f64;
+    let mut format_duration = 0.0_f64;
+    let mut duration_ts = 0.0_f64;
+    let mut time_base = 0.0_f64;
     let mut frame_count = 0_u32;
+    let mut section = "";
 
     for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let line = line.trim();
+        match line {
+            "[STREAM]" => {
+                section = "stream";
+                continue;
+            }
+            "[FORMAT]" => {
+                section = "format";
+                continue;
+            }
+            "[/STREAM]" | "[/FORMAT]" => {
+                section = "";
+                continue;
+            }
+            _ => {}
+        }
         let Some((key, value)) = line.split_once('=') else {
             continue;
         };
         let value = value.trim();
-        match key.trim() {
-            "width" => width = value.parse::<u32>().unwrap_or(0),
-            "height" => height = value.parse::<u32>().unwrap_or(0),
-            "avg_frame_rate" if fps <= 0.0 => {
+        match (section, key.trim()) {
+            (_, "width") => width = value.parse::<u32>().unwrap_or(0),
+            (_, "height") => height = value.parse::<u32>().unwrap_or(0),
+            (_, "avg_frame_rate") if fps <= 0.0 => {
                 fps = parse_frame_rate(value).unwrap_or(0.0);
             }
-            "r_frame_rate" if fps <= 0.0 => {
+            (_, "r_frame_rate") if fps <= 0.0 => {
                 fps = parse_frame_rate(value).unwrap_or(0.0);
             }
-            "duration" if duration <= 0.0 => {
+            ("stream", "duration") if duration <= 0.0 => {
                 duration = parse_positive_f64(value).unwrap_or(0.0);
             }
-            "nb_frames" => frame_count = value.parse::<u32>().unwrap_or(0),
+            ("format", "duration") if format_duration <= 0.0 => {
+                format_duration = parse_positive_f64(value).unwrap_or(0.0);
+            }
+            (_, "duration_ts") if duration_ts <= 0.0 => {
+                duration_ts = parse_positive_f64(value).unwrap_or(0.0);
+            }
+            (_, "time_base") if time_base <= 0.0 => {
+                time_base = parse_frame_rate(value).unwrap_or(0.0);
+            }
+            (_, "nb_frames") => frame_count = value.parse::<u32>().unwrap_or(0),
             _ => {}
         }
     }
@@ -414,6 +457,12 @@ fn probe_video_playback_info(ffprobe: &Path, video: &Path) -> Result<VideoPlayba
             "Could not read video dimensions for {}",
             video.display()
         ));
+    }
+    if duration <= 0.0 && duration_ts > 0.0 && time_base > 0.0 {
+        duration = duration_ts * time_base;
+    }
+    if duration <= 0.0 && format_duration > 0.0 {
+        duration = format_duration;
     }
     if frame_count == 0 && duration > 0.0 && fps > 0.0 {
         frame_count = (duration * fps).round().max(1.0) as u32;
@@ -708,6 +757,76 @@ fn jpeg_quality_to_qscale(image_quality: u8) -> String {
     let quality = image_quality.clamp(1, 100) as u16;
     let qscale = 31 - ((quality - 1) * 29 / 99);
     qscale.clamp(2, 31).to_string()
+}
+
+/// Start a YOLO training run via Python/Ultralytics.
+///
+/// Spawns a Python subprocess that runs `model.train(...)`.
+/// Returns the experiment run directory path on success.
+#[frb]
+pub fn start_yolo_training(
+    python_path: String,
+    model_path: String,
+    data_yaml_path: String,
+    project_dir: String,
+    experiment_name: String,
+    epochs: u32,
+    imgsz: u32,
+    batch: String,
+    device: String,
+    lr0: f64,
+    momentum: f64,
+    hsv_s: f64,
+    hsv_v: f64,
+    translate: f64,
+    scale: f64,
+    shear: f64,
+    flipud: f64,
+    fliplr: f64,
+    degrees: f64,
+    workers: u32,
+    amp: bool,
+    resume: bool,
+    cls_pw: f64,
+) -> Result<String, String> {
+    let config = TrainingConfig {
+        python_path,
+        model_path,
+        data_yaml_path,
+        project_dir,
+        experiment_name,
+        epochs,
+        imgsz,
+        batch,
+        device,
+        lr0,
+        momentum,
+        hsv_s,
+        hsv_v,
+        translate,
+        scale,
+        shear,
+        flipud,
+        fliplr,
+        degrees,
+        workers,
+        amp,
+        resume,
+        cls_pw,
+    };
+    training_mod::start_training(config)
+}
+
+/// Poll training progress from the results.csv written by Ultralytics.
+#[frb]
+pub fn poll_yolo_training_progress() -> Option<TrainingProgress> {
+    training_mod::poll_training_progress()
+}
+
+/// Stop the active YOLO training process.
+#[frb]
+pub fn stop_yolo_training() -> Result<String, String> {
+    training_mod::stop_training()
 }
 
 fn count_images_with_prefix(

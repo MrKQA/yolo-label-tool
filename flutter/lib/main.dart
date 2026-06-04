@@ -7,15 +7,16 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:file_selector/file_selector.dart';
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flex_color_picker/flex_color_picker.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
-import 'package:video_player/video_player.dart';
 import 'package:video_player_win/video_player_win.dart' as video_player_win;
 
 import 'src/rust/api.dart';
+import 'src/rust/api/training_mod.dart' show TrainingProgress;
 import 'src/rust/frb_generated.dart';
 
 part 'LabelPage.dart';
@@ -62,6 +63,7 @@ const _languageAssetDirectory = 'lib/language';
 const _historyFileName = 'history.json';
 const _keybindingsFileName = 'keybindings.json';
 const _settingsFileName = 'settings.json';
+const _trainingHistoryFileName = 'training_history.json';
 
 const _labelColorPalette = [
   Color(0xFF2563EB),
@@ -168,6 +170,7 @@ class _LanguageStrings {
     'menu.edit': '编辑',
     'menu.settings': '设置',
     'menu.help': '说明',
+    'menu.viewLogs': '查看日志',
     'menu.openFile': '打开文件',
     'menu.openFolder': '打开文件夹',
     'menu.openRecent': '打开最近的文件',
@@ -189,6 +192,11 @@ class _LanguageStrings {
     'settings.outputPath': '训练结果保存位置',
     'settings.choosePython': '选择 Python',
     'settings.chooseFolder': '选择文件夹',
+    'settings.pythonChecking': '正在识别 Python 环境...',
+    'settings.pythonValid': 'Python 环境识别成功',
+    'settings.pythonNotFound': '未找到 python.exe，请选择 Python 环境文件夹或 python.exe',
+    'settings.pythonInvalid': 'Python 环境识别失败，请确认已安装 torch 和 onnxruntime',
+    'settings.pythonTimeout': 'Python 环境识别超时',
     'path.model': '模型路径',
     'path.trainingOutput': '训练结果路径',
     'settings.cacheSize': '当前缓存大小',
@@ -272,7 +280,14 @@ class _LanguageStrings {
     'train.chooseModel': '选择 PT 模型',
     'train.refreshModels': '刷新模型',
     'train.chooseDataset': '选择数据集',
+    'train.loadingDataset': '请等待数据集统计完成',
+    'train.datasetLoadFailed': '数据集统计失败',
     'train.start': '开始训练',
+    'train.stop': '停止',
+    'train.stopping': '停止中',
+    'train.continueTraining': '继续训练',
+    'train.startFailed': '训练启动失败',
+    'train.pythonNotConfigured': '请先在设置中配置 Python 环境路径',
     'train.datasetPath': '数据集路径',
     'train.invalidModel': '模型文件异常，请选择 YOLO PT 模型。',
     'train.noModels': 'models 文件夹中没有可用的 YOLO PT 模型。',
@@ -280,8 +295,25 @@ class _LanguageStrings {
     'train.classes': '类别',
     'train.trainCount': 'train 数量',
     'train.valCount': 'val 数量',
+    'train.testCount': 'test 数量',
+    'train.imbalanceRatio': '类别不均衡比例',
+    'train.clsPwAuto': '自动 cls_pw',
+    'train.resume': '恢复中断训练',
+    'train.resumeAvailable': '可恢复训练',
+    'train.resumeNoCheckpoint': '未找到 last.pt',
+    'train.resumeInvalidLayout': 'last.pt 不在 weights 目录中',
+    'train.resumeNoResults': '未找到 results.csv',
+    'train.resumeUnknownProgress': '无法读取训练进度',
+    'train.resumeDataMismatch': 'last.pt 对应的数据集与当前 data.yaml 不一致',
+    'train.resumeAlreadyDone': '该训练记录看起来已经完成',
+    'train.commandPreview': '训练命令',
     'train.currentEpoch': '当前轮次',
     'train.notStarted': '未开始',
+    'train.historyTitle': '最近训练记录',
+    'train.historyStart': '开始',
+    'train.historyResume': '继续',
+    'train.historyStop': '停止',
+    'train.historyTimePoint': '时间点',
     'train.coreParameters': '核心参数',
     'train.batchFixed': '固定批次',
     'train.batchAuto60': '自动 60%',
@@ -292,6 +324,14 @@ class _LanguageStrings {
     'train.tuningTips':
         '提升 YOLO 训练效果通常先检查数据质量和标注一致性，再调整 imgsz、batch、lr0、momentum 与增强参数。batch 越大梯度越稳定但更占显存；lr0 控制初始学习速度；momentum 控制更新惯性；imgsz 越大越利于小目标但训练更慢。',
     'train.chartPlaceholder': '训练开始后显示 loss、mAP、precision、recall 等曲线。',
+    'train.chart': '曲线',
+    'train.terminal': '终端',
+    'train.terminalPlaceholder': '训练终端输出会显示在这里。',
+    'logs.title': '日志查看',
+    'logs.openFolder': '打开日志文件夹',
+    'logs.date': '日期',
+    'logs.noLogs': '暂无日志',
+    'logs.readFailed': '日志读取失败',
     'detect.title': '浏览 / 视频检测',
     'detect.chooseImage': '选择图片',
     'detect.chooseFile': '选择文件',
@@ -311,6 +351,22 @@ class _LanguageStrings {
     'detect.loadingVideo': '正在加载视频',
     'detect.videoBackend': '视频后端',
     'detect.decodeFailed': '视频解码失败',
+    'detect.hudFullscreen': '全屏',
+    'detect.hudExitFullscreen': '退出全屏',
+    'detect.hudPrevious': '上一项',
+    'detect.hudNext': '下一项',
+    'detect.hudNoPrevious': '前面已经没有了~',
+    'detect.hudNoNext': '后面已经没有了~',
+    'detect.hudVolume': '音量',
+    'detect.speed': '速度',
+    'detect.scaleMode': '画面模式',
+    'detect.scaleAuto': '自动',
+    'detect.scale4x3': '4:3',
+    'detect.scale16x9': '16:9',
+    'detect.scaleFitWidth': '等宽',
+    'detect.scaleFitHeight': '等高',
+    'detect.scaleOriginal': '原始',
+    'detect.volumeWheelHint': '鼠标滚轮调节音量',
     'action.reset': '重置',
     'action.close': '关闭',
     'action.save': '保存',
@@ -549,6 +605,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   bool _shortcutDialogOpen = false;
   bool _importingDataset = false;
   bool _topMenuVisible = true;
+  bool _videoFullscreenVisible = false;
   bool _zoomLocked = false;
   double _zoom = 100;
   int _selectedImageIndex = 0;
@@ -608,6 +665,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   @override
   void initState() {
     super.initState();
+    _detectVideoSession.addListener(_handleDetectVideoSessionChanged);
     _loadPersistedConfig();
     _loadAvailableLanguages();
     _scheduleTopMenuHide();
@@ -616,9 +674,20 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   @override
   void dispose() {
     _topMenuHideTimer?.cancel();
+    _detectVideoSession.removeListener(_handleDetectVideoSessionChanged);
     _detectVideoSession.dispose();
     _keyboardFocusNode.dispose();
     super.dispose();
+  }
+
+  void _handleDetectVideoSessionChanged() {
+    final visible =
+        _detectVideoSession.fullscreen &&
+        _detectVideoSession.hasInitializedVideo;
+    if (visible == _videoFullscreenVisible || !mounted) {
+      return;
+    }
+    setState(() => _videoFullscreenVisible = visible);
   }
 
   void _loadPersistedConfig() {
@@ -697,18 +766,28 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     });
   }
 
-  void _selectPreviousImage({int step = 1}) {
+  bool _selectPreviousImage({int step = 1}) {
     if (_images.isEmpty) {
-      return;
+      return false;
     }
-    _selectImage((_selectedImageIndex - step).clamp(0, _images.length - 1));
+    final nextIndex = (_selectedImageIndex - step).clamp(0, _images.length - 1);
+    if (nextIndex == _selectedImageIndex) {
+      return false;
+    }
+    _selectImage(nextIndex);
+    return true;
   }
 
-  void _selectNextImage({int step = 1}) {
+  bool _selectNextImage({int step = 1}) {
     if (_images.isEmpty) {
-      return;
+      return false;
     }
-    _selectImage((_selectedImageIndex + step).clamp(0, _images.length - 1));
+    final nextIndex = (_selectedImageIndex + step).clamp(0, _images.length - 1);
+    if (nextIndex == _selectedImageIndex) {
+      return false;
+    }
+    _selectImage(nextIndex);
+    return true;
   }
 
   Future<void> _openImageFile({int? insertAfterIndex}) async {
@@ -838,6 +917,61 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     } else if (action == 'delete' && index != null) {
       _deleteImage(index);
     }
+  }
+
+  void _showTrainingHistoryDialog() {
+    final history = _ConfigStore.loadTrainingHistory().entries;
+    if (history.isEmpty) {
+      _showFloatingMessage(t('train.noHistory'));
+      return;
+    }
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(t('menu.trainingHistory')),
+        content: SizedBox(
+          width: 560,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: history.length,
+            itemBuilder: (context, index) {
+              final entry = history[index];
+              return Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(
+                    entry.action == _TrainingHistoryAction.stop
+                        ? Icons.stop_circle_outlined
+                        : Icons.play_circle_outline,
+                  ),
+                  title: Text(
+                    '${_trainingActionLabel(entry.action)}  '
+                    '${entry.epoch}/${entry.targetEpochs}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Text(
+                    '${t('train.historyTimePoint')}: '
+                    '${_formatTrainingHistoryTime(entry.timestamp)}\n'
+                    '${t('path.model')}: ${_fileName(entry.modelPath)}\n'
+                    '${t('train.datasetPath')}: ${entry.datasetPath}',
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(t('action.close')),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _importYoloDataset() async {
@@ -1746,6 +1880,16 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
           : KeyEventResult.ignored;
     }
 
+    if (_activeSection == 'browse' && !_shortcutDialogOpen) {
+      final result = _detectVideoSession.handleShortcutKey(
+        event,
+        _shortcutConfig,
+      );
+      if (result == KeyEventResult.handled) {
+        return result;
+      }
+    }
+
     if ((event is! KeyDownEvent && event is! KeyRepeatEvent) ||
         _activeSection != 'label' ||
         _shortcutDialogOpen) {
@@ -1783,11 +1927,15 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     }
 
     if (_shortcutConfig.matches(_ShortcutAction.previousImage, key)) {
-      _selectPreviousImage(step: imageStep);
+      if (!_selectPreviousImage(step: imageStep)) {
+        _showFloatingMessage(t('detect.hudNoPrevious'));
+      }
       return KeyEventResult.handled;
     }
     if (_shortcutConfig.matches(_ShortcutAction.nextImage, key)) {
-      _selectNextImage(step: imageStep);
+      if (!_selectNextImage(step: imageStep)) {
+        _showFloatingMessage(t('detect.hudNoNext'));
+      }
       return KeyEventResult.handled;
     }
     if (_shortcutConfig.matches(_ShortcutAction.zoomIn, key)) {
@@ -1911,6 +2059,110 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     }
   }
 
+  Future<void> _showLogViewerDialog() async {
+    final directory = _ConfigStore.logsDirectory;
+    if (!directory.existsSync()) {
+      directory.createSync(recursive: true);
+    }
+    final files = _logFilesByDate();
+    String? selectedPath = files.isEmpty ? null : files.first.path;
+    String logText = selectedPath == null
+        ? t('logs.noLogs')
+        : await _readTrainingLogTail(selectedPath);
+
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: Text(t('logs.title')),
+              content: SizedBox(
+                width: 760,
+                height: 520,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            initialValue: selectedPath,
+                            decoration: InputDecoration(
+                              labelText: t('logs.date'),
+                              isDense: true,
+                            ),
+                            items: [
+                              for (final file in files)
+                                DropdownMenuItem(
+                                  value: file.path,
+                                  child: Text(_fileName(file.path)),
+                                ),
+                            ],
+                            onChanged: files.isEmpty
+                                ? null
+                                : (value) async {
+                                    if (value == null) return;
+                                    final nextText =
+                                        await _readTrainingLogTail(value);
+                                    setDialogState(() {
+                                      selectedPath = value;
+                                      logText = nextText;
+                                    });
+                                  },
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        OutlinedButton.icon(
+                          onPressed: () => _openLogsFolder(directory),
+                          icon: const Icon(Icons.folder_open),
+                          label: Text(t('logs.openFolder')),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Expanded(
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        color: _isDarkMode(context)
+                            ? const Color(0xFF090515)
+                            : Colors.black,
+                        child: Scrollbar(
+                          child: SingleChildScrollView(
+                            child: SelectableText(
+                              logText,
+                              style: const TextStyle(
+                                color: Color(0xFFE5E7EB),
+                                fontFamily: 'Consolas',
+                                fontSize: 12.5,
+                                height: 1.35,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: Text(t('action.close')),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    if (mounted) {
+      _keyboardFocusNode.requestFocus();
+    }
+  }
+
   Future<int> _clearCacheData() async {
     setState(() {
       _recentFolders.clear();
@@ -1956,11 +2208,13 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                   onExit: () => SystemNavigator.pop(),
                   onImportDataset: _importYoloDataset,
                   onExportDataset: _showExportDialog,
+                  onShowTrainingHistory: _showTrainingHistoryDialog,
                   onUndo: _undoAnnotationChange,
                   onRedo: _redoAnnotationChange,
                   onCopy: _copySelectedAnnotation,
                   onPaste: _pasteAnnotation,
                   onShowSettings: _showSettings,
+                  onShowLogs: _showLogViewerDialog,
                   onShowHelp: _showKeySettings,
                   onLanguageSelected: _changeLanguage,
                   onPointerEnter: _showTopMenu,
@@ -1979,63 +2233,72 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                           setState(() => _activeSection = section);
                         },
                       ),
-                      if (labelPage)
-                        _LabelPage(
-                          status: widget.status,
-                          images: _images,
-                          selectedImage: _selectedImage,
-                          selectedImageIndex: _selectedImageIndex,
-                          zoom: _zoom,
-                          activeTool: _activeTool,
-                          activeMode: _activeAnnotationMode,
-                          imageSplit: _selectedImageSplit,
-                          activeClassId: _activeClassId,
-                          labelClasses: _labelClasses,
-                          annotations: _currentAnnotations,
-                          selectedAnnotationId: _selectedAnnotationId,
-                          showClassLabels: _showClassLabels,
-                          onImageSelected: _selectImage,
-                          onImageContextMenu: _showImageContextMenu,
-                          onPointerSignal: _handlePointerSignal,
-                          onToolSelected: _selectTool,
-                          onSelectMode: () => _selectTool('select'),
-                          onModeSelected: _activateAnnotationMode,
-                          onImageSplitChanged: _setSelectedImageSplit,
-                          onEnsureClass: _ensureActiveClass,
-                          onAnnotationCreated: _createAnnotation,
-                          onSegAnnotationCreated: _createSegAnnotation,
-                          onAnnotationSelected: _selectAnnotation,
-                          onAnnotationUpdated: _updateAnnotation,
-                          onAnnotationDeleted: _deleteAnnotation,
-                          onAnnotationDragStarted: _pushAnnotationSnapshot,
-                          onClassSelected: _selectLabelClass,
-                          onClassAdded: () => _addLabelClass(),
-                          onClassEdited: _editLabelClass,
-                          onClassColorChanged: _chooseLabelClassColor,
-                          onClassDeleted: _deleteLabelClass,
-                          onClassReordered: _reorderLabelClass,
-                          onToggleClassLabels: () => setState(
-                            () => _showClassLabels = !_showClassLabels,
-                          ),
-                          onAnnotationClassChanged: _changeAnnotationClass,
-                          onImageDisplaySizeChanged: (size) {
-                            _imageDisplaySize = size;
-                            final key = _selectedImageKey;
-                            if (key != null && size != Size.zero) {
-                              _imageDisplaySizes[key] = size;
-                            }
-                          },
-                        )
-                      else if (_activeSection == 'train')
-                        _TrainPage(settings: _appSettings)
-                      else if (_activeSection == 'crop')
-                        _CropPage(exportPath: _appSettings.exportPath)
-                      else
-                        _DetectVideoPage(
-                          settings: _appSettings,
-                          shortcutConfig: _shortcutConfig,
-                          session: _detectVideoSession,
+                      Expanded(
+                        child: IndexedStack(
+                          index: _activeSection == 'label'
+                              ? 0
+                              : _activeSection == 'train'
+                              ? 1
+                              : _activeSection == 'crop'
+                              ? 2
+                              : 3,
+                          children: [
+                            _LabelPage(
+                              status: widget.status,
+                              images: _images,
+                              selectedImage: _selectedImage,
+                              selectedImageIndex: _selectedImageIndex,
+                              zoom: _zoom,
+                              activeTool: _activeTool,
+                              activeMode: _activeAnnotationMode,
+                              imageSplit: _selectedImageSplit,
+                              activeClassId: _activeClassId,
+                              labelClasses: _labelClasses,
+                              annotations: _currentAnnotations,
+                              selectedAnnotationId: _selectedAnnotationId,
+                              showClassLabels: _showClassLabels,
+                              onImageSelected: _selectImage,
+                              onImageContextMenu: _showImageContextMenu,
+                              onPointerSignal: _handlePointerSignal,
+                              onToolSelected: _selectTool,
+                              onSelectMode: () => _selectTool('select'),
+                              onModeSelected: _activateAnnotationMode,
+                              onImageSplitChanged: _setSelectedImageSplit,
+                              onEnsureClass: _ensureActiveClass,
+                              onAnnotationCreated: _createAnnotation,
+                              onSegAnnotationCreated: _createSegAnnotation,
+                              onAnnotationSelected: _selectAnnotation,
+                              onAnnotationUpdated: _updateAnnotation,
+                              onAnnotationDeleted: _deleteAnnotation,
+                              onAnnotationDragStarted: _pushAnnotationSnapshot,
+                              onClassSelected: _selectLabelClass,
+                              onClassAdded: () => _addLabelClass(),
+                              onClassEdited: _editLabelClass,
+                              onClassColorChanged: _chooseLabelClassColor,
+                              onClassDeleted: _deleteLabelClass,
+                              onClassReordered: _reorderLabelClass,
+                              onToggleClassLabels: () => setState(
+                                () => _showClassLabels = !_showClassLabels,
+                              ),
+                              onAnnotationClassChanged: _changeAnnotationClass,
+                              onImageDisplaySizeChanged: (size) {
+                                _imageDisplaySize = size;
+                                final key = _selectedImageKey;
+                                if (key != null && size != Size.zero) {
+                                  _imageDisplaySizes[key] = size;
+                                }
+                              },
+                            ),
+                            _TrainPage(settings: _appSettings),
+                            _CropPage(exportPath: _appSettings.exportPath),
+                            _DetectVideoPage(
+                              settings: _appSettings,
+                              shortcutConfig: _shortcutConfig,
+                              session: _detectVideoSession,
+                            ),
+                          ],
                         ),
+                      ),
                     ],
                   ),
                 ),
@@ -2053,6 +2316,13 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
             ),
             if (_importingDataset)
               const Positioned.fill(child: _ImportBlockingOverlay()),
+            if (_videoFullscreenVisible)
+              Positioned.fill(
+                child: _VideoFullscreenOverlay(
+                  session: _detectVideoSession,
+                  shortcutConfig: _shortcutConfig,
+                ),
+              ),
           ],
         ),
       ),
@@ -2061,7 +2331,9 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
 }
 
 class _ImportBlockingOverlay extends StatelessWidget {
-  const _ImportBlockingOverlay();
+  const _ImportBlockingOverlay({this.message});
+
+  final String? message;
 
   @override
   Widget build(BuildContext context) {
@@ -2083,7 +2355,7 @@ class _ImportBlockingOverlay extends StatelessWidget {
                   ),
                   const SizedBox(height: 18),
                   Text(
-                    t('import.waiting'),
+                    message ?? t('import.waiting'),
                     style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w600,
@@ -2116,11 +2388,13 @@ class _TopMenuBar extends StatelessWidget {
     required this.onExit,
     required this.onImportDataset,
     required this.onExportDataset,
+    required this.onShowTrainingHistory,
     required this.onUndo,
     required this.onRedo,
     required this.onCopy,
     required this.onPaste,
     required this.onShowSettings,
+    required this.onShowLogs,
     required this.onShowHelp,
     required this.onLanguageSelected,
     required this.onPointerEnter,
@@ -2140,11 +2414,13 @@ class _TopMenuBar extends StatelessWidget {
   final VoidCallback onExit;
   final VoidCallback onImportDataset;
   final VoidCallback onExportDataset;
+  final VoidCallback onShowTrainingHistory;
   final VoidCallback onUndo;
   final VoidCallback onRedo;
   final VoidCallback onCopy;
   final VoidCallback onPaste;
   final VoidCallback onShowSettings;
+  final VoidCallback onShowLogs;
   final VoidCallback onShowHelp;
   final Future<void> Function(String code) onLanguageSelected;
   final VoidCallback onPointerEnter;
@@ -2196,6 +2472,11 @@ class _TopMenuBar extends StatelessWidget {
                             onPressed: onOpenFolder,
                             leadingIcon: const Icon(Icons.folder_open),
                             child: Text(t('menu.openFolder')),
+                          ),
+                          MenuItemButton(
+                            onPressed: onShowTrainingHistory,
+                            leadingIcon: const Icon(Icons.history),
+                            child: Text(t('menu.trainingHistory')),
                           ),
                           _RecentFilesMenu(
                             recentFolders: recentFolders,
@@ -2266,6 +2547,11 @@ class _TopMenuBar extends StatelessWidget {
                             onPressed: onShowSettings,
                             leadingIcon: const Icon(Icons.settings_outlined),
                             child: Text(t('settings.preferences')),
+                          ),
+                          MenuItemButton(
+                            onPressed: onShowLogs,
+                            leadingIcon: const Icon(Icons.article_outlined),
+                            child: Text(t('menu.viewLogs')),
                           ),
                           MenuItemButton(
                             onPressed: onShowSettings,
