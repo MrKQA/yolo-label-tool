@@ -8,6 +8,9 @@ use std::slice;
 #[path = "training.rs"]
 pub mod training_mod;
 
+#[path = "detecting.rs"]
+pub mod detecting_mod;
+
 use training_mod::{TrainingConfig, TrainingProgress};
 
 /// Smoke-test function exposed to Flutter through flutter_rust_bridge.
@@ -170,6 +173,20 @@ pub unsafe extern "C" fn rust_label_decode_video_frame_png(
         .map(|frame| frame.png_bytes)
         .unwrap_or_default();
     vec_into_ffi_buffer(result)
+}
+
+/// C ABI: run YOLO detection from a JSON request for Flutter's manual FFI path.
+#[frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn rust_label_detect_json(
+    request_ptr: *const u8,
+    request_len: usize,
+) -> RustLabelByteBuffer {
+    let result = string_from_ffi(request_ptr, request_len)
+        .and_then(|request| detect_from_json_request(&request))
+        .map(detect_result_json)
+        .unwrap_or_else(error_json);
+    vec_into_ffi_buffer(result.into_bytes())
 }
 
 /// C ABI: free buffers returned by `rust_label_*` FFI functions.
@@ -696,11 +713,171 @@ fn video_playback_info_json(info: VideoPlaybackInfo) -> String {
     )
 }
 
+fn detect_result_json(result: detecting_mod::DetectResult) -> String {
+    if result.ok {
+        format!(
+            "{{\"ok\":true,\"outputPath\":\"{}\",\"labelCount\":{}}}",
+            json_escape(&result.output_path),
+            result.label_count,
+        )
+    } else {
+        error_json(
+            result
+                .error
+                .unwrap_or_else(|| "Detection failed".to_string()),
+        )
+    }
+}
+
+fn detect_from_json_request(request: &str) -> Result<detecting_mod::DetectResult, String> {
+    let mode = json_string_field(request, "mode").unwrap_or_else(|| "image".to_string());
+    let python_path = required_json_string(request, "pythonPath")?;
+    let model_path = required_json_string(request, "modelPath")?;
+    let input_path = required_json_string(request, "inputPath")?;
+    let output_dir = required_json_string(request, "outputDir")?;
+    let output_name = json_string_field(request, "outputName").unwrap_or_else(|| {
+        let extension = if mode.eq_ignore_ascii_case("video") {
+            "mp4"
+        } else {
+            "jpg"
+        };
+        format!("result.{extension}")
+    });
+    let conf_threshold = json_f64_field(request, "confThreshold").unwrap_or(0.25);
+    let iou_threshold = json_f64_field(request, "iouThreshold").unwrap_or(0.45);
+    let imgsz = json_u32_field(request, "imgsz").unwrap_or(640);
+    let device = json_string_field(request, "device").unwrap_or_else(|| "auto".to_string());
+
+    if mode.eq_ignore_ascii_case("video") {
+        let ffmpeg_path = match json_string_field(request, "ffmpegPath") {
+            Some(path) if !path.trim().is_empty() => path,
+            _ => find_ffmpeg()
+                .ok_or_else(|| {
+                    "FFmpeg was not found. Set FFMPEG_PATH or add ffmpeg to PATH.".to_string()
+                })?
+                .to_string_lossy()
+                .into_owned(),
+        };
+        let req = detecting_mod::DetectVideoRequest {
+            python_path,
+            model_path,
+            input_path,
+            output_dir,
+            output_name,
+            conf_threshold,
+            iou_threshold,
+            imgsz,
+            device,
+            ffmpeg_path,
+        };
+        Ok(detecting_mod::detect_video(&req))
+    } else {
+        let req = detecting_mod::DetectImageRequest {
+            python_path,
+            model_path,
+            input_path,
+            output_dir,
+            output_name,
+            conf_threshold,
+            iou_threshold,
+            imgsz,
+            device,
+        };
+        Ok(detecting_mod::detect_image(&req))
+    }
+}
+
+fn required_json_string(request: &str, key: &str) -> Result<String, String> {
+    json_string_field(request, key)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| format!("Missing {key}"))
+}
+
 fn error_json(error: String) -> String {
     format!(
         "{{\"ok\":false,\"error\":\"{}\"}}",
         json_escape(error.trim())
     )
+}
+
+fn json_string_field(input: &str, key: &str) -> Option<String> {
+    let mut index = json_value_start(input, key)?;
+    let chars: Vec<char> = input.chars().collect();
+    if chars.get(index) != Some(&'"') {
+        return None;
+    }
+    index += 1;
+    let mut value = String::new();
+    while index < chars.len() {
+        match chars[index] {
+            '"' => return Some(value),
+            '\\' => {
+                index += 1;
+                let escaped = *chars.get(index)?;
+                match escaped {
+                    '"' => value.push('"'),
+                    '\\' => value.push('\\'),
+                    '/' => value.push('/'),
+                    'b' => value.push('\u{0008}'),
+                    'f' => value.push('\u{000c}'),
+                    'n' => value.push('\n'),
+                    'r' => value.push('\r'),
+                    't' => value.push('\t'),
+                    'u' => {
+                        let hex: String = chars.get(index + 1..index + 5)?.iter().collect();
+                        let code = u32::from_str_radix(&hex, 16).ok()?;
+                        value.push(char::from_u32(code)?);
+                        index += 4;
+                    }
+                    other => value.push(other),
+                }
+            }
+            ch => value.push(ch),
+        }
+        index += 1;
+    }
+    None
+}
+
+fn json_f64_field(input: &str, key: &str) -> Option<f64> {
+    json_raw_scalar(input, key)?.parse::<f64>().ok()
+}
+
+fn json_u32_field(input: &str, key: &str) -> Option<u32> {
+    let value = json_raw_scalar(input, key)?;
+    value.parse::<u32>().ok().or_else(|| {
+        value
+            .parse::<f64>()
+            .ok()
+            .filter(|number| number.is_finite() && *number >= 0.0)
+            .map(|number| number.round() as u32)
+    })
+}
+
+fn json_raw_scalar(input: &str, key: &str) -> Option<String> {
+    let start = json_value_start(input, key)?;
+    let chars: Vec<char> = input.chars().collect();
+    let mut end = start;
+    while end < chars.len() && !matches!(chars[end], ',' | '}' | ']') {
+        end += 1;
+    }
+    let value: String = chars[start..end].iter().collect();
+    Some(value.trim().trim_matches('"').to_string())
+}
+
+fn json_value_start(input: &str, key: &str) -> Option<usize> {
+    let needle = format!("\"{}\"", key);
+    let key_byte_index = input.find(&needle)?;
+    let after_key = key_byte_index + needle.len();
+    let colon_byte_offset = input[after_key..].find(':')?;
+    let value_byte_index = after_key + colon_byte_offset + 1;
+    let char_index = input[..value_byte_index].chars().count();
+    let chars: Vec<char> = input.chars().collect();
+    let mut index = char_index;
+    while index < chars.len() && chars[index].is_whitespace() {
+        index += 1;
+    }
+    Some(index)
 }
 
 fn finite_json_number(value: f64) -> String {
@@ -827,6 +1004,62 @@ pub fn poll_yolo_training_progress() -> Option<TrainingProgress> {
 #[frb]
 pub fn stop_yolo_training() -> Result<String, String> {
     training_mod::stop_training()
+}
+
+/// Run YOLO detection on a single image, save the annotated result.
+#[frb]
+pub fn detect_image(
+    python_path: String,
+    model_path: String,
+    input_path: String,
+    output_dir: String,
+    output_name: String,
+    conf_threshold: f64,
+    iou_threshold: f64,
+    imgsz: u32,
+    device: String,
+) -> detecting_mod::DetectResult {
+    let req = detecting_mod::DetectImageRequest {
+        python_path,
+        model_path,
+        input_path,
+        output_dir,
+        output_name,
+        conf_threshold,
+        iou_threshold,
+        imgsz,
+        device,
+    };
+    detecting_mod::detect_image(&req)
+}
+
+/// Run YOLO detection on a video, encode output with FFmpeg h264.
+#[frb]
+pub fn detect_video(
+    python_path: String,
+    model_path: String,
+    input_path: String,
+    output_dir: String,
+    output_name: String,
+    conf_threshold: f64,
+    iou_threshold: f64,
+    imgsz: u32,
+    device: String,
+    ffmpeg_path: String,
+) -> detecting_mod::DetectResult {
+    let req = detecting_mod::DetectVideoRequest {
+        python_path,
+        model_path,
+        input_path,
+        ffmpeg_path,
+        output_dir,
+        output_name,
+        conf_threshold,
+        iou_threshold,
+        imgsz,
+        device,
+    };
+    detecting_mod::detect_video(&req)
 }
 
 fn count_images_with_prefix(

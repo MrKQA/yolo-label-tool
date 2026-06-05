@@ -339,8 +339,26 @@ class _LanguageStrings {
     'detect.chooseFolder': '选择文件夹',
     'detect.playVideo': '播放视频',
     'detect.predictVideo': '预测视频',
-    'detect.predictAll': '全部预测',
+    'detect.predictAll': '全部',
     'detect.saveResult': '保存结果',
+    'detect.predict': '预测',
+    'detect.chooseModel': '选择模型',
+    'detect.predicting': '预测中',
+    'detect.showOriginal': '查看原图',
+    'detect.showPredicted': '查看预测',
+    'detect.imgsz': '尺寸',
+    'detect.conf': '置信度',
+    'detect.device': '设备',
+    'detect.deviceAuto': '自动',
+    'detect.deviceNvUnavailable': '未检测到 NVIDIA 显卡',
+    'detect.deviceCpu': 'CPU',
+    'detect.deviceHelp':
+        '自动会优先使用 NVIDIA CUDA，检测不到或预测失败会回退 CPU；中间项显示检测到的 NVIDIA 显卡型号；CPU 只使用处理器。',
+    'detect.pythonNotConfigured': '请先在设置中配置 Python 环境路径',
+    'detect.detectDone': '预测完成',
+    'detect.saveDone': '保存完成',
+    'detect.detectFailed': '预测失败',
+    'detect.detectCount': '目标数',
     'detect.model': '检测模型',
     'detect.fileName': '文件名',
     'detect.paused': '已暂停',
@@ -2092,8 +2110,9 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                                 ? null
                                 : (value) async {
                                     if (value == null) return;
-                                    final nextText =
-                                        await _readTrainingLogTail(value);
+                                    final nextText = await _readTrainingLogTail(
+                                      value,
+                                    );
                                     setDialogState(() {
                                       selectedPath = value;
                                       logText = nextText;

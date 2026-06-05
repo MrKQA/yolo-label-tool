@@ -81,6 +81,34 @@ class _RustVideoBackend {
     );
   }
 
+  static Future<_DetectResult> detect({
+    required String mode,
+    required String pythonPath,
+    required String modelPath,
+    required String inputPath,
+    required String outputDir,
+    required String outputName,
+    required double confThreshold,
+    required double iouThreshold,
+    required int imgsz,
+    required String device,
+  }) {
+    return Isolate.run(
+      () => _detectSync(
+        mode: mode,
+        pythonPath: pythonPath,
+        modelPath: modelPath,
+        inputPath: inputPath,
+        outputDir: outputDir,
+        outputName: outputName,
+        confThreshold: confThreshold,
+        iouThreshold: iouThreshold,
+        imgsz: imgsz,
+        device: device,
+      ),
+    );
+  }
+
   static _RustVideoInfo _loadInfoSync(String videoPath) {
     final bindings = _RustVideoBindings.open();
     final pathBytes = Uint8List.fromList(utf8.encode(videoPath));
@@ -130,6 +158,65 @@ class _RustVideoBackend {
       bindings.allocator.free(pathPtr);
     }
   }
+
+  static _DetectResult _detectSync({
+    required String mode,
+    required String pythonPath,
+    required String modelPath,
+    required String inputPath,
+    required String outputDir,
+    required String outputName,
+    required double confThreshold,
+    required double iouThreshold,
+    required int imgsz,
+    required String device,
+  }) {
+    final bindings = _RustVideoBindings.open();
+    final request = jsonEncode({
+      'mode': mode,
+      'pythonPath': pythonPath,
+      'modelPath': modelPath,
+      'inputPath': inputPath,
+      'outputDir': outputDir,
+      'outputName': outputName,
+      'confThreshold': confThreshold,
+      'iouThreshold': iouThreshold,
+      'imgsz': imgsz,
+      'device': device,
+    });
+    final requestBytes = Uint8List.fromList(utf8.encode(request));
+    final requestPtr = bindings.allocator.allocate(requestBytes);
+    try {
+      final buffer = bindings.detectJson(requestPtr, requestBytes.length);
+      final jsonText = bindings.takeUtf8(buffer);
+      final decoded = jsonDecode(jsonText);
+      if (decoded is! Map<String, dynamic>) {
+        throw StateError('Invalid detection response');
+      }
+      return _DetectResult(
+        ok: decoded['ok'] == true,
+        outputPath: '${decoded['outputPath'] ?? ''}',
+        error: decoded['error']?.toString(),
+        labelCount: (decoded['labelCount'] as num?)?.toInt() ?? 0,
+      );
+    } finally {
+      bindings.allocator.free(requestPtr);
+    }
+  }
+}
+
+class _DetectResult {
+  const _DetectResult({
+    required this.ok,
+    required this.outputPath,
+    required this.error,
+    required this.labelCount,
+  });
+
+  final bool ok;
+  final String outputPath;
+  final String? error;
+  final int labelCount;
 }
 
 class _RustVideoInfo {
@@ -158,6 +245,7 @@ class _RustVideoInfo {
     }
     return 0;
   }
+
   double get safeFps =>
       fps.isFinite && fps > 0 ? fps.clamp(1, 60).toDouble() : 25;
 }
@@ -186,6 +274,10 @@ typedef _DecodeVideoFrameNative =
     );
 typedef _DecodeVideoFrameDart =
     _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int, double, int);
+typedef _DetectJsonNative =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef _DetectJsonDart =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 
 typedef _FreeByteBufferNative = ffi.Void Function(_RustVideoByteBuffer);
 typedef _FreeByteBufferDart = void Function(_RustVideoByteBuffer);
@@ -201,6 +293,9 @@ class _RustVideoBindings {
           .lookupFunction<_DecodeVideoFrameNative, _DecodeVideoFrameDart>(
             'rust_label_decode_video_frame_png',
           ),
+      detectJson = library.lookupFunction<_DetectJsonNative, _DetectJsonDart>(
+        'rust_label_detect_json',
+      ),
       _freeByteBuffer = library
           .lookupFunction<_FreeByteBufferNative, _FreeByteBufferDart>(
             'rust_label_free_byte_buffer',
@@ -209,6 +304,7 @@ class _RustVideoBindings {
   final _WindowsHeapAllocator allocator;
   final _VideoInfoJsonDart videoInfoJson;
   final _DecodeVideoFrameDart decodeVideoFramePng;
+  final _DetectJsonDart detectJson;
   final _FreeByteBufferDart _freeByteBuffer;
 
   static _RustVideoBindings open() {

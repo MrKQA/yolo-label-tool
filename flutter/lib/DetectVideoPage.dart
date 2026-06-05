@@ -3,6 +3,8 @@
 part of 'main.dart';
 
 const _videoExtensions = {'mp4', 'avi', 'mov', 'mkv', 'webm', 'wmv', 'flv'};
+const _detectImageSizeOptions = [320, 416, 640, 800, 960, 1280];
+const _detectDeviceOptions = ['auto', 'nv', 'cpu'];
 const _mediaTypeGroup = XTypeGroup(
   label: 'Image or video',
   extensions: [
@@ -40,11 +42,16 @@ class _DetectVideoSession extends ChangeNotifier {
   bool previewPanelVisible = true;
   bool videoLoading = false;
   bool scrubbing = false;
+  bool predicting = false;
   bool fullscreen = false;
   double playbackSpeed = 1;
   double volume = 1;
+  double detectConf = 0.25;
+  int detectImageSize = 640;
+  String detectDevice = 'auto';
   double? scrubSeconds;
   String? selectedInput;
+  String? predictionOutputPath;
   String? detectModelPath;
   String? videoStatus;
   String? _controllerPath;
@@ -52,6 +59,7 @@ class _DetectVideoSession extends ChangeNotifier {
   video_player_win.WinVideoPlayerController? controller;
   _VideoScaleMode scaleMode = _VideoScaleMode.auto;
   List<String> folderItems = const [];
+  final Map<String, String> _predictionOutputsByInput = {};
   double _positionAnchorSeconds = 0;
   DateTime? _positionAnchorTime;
 
@@ -62,6 +70,14 @@ class _DetectVideoSession extends ChangeNotifier {
       selectedInput != null && _isVideoPath(selectedInput!);
 
   bool get canSaveResult => predictVideo || predictAll || selectedInputIsImage;
+
+  String? get displayInput {
+    final output = predictionOutputPath;
+    if (showPredictionResult && output != null && File(output).existsSync()) {
+      return output;
+    }
+    return selectedInput;
+  }
 
   bool get hasInitializedVideo =>
       controller != null && controller!.value.isInitialized;
@@ -194,6 +210,7 @@ class _DetectVideoSession extends ChangeNotifier {
     }
     selectedInput = path;
     showPredictionResult = true;
+    predictionOutputPath = _cachedPredictionOutput(path);
     saveResult = saveResult && _canSaveForInput(path);
     if (!sameInput) {
       await _resetVideoController();
@@ -203,9 +220,19 @@ class _DetectVideoSession extends ChangeNotifier {
   }
 
   bool _canSaveForInput(String? input) {
-    return predictVideo ||
-        predictAll ||
-        (input != null && _isImagePath(input));
+    return predictVideo || predictAll || (input != null && _isImagePath(input));
+  }
+
+  String? _cachedPredictionOutput(String input) {
+    final cached = _predictionOutputsByInput[_pathKey(input)];
+    if (cached == null) {
+      return null;
+    }
+    if (File(cached).existsSync()) {
+      return cached;
+    }
+    _predictionOutputsByInput.remove(_pathKey(input));
+    return null;
   }
 
   Future<void> _resetVideoController() async {
@@ -227,8 +254,12 @@ class _DetectVideoSession extends ChangeNotifier {
   }
 
   Future<void> loadSelectedVideoIfNeeded() async {
-    final input = selectedInput;
-    if (input == null || !_isVideoPath(input) || !playVideo) {
+    final input = displayInput;
+    final predictionPreview =
+        predictVideo || predictAll || predictionOutputPath != null;
+    if (input == null ||
+        !_isVideoPath(input) ||
+        (!playVideo && !predictionPreview)) {
       return;
     }
     if (controller != null &&
@@ -284,7 +315,7 @@ class _DetectVideoSession extends ChangeNotifier {
       await nextController.setLooping(true);
       await nextController.setPlaybackSpeed(playbackSpeed);
       await nextController.setVolume(volume);
-      if (playVideo) {
+      if (playVideo || predictionPreview) {
         await nextController.play();
         _markPlaybackStarted();
       }
@@ -457,7 +488,9 @@ class _DetectVideoSession extends ChangeNotifier {
       }
     }
     if (showHud) {
-      _showShortcutHud('${t('detect.hudVolume')} ${(nextVolume * 100).round()}%');
+      _showShortcutHud(
+        '${t('detect.hudVolume')} ${(nextVolume * 100).round()}%',
+      );
     }
     if (changed) {
       _emit();
@@ -489,8 +522,6 @@ class _DetectVideoSession extends ChangeNotifier {
     if (value) {
       predictVideo = false;
       predictAll = false;
-    } else if (!predictVideo) {
-      predictVideo = true;
     }
     saveResult = saveResult && canSaveResult;
     if (value) {
@@ -507,6 +538,7 @@ class _DetectVideoSession extends ChangeNotifier {
     if (value && detectModelPath == null) {
       final model = await _chooseDetectModel(settings);
       if (model == null) {
+        _emit();
         return;
       }
       detectModelPath = model;
@@ -532,6 +564,7 @@ class _DetectVideoSession extends ChangeNotifier {
     if (value && detectModelPath == null) {
       final model = await _chooseDetectModel(settings);
       if (model == null) {
+        _emit();
         return;
       }
       detectModelPath = model;
@@ -548,6 +581,26 @@ class _DetectVideoSession extends ChangeNotifier {
     _emit();
   }
 
+  Future<void> setPredictionOutput(String? path) async {
+    predictionOutputPath = path;
+    final input = selectedInput;
+    if (input != null) {
+      final key = _pathKey(input);
+      if (path == null) {
+        _predictionOutputsByInput.remove(key);
+      } else {
+        _predictionOutputsByInput[key] = path;
+      }
+    }
+    showPredictionResult = path != null;
+    if (path != null && _isImagePath(path)) {
+      await FileImage(File(path)).evict();
+    }
+    await _resetVideoController();
+    _emit();
+    await loadSelectedVideoIfNeeded();
+  }
+
   void setSaveResult(bool value) {
     if (!canSaveResult) {
       return;
@@ -557,11 +610,16 @@ class _DetectVideoSession extends ChangeNotifier {
   }
 
   void togglePredictionResult() {
-    if (!predictVideo && !predictAll) {
+    if (!predictVideo && !predictAll && predictionOutputPath == null) {
       return;
     }
     showPredictionResult = !showPredictionResult;
     _emit();
+    _resetVideoController().then((_) {
+      if (!_disposed) {
+        loadSelectedVideoIfNeeded();
+      }
+    });
   }
 
   Future<bool> selectRelativeMedia(int delta) async {
@@ -572,10 +630,7 @@ class _DetectVideoSession extends ChangeNotifier {
       (path) => _pathKey(path) == _pathKey(selectedInput ?? ''),
     );
     final baseIndex = currentIndex < 0 ? 0 : currentIndex;
-    final nextIndex = (baseIndex + delta).clamp(
-      0,
-      folderItems.length - 1,
-    );
+    final nextIndex = (baseIndex + delta).clamp(0, folderItems.length - 1);
     if (nextIndex == baseIndex) {
       return false;
     }
@@ -605,7 +660,7 @@ class _DetectVideoSession extends ChangeNotifier {
     final file = await openFile(
       initialDirectory: initialDirectory,
       acceptedTypeGroups: const [
-        XTypeGroup(label: 'PyTorch model', extensions: ['pt']),
+        XTypeGroup(label: 'YOLO model', extensions: ['pt', 'onnx']),
       ],
     );
     return file?.path;
@@ -645,7 +700,9 @@ class _DetectVideoSession extends ChangeNotifier {
         key == LogicalKeyboardKey.numpadEnter) {
       if (event is KeyDownEvent) {
         _showShortcutHud(
-          fullscreen ? t('detect.hudExitFullscreen') : t('detect.hudFullscreen'),
+          fullscreen
+              ? t('detect.hudExitFullscreen')
+              : t('detect.hudFullscreen'),
         );
         requestFullscreenToggle();
       }
@@ -699,10 +756,7 @@ class _DetectVideoSession extends ChangeNotifier {
 }
 
 class _VideoShortcutHud {
-  const _VideoShortcutHud({
-    required this.text,
-    required this.hold,
-  });
+  const _VideoShortcutHud({required this.text, required this.hold});
 
   final String text;
   final bool hold;
@@ -745,6 +799,8 @@ class _DetectVideoPage extends StatefulWidget {
 
 class _DetectVideoPageState extends State<_DetectVideoPage> {
   final FocusNode _focusNode = FocusNode(debugLabel: 'detect-video');
+  late final TextEditingController _confController;
+  late final List<_TrainingDeviceOption> _nvidiaDeviceOptions;
   Timer? _previewHideTimer;
 
   _DetectVideoSession get _session => widget.session;
@@ -752,6 +808,10 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
   @override
   void initState() {
     super.initState();
+    _confController = TextEditingController(
+      text: _session.detectConf.toStringAsFixed(2),
+    );
+    _nvidiaDeviceOptions = _detectNvidiaDevices();
     _session.addListener(_handleSessionChanged);
     _schedulePreviewHide();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -768,6 +828,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
     if (oldWidget.session != widget.session) {
       oldWidget.session.removeListener(_handleSessionChanged);
       widget.session.addListener(_handleSessionChanged);
+      _confController.text = _session.detectConf.toStringAsFixed(2);
     }
   }
 
@@ -775,6 +836,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
   void dispose() {
     _previewHideTimer?.cancel();
     _session.removeListener(_handleSessionChanged);
+    _confController.dispose();
     _focusNode.dispose();
     super.dispose();
   }
@@ -789,6 +851,144 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
     if (mounted) {
       FocusScope.of(context).requestFocus(_focusNode);
     }
+  }
+
+  Future<void> _ensureDetectModel() async {
+    if (_session.detectModelPath != null) return;
+    final model = await _DetectVideoSession._chooseDetectModel(widget.settings);
+    if (model != null) {
+      _session.detectModelPath = model;
+    }
+  }
+
+  Future<void> _handlePredict() async {
+    await _runDetection(save: false);
+  }
+
+  Future<void> _handlePredictButton() async {
+    if (_session.detectModelPath == null) {
+      await _ensureDetectModel();
+      if (_session.detectModelPath == null) {
+        return;
+      }
+      if (_session.selectedInput == null) {
+        _session._emit();
+        return;
+      }
+    }
+    await _handlePredict();
+  }
+
+  Future<void> _handleSave() async {
+    await _runDetection(save: true);
+  }
+
+  Future<void> _runDetection({required bool save}) async {
+    if (_session.predicting) {
+      return;
+    }
+    _applyConfText();
+    final input = _session.selectedInput;
+    if (input == null) {
+      return;
+    }
+    final pythonPath = widget.settings.pythonPath.trim();
+    if (pythonPath.isEmpty) {
+      _showDetectMessage(t('detect.pythonNotConfigured'));
+      return;
+    }
+    await _ensureDetectModel();
+    final modelPath = _session.detectModelPath;
+    if (modelPath == null) return;
+    final isVideo = _isVideoPath(input);
+    _session.predicting = true;
+    _session.showPredictionResult = true;
+    _session.videoStatus = t('detect.predicting');
+    _session._emit();
+    try {
+      final result = await _RustVideoBackend.detect(
+        mode: isVideo ? 'video' : 'image',
+        pythonPath: pythonPath,
+        modelPath: modelPath,
+        inputPath: input,
+        outputDir: _detectOutputDirectory(save: save),
+        outputName: _detectOutputName(input, save: save),
+        confThreshold: _session.detectConf,
+        iouThreshold: 0.45,
+        imgsz: _session.detectImageSize,
+        device: _session.detectDevice,
+      );
+      if (!mounted) {
+        return;
+      }
+      if (!result.ok) {
+        final error = result.error ?? t('detect.detectFailed');
+        _session.videoStatus = '${t('detect.detectFailed')}: $error';
+        _showDetectMessage(_session.videoStatus!);
+        return;
+      }
+      _session.predictVideo = isVideo;
+      _session.showPredictionResult = true;
+      await _session.setPredictionOutput(result.outputPath);
+      _session.videoStatus =
+          '${save ? t('detect.saveDone') : t('detect.detectDone')} '
+          '(${t('detect.detectCount')}: ${result.labelCount})';
+      _showDetectMessage(_session.videoStatus!);
+    } finally {
+      if (mounted) {
+        _session.predicting = false;
+        _session._emit();
+      }
+    }
+  }
+
+  String _detectOutputDirectory({required bool save}) {
+    final root = widget.settings.outputPath.trim().isNotEmpty
+        ? widget.settings.outputPath.trim()
+        : _ConfigStore.defaultRunsDirectory.path;
+    final directory = Directory(
+      _joinPath(root, save ? 'detect_exports' : 'detect_preview'),
+    );
+    directory.createSync(recursive: true);
+    return directory.path;
+  }
+
+  String _detectOutputName(String input, {required bool save}) {
+    final stem = _baseNameWithoutExtension(input);
+    final extension = _isVideoPath(input) ? '.mp4' : '.jpg';
+    final suffix = save ? _timestampFileSuffix() : 'preview';
+    return '${stem}_$suffix$extension';
+  }
+
+  String _timestampFileSuffix() {
+    final now = DateTime.now();
+    String two(int value) => value.toString().padLeft(2, '0');
+    return '${now.year}${two(now.month)}${two(now.day)}_'
+        '${two(now.hour)}${two(now.minute)}${two(now.second)}';
+  }
+
+  void _applyConfText() {
+    final parsed = double.tryParse(_confController.text.trim());
+    if (parsed == null) {
+      _confController.text = _session.detectConf.toStringAsFixed(2);
+      return;
+    }
+    final clamped = parsed.clamp(0.01, 1.0).toDouble();
+    _session.detectConf = clamped;
+    final normalized = clamped.toStringAsFixed(2);
+    if (_confController.text != normalized) {
+      _confController.text = normalized;
+    }
+    _session._emit();
+  }
+
+  void _showDetectMessage(String message) {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
   void _schedulePreviewHide() {
@@ -822,6 +1022,12 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
 
   @override
   Widget build(BuildContext context) {
+    final deviceValue = _detectDeviceOptions.contains(_session.detectDevice)
+        ? _session.detectDevice
+        : 'auto';
+    final nvidiaDeviceLabel =
+        _nvidiaDeviceOptions.firstOrNullValue?.label ??
+        t('detect.deviceNvUnavailable');
     final content = Expanded(
       child: Focus(
         focusNode: _focusNode,
@@ -863,23 +1069,142 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
                       label: t('detect.playVideo'),
                       onChanged: (value) => _session.setPlayMode(value),
                     ),
-                    _DetectCheckbox(
-                      value: _session.predictVideo,
-                      label: t('detect.predictVideo'),
-                      onChanged: (value) =>
-                          _session.setPredictMode(value, widget.settings),
+                    FilledButton.icon(
+                      onPressed:
+                          _session.predicting ||
+                              (_session.detectModelPath != null &&
+                                  _session.selectedInput == null)
+                          ? null
+                          : () => _handlePredictButton(),
+                      icon: _session.predicting
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.visibility),
+                      label: Text(
+                        _session.predicting
+                            ? t('detect.predicting')
+                            : _session.detectModelPath == null
+                            ? t('detect.chooseModel')
+                            : t('detect.predict'),
+                      ),
                     ),
-                    _DetectCheckbox(
-                      value: _session.predictAll,
-                      label: t('detect.predictAll'),
-                      onChanged: (value) =>
-                          _session.setPredictAllMode(value, widget.settings),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Checkbox(
+                          value: _session.predictAll,
+                          onChanged: _session.predicting || _session.playVideo
+                              ? null
+                              : (v) => _session.setPredictAllMode(
+                                  v ?? false,
+                                  widget.settings,
+                                ),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        Text(t('detect.predictAll')),
+                      ],
                     ),
-                    _DetectCheckbox(
-                      value: _session.saveResult,
-                      label: t('detect.saveResult'),
-                      enabled: _session.canSaveResult,
-                      onChanged: _session.setSaveResult,
+                    FilledButton.icon(
+                      onPressed:
+                          _session.selectedInput == null || _session.predicting
+                          ? null
+                          : () => _handleSave(),
+                      icon: const Icon(Icons.save_alt),
+                      label: Text(t('detect.saveResult')),
+                    ),
+                    if (_session.showPredictionResult)
+                      OutlinedButton.icon(
+                        onPressed: _session.togglePredictionResult,
+                        icon: const Icon(Icons.compare),
+                        label: Text(t('detect.showOriginal')),
+                      )
+                    else
+                      OutlinedButton.icon(
+                        onPressed: _session.togglePredictionResult,
+                        icon: const Icon(Icons.compare),
+                        label: Text(t('detect.showPredicted')),
+                      ),
+                    SizedBox(
+                      width: 104,
+                      child: DropdownButtonFormField<int>(
+                        initialValue: _session.detectImageSize,
+                        items: [
+                          for (final size in _detectImageSizeOptions)
+                            DropdownMenuItem(value: size, child: Text('$size')),
+                        ],
+                        onChanged: _session.predicting
+                            ? null
+                            : (value) {
+                                if (value == null) return;
+                                _session.detectImageSize = value;
+                                _session._emit();
+                              },
+                        decoration: InputDecoration(
+                          labelText: t('detect.imgsz'),
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 104,
+                      child: TextField(
+                        controller: _confController,
+                        enabled: !_session.predicting,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        onEditingComplete: _applyConfText,
+                        onSubmitted: (_) => _applyConfText(),
+                        decoration: InputDecoration(
+                          labelText: t('detect.conf'),
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 220,
+                      child: Tooltip(
+                        message: t('detect.deviceHelp'),
+                        waitDuration: const Duration(milliseconds: 500),
+                        child: DropdownButtonFormField<String>(
+                          initialValue: deviceValue,
+                          items: [
+                            DropdownMenuItem(
+                              value: 'auto',
+                              child: Text(t('detect.deviceAuto')),
+                            ),
+                            DropdownMenuItem(
+                              value: 'nv',
+                              child: Text(
+                                nvidiaDeviceLabel,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            DropdownMenuItem(
+                              value: 'cpu',
+                              child: Text(t('detect.deviceCpu')),
+                            ),
+                          ],
+                          onChanged: _session.predicting
+                              ? null
+                              : (value) {
+                                  if (value == null) return;
+                                  _session.detectDevice = value;
+                                  _session._emit();
+                                },
+                          decoration: InputDecoration(
+                            labelText: t('detect.device'),
+                            isDense: true,
+                          ),
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -1038,8 +1363,11 @@ class _DetectPlaybackSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final input = session.selectedInput;
-    final isPredictionMode = session.predictVideo || session.predictAll;
+    final input = session.displayInput;
+    final isPredictionMode =
+        session.predictVideo ||
+        session.predictAll ||
+        session.predictionOutputPath != null;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: isPredictionMode ? onToggleResult : null,
@@ -1224,10 +1552,7 @@ class _VideoFullscreenOverlayState extends State<_VideoFullscreenOverlay> {
 }
 
 class _VideoPlayerPanel extends StatelessWidget {
-  const _VideoPlayerPanel({
-    required this.session,
-    this.fullscreen = false,
-  });
+  const _VideoPlayerPanel({required this.session, this.fullscreen = false});
 
   final _DetectVideoSession session;
   final bool fullscreen;
@@ -1532,165 +1857,48 @@ class _VideoPlayerShellState extends State<_VideoPlayerShell> {
         child: ColoredBox(
           color: Colors.black,
           child: SizedBox.expand(
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: Padding(
-                  padding: videoInsets,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: Colors.black,
-                      borderRadius: BorderRadius.circular(videoRadius),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(videoRadius),
-                      child: Center(child: widget.child),
-                    ),
-                  ),
-                ),
-              ),
-              if (session.videoLoading)
-                const Positioned.fill(
-                  child: IgnorePointer(
-                    child: Center(child: CircularProgressIndicator()),
-                  ),
-                ),
-              if (_shortcutHudText.isNotEmpty)
+            child: Stack(
+              children: [
                 Positioned.fill(
-                  child: IgnorePointer(
-                    child: Center(
-                      child: AnimatedOpacity(
-                        duration: const Duration(milliseconds: 180),
-                        opacity: _shortcutHudVisible ? 1 : 0,
-                        child: Text(
-                          _shortcutHudText,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: _shortcutHudTextColor,
-                            fontSize: fullscreen ? 44 : 32,
-                            fontWeight: FontWeight.w700,
-                            shadows: [
-                              Shadow(
-                                color: _shortcutHudShadowColor,
-                                blurRadius: 10,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              Positioned(
-                left: 12,
-                right: 12,
-                bottom: 12,
-                child: IgnorePointer(
-                  ignoring: !_controlsVisible,
-                  child: AnimatedOpacity(
-                    duration: const Duration(milliseconds: 180),
-                    opacity: _controlsVisible ? 1 : 0,
+                  child: Padding(
+                    padding: videoInsets,
                     child: DecoratedBox(
                       decoration: BoxDecoration(
-                        color: controlColor,
-                        border: Border.all(color: controlBorder),
-                        borderRadius: BorderRadius.circular(6),
+                        color: Colors.black,
+                        borderRadius: BorderRadius.circular(videoRadius),
                       ),
-                      child: IconTheme.merge(
-                        data: IconThemeData(
-                          color: fullscreen ? Colors.white : null,
-                        ),
-                        child: DefaultTextStyle.merge(
-                          style: controlTextStyle,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 8,
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    IconButton(
-                                      visualDensity: VisualDensity.compact,
-                                      onPressed: session.hasInitializedVideo
-                                          ? session.togglePause
-                                          : null,
-                                      icon: Icon(
-                                        session.isPaused
-                                            ? Icons.play_arrow
-                                            : Icons.pause,
-                                      ),
-                                      tooltip: session.isPaused
-                                          ? t('detect.playing')
-                                          : t('detect.paused'),
-                                    ),
-                                    Expanded(
-                                      child: Slider(
-                                        value: sliderValue,
-                                        min: 0,
-                                        max: sliderMax,
-                                        onChangeStart: canSeek
-                                            ? _beginScrub
-                                            : null,
-                                        onChanged: canSeek
-                                            ? _updateScrub
-                                            : null,
-                                        onChangeEnd: canSeek ? _endScrub : null,
-                                      ),
-                                    ),
-                                    SizedBox(
-                                      width: 118,
-                                      child: Text(
-                                        '${_formatVideoTime(sliderValue)} / ${_formatVideoTime(durationSeconds)}',
-                                        textAlign: TextAlign.right,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    _SpeedSelector(
-                                      currentSpeed: session.playbackSpeed,
-                                      onSelected: (speed) {
-                                        _showControls();
-                                        session.setPlaybackSpeed(speed);
-                                      },
-                                    ),
-                                    const SizedBox(width: 8),
-                                    _VideoScaleSelector(
-                                      currentMode: session.scaleMode,
-                                      onSelected: (mode) {
-                                        _showControls();
-                                        session.setScaleMode(mode);
-                                      },
-                                    ),
-                                    const SizedBox(width: 8),
-                                    _VolumeIndicator(volume: session.volume),
-                                  ],
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(videoRadius),
+                        child: Center(child: widget.child),
+                      ),
+                    ),
+                  ),
+                ),
+                if (session.videoLoading)
+                  const Positioned.fill(
+                    child: IgnorePointer(
+                      child: Center(child: CircularProgressIndicator()),
+                    ),
+                  ),
+                if (_shortcutHudText.isNotEmpty)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: Center(
+                        child: AnimatedOpacity(
+                          duration: const Duration(milliseconds: 180),
+                          opacity: _shortcutHudVisible ? 1 : 0,
+                          child: Text(
+                            _shortcutHudText,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: _shortcutHudTextColor,
+                              fontSize: fullscreen ? 44 : 32,
+                              fontWeight: FontWeight.w700,
+                              shadows: [
+                                Shadow(
+                                  color: _shortcutHudShadowColor,
+                                  blurRadius: 10,
                                 ),
-                                if (session.selectedInput != null)
-                                  Text(
-                                    _fileName(session.selectedInput!),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                if (session.videoStatus != null)
-                                  Text(
-                                    session.videoStatus!,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodySmall
-                                        ?.merge(controlTextStyle),
-                                  ),
-                                if (session.predictVideo || session.predictAll)
-                                  Text(
-                                    t('detect.clickToggleResult'),
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodySmall
-                                        ?.merge(controlTextStyle),
-                                  ),
                               ],
                             ),
                           ),
@@ -1698,12 +1906,132 @@ class _VideoPlayerShellState extends State<_VideoPlayerShell> {
                       ),
                     ),
                   ),
+                Positioned(
+                  left: 12,
+                  right: 12,
+                  bottom: 12,
+                  child: IgnorePointer(
+                    ignoring: !_controlsVisible,
+                    child: AnimatedOpacity(
+                      duration: const Duration(milliseconds: 180),
+                      opacity: _controlsVisible ? 1 : 0,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: controlColor,
+                          border: Border.all(color: controlBorder),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: IconTheme.merge(
+                          data: IconThemeData(
+                            color: fullscreen ? Colors.white : null,
+                          ),
+                          child: DefaultTextStyle.merge(
+                            style: controlTextStyle,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      IconButton(
+                                        visualDensity: VisualDensity.compact,
+                                        onPressed: session.hasInitializedVideo
+                                            ? session.togglePause
+                                            : null,
+                                        icon: Icon(
+                                          session.isPaused
+                                              ? Icons.play_arrow
+                                              : Icons.pause,
+                                        ),
+                                        tooltip: session.isPaused
+                                            ? t('detect.playing')
+                                            : t('detect.paused'),
+                                      ),
+                                      Expanded(
+                                        child: Slider(
+                                          value: sliderValue,
+                                          min: 0,
+                                          max: sliderMax,
+                                          onChangeStart: canSeek
+                                              ? _beginScrub
+                                              : null,
+                                          onChanged: canSeek
+                                              ? _updateScrub
+                                              : null,
+                                          onChangeEnd: canSeek
+                                              ? _endScrub
+                                              : null,
+                                        ),
+                                      ),
+                                      SizedBox(
+                                        width: 118,
+                                        child: Text(
+                                          '${_formatVideoTime(sliderValue)} / ${_formatVideoTime(durationSeconds)}',
+                                          textAlign: TextAlign.right,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      _SpeedSelector(
+                                        currentSpeed: session.playbackSpeed,
+                                        onSelected: (speed) {
+                                          _showControls();
+                                          session.setPlaybackSpeed(speed);
+                                        },
+                                      ),
+                                      const SizedBox(width: 8),
+                                      _VideoScaleSelector(
+                                        currentMode: session.scaleMode,
+                                        onSelected: (mode) {
+                                          _showControls();
+                                          session.setScaleMode(mode);
+                                        },
+                                      ),
+                                      const SizedBox(width: 8),
+                                      _VolumeIndicator(volume: session.volume),
+                                    ],
+                                  ),
+                                  if (session.selectedInput != null)
+                                    Text(
+                                      _fileName(session.selectedInput!),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  if (session.videoStatus != null)
+                                    Text(
+                                      session.videoStatus!,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.merge(controlTextStyle),
+                                    ),
+                                  if (session.predictVideo ||
+                                      session.predictAll)
+                                    Text(
+                                      t('detect.clickToggleResult'),
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.merge(controlTextStyle),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
-      ),
       ),
     );
   }
@@ -1823,9 +2151,7 @@ String _videoStatusText({
   required _RustVideoInfo? metadata,
   required String? metadataError,
 }) {
-  final parts = <String>[
-    '${size.width.round()}x${size.height.round()}',
-  ];
+  final parts = <String>['${size.width.round()}x${size.height.round()}'];
   final nativeDuration = nativeDurationSeconds.isFinite
       ? nativeDurationSeconds
       : 0.0;
@@ -1834,7 +2160,8 @@ String _videoStatusText({
     parts.add(_formatVideoTime(nativeDuration));
   }
   if (metadataDuration > 0 &&
-      (nativeDuration <= 0 || (metadataDuration - nativeDuration).abs() > 0.5)) {
+      (nativeDuration <= 0 ||
+          (metadataDuration - nativeDuration).abs() > 0.5)) {
     parts.add('FFmpeg ${_formatVideoTime(metadataDuration)}');
   }
   if (metadataDuration <= 0 && metadataError != null) {
@@ -1852,10 +2179,7 @@ String _shortVideoError(Object error) {
 }
 
 class _SpeedSelector extends StatelessWidget {
-  const _SpeedSelector({
-    required this.currentSpeed,
-    required this.onSelected,
-  });
+  const _SpeedSelector({required this.currentSpeed, required this.onSelected});
 
   final double currentSpeed;
   final ValueChanged<double> onSelected;
@@ -1892,10 +2216,7 @@ class _SpeedSelector extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                '${currentSpeed}x',
-                style: const TextStyle(fontSize: 12),
-              ),
+              Text('${currentSpeed}x', style: const TextStyle(fontSize: 12)),
               const Icon(Icons.arrow_drop_down, size: 16),
             ],
           ),
@@ -2003,12 +2324,10 @@ class _DetectCheckbox extends StatelessWidget {
     required this.value,
     required this.label,
     required this.onChanged,
-    this.enabled = true,
   });
 
   final bool value;
   final String label;
-  final bool enabled;
   final ValueChanged<bool> onChanged;
 
   @override
@@ -2016,7 +2335,7 @@ class _DetectCheckbox extends StatelessWidget {
     return FilterChip(
       selected: value,
       label: Text(label),
-      onSelected: enabled ? onChanged : null,
+      onSelected: onChanged,
       avatar: Icon(value ? Icons.check_box : Icons.check_box_outline_blank),
     );
   }
