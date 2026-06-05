@@ -12,6 +12,7 @@ ffmpeg/
 # IDE
 .idea/
 .vscode/
+.claude/
 
 # models
 models/

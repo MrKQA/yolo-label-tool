@@ -64,9 +64,18 @@ python_exe_dir = os.path.dirname(python_path)
 python_root = python_exe_dir
 if os.path.basename(python_exe_dir).lower() == "scripts":
     python_root = os.path.dirname(python_exe_dir)
+worker_python_path = python_path
+if os.name == "nt":
+    pythonw_path = os.path.join(python_exe_dir, "pythonw.exe")
+    if os.path.isfile(pythonw_path):
+        worker_python_path = pythonw_path
+    elif workers > 0:
+        print("[rustlabel] pythonw.exe was not found; forcing workers=0 to avoid worker console windows")
+        workers = 0
 
 print("[rustlabel] Python training bootstrap")
 print(f"[rustlabel] python_path={python_path}")
+print(f"[rustlabel] worker_python_path={worker_python_path}")
 print(f"[rustlabel] python_root={python_root}")
 print(f"[rustlabel] model_path={model_path}")
 print(f"[rustlabel] data_yaml_path={data_yaml_path}")
@@ -115,11 +124,11 @@ print(f"[rustlabel] PATH prefix={os.environ.get('PATH', '')[:1000]}")
 try:
     import multiprocessing as _rustlabel_multiprocessing
     import multiprocessing.spawn as _rustlabel_multiprocessing_spawn
-    sys.executable = python_path
+    sys.executable = worker_python_path
     if hasattr(sys, "_base_executable"):
-        sys._base_executable = python_path
+        sys._base_executable = worker_python_path
     _rustlabel_multiprocessing.freeze_support()
-    _rustlabel_multiprocessing.set_executable(python_path)
+    _rustlabel_multiprocessing.set_executable(worker_python_path)
     print(f"[rustlabel] multiprocessing executable={_rustlabel_multiprocessing_spawn.get_executable()}")
 except Exception as error:
     print(f"[rustlabel] configure multiprocessing executable failed: {error}")

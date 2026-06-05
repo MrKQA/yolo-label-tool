@@ -16,6 +16,7 @@ class _TrainPage extends StatefulWidget {
 enum _BatchMode { fixed, autoGpu60, autoGpuRatio }
 
 const _imageSizeOptions = [320, 416, 640, 800, 960, 1280];
+const _trainingChartPointLimit = 2000;
 
 class _TrainingDeviceOption {
   const _TrainingDeviceOption({required this.id, required this.label});
@@ -51,6 +52,15 @@ class _TrainPageState extends State<_TrainPage> {
   int _currentEpoch = 0;
   String? _activeRunDir;
   _TrainingMetrics? _trainingMetrics;
+  final Map<String, int> _chartColors = {
+    'Train Loss': 0xFF2563EB,
+    'Val Loss': 0xFFDC2626,
+    'mAP@0.5': 0xFF16A34A,
+    'mAP@0.5:0.95': 0xFF9333EA,
+    'Precision': 0xFFEA580C,
+    'Recall': 0xFF0891B2,
+    'LR': 0xFF64748B,
+  };
   List<_TrainingMetricPoint> _trainingMetricPoints = const [];
   bool _showTrainingTerminal = false;
   String _trainingLogText = '';
@@ -112,6 +122,7 @@ class _TrainPageState extends State<_TrainPage> {
     _loadDeviceOptions();
     _loadModelOptions();
     _scheduleHide();
+    _restorePreferences();
   }
 
   @override
@@ -124,35 +135,168 @@ class _TrainPageState extends State<_TrainPage> {
   void _loadModelOptions({bool preserveSelection = true}) {
     final previous = _modelPath;
     setState(() {
-      _modelOptions =
-          _modelsDirectoryCandidates()
-              .expand((directory) {
-                if (!directory.existsSync()) {
-                  return const <String>[];
-                }
-                return directory
-                    .listSync()
-                    .whereType<File>()
-                    .map((file) => file.path)
-                    .where(_isSupportedYoloPtModel);
-              })
-              .toSet()
-              .toList()
-            ..sort(_naturalPathCompare);
-      if (previous != null &&
-          File(previous).existsSync() &&
-          !_modelOptions.any((path) => _pathKey(path) == _pathKey(previous))) {
-        _modelOptions = [..._modelOptions, previous]..sort(_naturalPathCompare);
-      }
+      final discovered = _modelsDirectoryCandidates().expand((directory) {
+        if (!directory.existsSync()) {
+          return const <String>[];
+        }
+        return directory
+            .listSync()
+            .whereType<File>()
+            .map((file) => file.path)
+            .where(_isSupportedYoloPtModel);
+      });
+      _modelOptions = _dedupeModelOptions(
+        discovered,
+        preferredPath: previous,
+      );
       if (preserveSelection &&
           previous != null &&
           _modelOptions.any((path) => _pathKey(path) == _pathKey(previous))) {
-        _modelPath = previous;
+        _modelPath = _matchingModelOption(previous);
       } else {
         _modelPath = _modelOptions.isEmpty ? null : _modelOptions.first;
       }
     });
     _refreshResumeInfo();
+  }
+
+  List<String> _dedupeModelOptions(
+    Iterable<String> paths, {
+    String? preferredPath,
+  }) {
+    final byKey = <String, String>{};
+    for (final path in paths) {
+      if (path.trim().isEmpty) {
+        continue;
+      }
+      byKey.putIfAbsent(_pathKey(path), () => path);
+    }
+    if (preferredPath != null &&
+        preferredPath.trim().isNotEmpty &&
+        File(preferredPath).existsSync()) {
+      byKey[_pathKey(preferredPath)] = preferredPath;
+    }
+    return byKey.values.toList()..sort(_compareModelPaths);
+  }
+
+  int _compareModelPaths(String left, String right) {
+    final leftOrder = _yoloModelSortOrder(left);
+    final rightOrder = _yoloModelSortOrder(right);
+    final order = leftOrder.compareTo(rightOrder);
+    return order == 0 ? _naturalPathCompare(left, right) : order;
+  }
+
+  String? _matchingModelOption(String path, [Iterable<String>? options]) {
+    final key = _pathKey(path);
+    for (final option in options ?? _modelOptions) {
+      if (_pathKey(option) == key) {
+        return option;
+      }
+    }
+    return null;
+  }
+
+  String? _modelDropdownValue([Iterable<String>? options]) {
+    final path = _modelPath;
+    if (path == null) {
+      return null;
+    }
+    return _matchingModelOption(path, options);
+  }
+
+  void _restorePreferences() {
+    final prefs = _ConfigStore.loadTrainingPreferences();
+    if (prefs.chartColors.isNotEmpty) {
+      _chartColors.addAll(prefs.chartColors);
+    }
+    if (prefs.parameters.isNotEmpty) {
+      setState(() {
+        _parameters.addAll(prefs.parameters);
+        _batchMode =
+            _BatchMode.values[prefs.batchModeIndex.clamp(
+              0,
+              _BatchMode.values.length - 1,
+            )];
+        _batchSize = prefs.batchSize;
+        _batchRatio = prefs.batchRatio;
+        _ampEnabled = prefs.ampEnabled;
+        if (prefs.selectedDeviceIds.isNotEmpty) {
+          _selectedDeviceIds = prefs.selectedDeviceIds.toSet();
+        }
+        if (prefs.modelPath != null && File(prefs.modelPath!).existsSync()) {
+          _modelOptions = _dedupeModelOptions(
+            _modelOptions,
+            preferredPath: prefs.modelPath,
+          );
+          _modelPath = _matchingModelOption(prefs.modelPath!) ?? prefs.modelPath;
+        }
+        if (prefs.datasetPath != null &&
+            File(prefs.datasetPath!).existsSync()) {
+          _datasetPath = prefs.datasetPath;
+          _datasetSummary = _DatasetSummary.fromYamlFile(prefs.datasetPath!);
+        }
+      });
+    }
+  }
+
+  void _savePreferences() {
+    final prefs = _TrainingPreferences(
+      modelPath: _modelPath,
+      datasetPath: _datasetPath,
+      parameters: Map<String, double>.from(_parameters),
+      batchModeIndex: _batchMode.index,
+      batchSize: _batchSize,
+      batchRatio: _batchRatio,
+      ampEnabled: _ampEnabled,
+      selectedDeviceIds: _selectedDeviceIds.toList(),
+      chartColors: Map<String, int>.from(_chartColors),
+    );
+    _ConfigStore.saveTrainingPreferences(prefs);
+  }
+
+  void _resetParameters() {
+    setState(() {
+      _parameters
+        ..clear()
+        ..addAll(const {
+          'epochs': 300,
+          'imgsz': 640,
+          'cls_pw': 0,
+          'lr0': 0.01,
+          'momentum': 0.937,
+          'hsv_s': 0.25,
+          'hsv_v': 0.5,
+          'translate': 0.1,
+          'scale': 0.25,
+          'shear': 5,
+          'flipud': 0,
+          'fliplr': 0,
+          'degrees': 0,
+        });
+      _batchMode = _BatchMode.fixed;
+      _batchSize = 16;
+      _batchRatio = 0.70;
+      _ampEnabled = false;
+      _selectedDeviceIds = const {'cpu'};
+    });
+    _savePreferences();
+  }
+
+  Future<void> _setChartColor(String key) async {
+    final current = Color(_chartColors[key] ?? 0xFF2563EB);
+    final selected = await _showWheelColorDialog(
+      context: context,
+      initialColor: current,
+      title: key,
+      constraints: const BoxConstraints(maxWidth: 480, maxHeight: 560),
+    );
+    if (selected == null) {
+      return;
+    }
+    if (mounted && selected.toARGB32() != current.toARGB32()) {
+      setState(() => _chartColors[key] = selected.toARGB32());
+      _savePreferences();
+    }
   }
 
   void _loadDeviceOptions() {
@@ -182,6 +326,47 @@ class _TrainPageState extends State<_TrainPage> {
         !name.contains('-pose');
   }
 
+  int _yoloModelSortOrder(String path) {
+    final name = _fileName(path).toLowerCase().replaceAll('.pt', '');
+    if (name == 'last' || name == 'best') return 999999;
+
+    // Version order: v8 < 11 < 26
+    int ver;
+    if (name.contains('v8')) {
+      ver = 0;
+    } else if (name.contains('26')) {
+      ver = 2;
+    } else {
+      ver = 1; // yolo11 (bare number)
+    }
+
+    // Size order: n < s < m < l < x
+    // Size letter follows a digit (e.g. yolo11n, yolov8x-obb)
+    final sizeMatch = RegExp(r'\d([nsmlx])(?:-|$)').firstMatch(name);
+    final sizes = ['n', 's', 'm', 'l', 'x'];
+    int sz = 5;
+    if (sizeMatch != null) {
+      sz = sizes.indexOf(sizeMatch.group(1)!);
+      if (sz < 0) sz = 5;
+    }
+
+    // Task type: base(0) < seg(1) < obb(2) < cls(3) < pose(4)
+    int task;
+    if (name.contains('-seg')) {
+      task = 1;
+    } else if (name.contains('-obb')) {
+      task = 2;
+    } else if (name.contains('-cls')) {
+      task = 3;
+    } else if (name.contains('-pose')) {
+      task = 4;
+    } else {
+      task = 0;
+    }
+
+    return ver * 1000 + sz * 100 + task;
+  }
+
   Future<void> _chooseModel() async {
     final file = await openFile(
       initialDirectory: _initialModelDirectory(),
@@ -193,11 +378,11 @@ class _TrainPageState extends State<_TrainPage> {
       return;
     }
     setState(() {
-      if (!_modelOptions.any((path) => _pathKey(path) == _pathKey(file.path))) {
-        _modelOptions = [..._modelOptions, file.path]
-          ..sort(_naturalPathCompare);
-      }
-      _modelPath = file.path;
+      _modelOptions = _dedupeModelOptions(
+        _modelOptions,
+        preferredPath: file.path,
+      );
+      _modelPath = _matchingModelOption(file.path) ?? file.path;
     });
     _selectDatasetFromCheckpoint(file.path);
     _refreshResumeInfo();
@@ -264,6 +449,7 @@ class _TrainPageState extends State<_TrainPage> {
         _parameters['cls_pw'] = summary.recommendedClsPw;
       });
       _refreshResumeInfo();
+      _savePreferences();
     } on Object catch (error) {
       if (mounted) {
         _showWarning('${t('train.datasetLoadFailed')}: $error');
@@ -308,6 +494,12 @@ class _TrainPageState extends State<_TrainPage> {
     final totalEpochs = _targetTrainingEpochs();
     final continuing = _showContinueTraining;
     final nextEpoch = _initialTrainingEpoch(totalEpochs);
+    final initialMetricPoints = continuing
+        ? _initialTrainingMetricPoints()
+        : const <_TrainingMetricPoint>[];
+    final initialMetrics = initialMetricPoints.isEmpty
+        ? null
+        : initialMetricPoints.last.metrics;
     _trainingTimer?.cancel();
     final logPath = _logFileForDate(DateTime.now()).path;
 
@@ -316,8 +508,8 @@ class _TrainPageState extends State<_TrainPage> {
       _trainingStopping = false;
       _trainingInterrupted = false;
       _currentEpoch = nextEpoch;
-      _trainingMetrics = null;
-      _trainingMetricPoints = [];
+      _trainingMetrics = initialMetrics;
+      _trainingMetricPoints = initialMetricPoints;
       _activeTrainingLogPath = logPath;
       _trainingLogText = '';
     });
@@ -414,23 +606,23 @@ class _TrainPageState extends State<_TrainPage> {
         final metrics = _trainingMetrics;
         if (metrics != null && progress.currentEpoch > 0) {
           final nextPoints = [..._trainingMetricPoints];
-          if (nextPoints.isEmpty ||
-              nextPoints.last.epoch != progress.currentEpoch) {
+          final existingIndex = nextPoints.indexWhere(
+            (point) => point.epoch == progress.currentEpoch,
+          );
+          final nextPoint = _TrainingMetricPoint(
+            epoch: progress.currentEpoch,
+            timestamp: DateTime.now(),
+            metrics: metrics,
+          );
+          if (existingIndex < 0) {
             nextPoints.add(
-              _TrainingMetricPoint(
-                epoch: progress.currentEpoch,
-                timestamp: DateTime.now(),
-                metrics: metrics,
-              ),
+              nextPoint,
             );
           } else {
-            nextPoints[nextPoints.length - 1] = _TrainingMetricPoint(
-              epoch: progress.currentEpoch,
-              timestamp: DateTime.now(),
-              metrics: metrics,
-            );
+            nextPoints[existingIndex] = nextPoint;
           }
-          _trainingMetricPoints = nextPoints.take(500).toList();
+          nextPoints.sort((a, b) => a.epoch.compareTo(b.epoch));
+          _trainingMetricPoints = _trimTrainingMetricPoints(nextPoints);
         }
         if (progress.status == 'stopping') {
           _trainingStopping = true;
@@ -474,6 +666,31 @@ class _TrainPageState extends State<_TrainPage> {
     return 1;
   }
 
+  List<_TrainingMetricPoint> _initialTrainingMetricPoints() {
+    final resultsPath = _continuationResultsPath();
+    if (resultsPath == null) {
+      return const [];
+    }
+    return _readTrainingMetricPoints(File(resultsPath));
+  }
+
+  String? _continuationResultsPath() {
+    final resumeResultsPath = _resumeInfo?.resultsPath;
+    if (_useResumeTraining &&
+        resumeResultsPath != null &&
+        File(resumeResultsPath).existsSync()) {
+      return resumeResultsPath;
+    }
+    final activeRunDir = _activeRunDir;
+    if (_trainingInterrupted && activeRunDir != null) {
+      final resultsPath = '$activeRunDir\\results.csv';
+      if (File(resultsPath).existsSync()) {
+        return resultsPath;
+      }
+    }
+    return null;
+  }
+
   void _appendTrainingRecord(_TrainingHistoryAction action) {
     final entry = _TrainingHistoryEntry(
       action: action,
@@ -493,6 +710,7 @@ class _TrainPageState extends State<_TrainPage> {
     setState(() => _modelPath = value);
     _selectDatasetFromCheckpoint(value);
     _refreshResumeInfo();
+    _savePreferences();
   }
 
   void _setParameter(String key, double value) {
@@ -500,6 +718,7 @@ class _TrainPageState extends State<_TrainPage> {
     if (key == 'epochs') {
       _refreshResumeInfo();
     }
+    _savePreferences();
   }
 
   void _refreshResumeInfo() {
@@ -611,6 +830,11 @@ class _TrainPageState extends State<_TrainPage> {
 
   @override
   Widget build(BuildContext context) {
+    final modelOptions = _dedupeModelOptions(
+      _modelOptions,
+      preferredPath: _modelPath,
+    );
+    final modelDropdownValue = _modelDropdownValue(modelOptions);
     return Expanded(
       child: Stack(
         fit: StackFit.expand,
@@ -637,10 +861,10 @@ class _TrainPageState extends State<_TrainPage> {
                           SizedBox(
                             width: 260,
                             child: DropdownButtonFormField<String>(
-                              initialValue: _modelPath,
+                              initialValue: modelDropdownValue,
                               onTap: () => _loadModelOptions(),
                               items: [
-                                for (final model in _modelOptions)
+                                for (final model in modelOptions)
                                   DropdownMenuItem(
                                     value: model,
                                     child: Text(
@@ -716,7 +940,7 @@ class _TrainPageState extends State<_TrainPage> {
                         ],
                       ),
                       const SizedBox(height: 12),
-                      if (_modelOptions.isEmpty)
+                      if (modelOptions.isEmpty)
                         Text(
                           t('train.noModels'),
                           style: TextStyle(
@@ -830,10 +1054,11 @@ class _TrainPageState extends State<_TrainPage> {
                                     ? _TrainingTerminalPanel(
                                         text: _trainingLogText,
                                       )
-                                    : _trainingRunning &&
-                                          _trainingMetrics != null
+                                    : _trainingMetricPoints.isNotEmpty
                                     ? _TrainingProgressPanel(
-                                        metrics: _trainingMetrics!,
+                                        metrics: _trainingMetrics ?? _trainingMetricPoints.last.metrics,
+                                        colors: _chartColors,
+                                        onColorChanged: _setChartColor,
                                         points: _trainingMetricPoints,
                                       )
                                     : Center(
@@ -878,17 +1103,25 @@ class _TrainPageState extends State<_TrainPage> {
                             onChanged: _setParameter,
                             onBatchModeChanged: (value) {
                               setState(() => _batchMode = value);
+                              _savePreferences();
                             },
                             onBatchSizeChanged: (value) {
                               setState(() => _batchSize = value);
+                              _savePreferences();
                             },
                             onBatchRatioChanged: (value) {
                               setState(() => _batchRatio = value);
+                              _savePreferences();
                             },
                             onAmpChanged: (value) {
                               setState(() => _ampEnabled = value);
+                              _savePreferences();
                             },
-                            onDeviceChanged: _toggleTrainingDevice,
+                            onDeviceChanged: (id, selected) {
+                              _toggleTrainingDevice(id, selected);
+                              _savePreferences();
+                            },
+                            onReset: _resetParameters,
                           )
                         : const SizedBox.expand(),
                   ),
@@ -1070,7 +1303,10 @@ class _TrainingParameterPanel extends StatelessWidget {
     required this.onBatchRatioChanged,
     required this.onAmpChanged,
     required this.onDeviceChanged,
+    required this.onReset,
   });
+
+  final VoidCallback onReset;
 
   final Map<String, double> parameters;
   final _BatchMode batchMode;
@@ -1126,6 +1362,15 @@ class _TrainingParameterPanel extends StatelessWidget {
                     value: entry.value,
                     onChanged: (value) => onChanged(entry.key, value),
                   ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: onReset,
+                    icon: const Icon(Icons.restart_alt, size: 16),
+                    label: Text(t('action.reset')),
+                  ),
+                ),
                 _ParameterSectionTitle(title: t('train.tuningTitle')),
                 _TrainingTuningTips(),
               ],
@@ -1740,6 +1985,117 @@ int? _readLastResultEpoch(File resultsCsv) {
   return lastEpoch;
 }
 
+List<_TrainingMetricPoint> _readTrainingMetricPoints(File resultsCsv) {
+  if (!resultsCsv.existsSync()) {
+    return const [];
+  }
+  final lines = resultsCsv.readAsLinesSync();
+  final headerIndex = lines.indexWhere((line) => line.trim().isNotEmpty);
+  if (headerIndex < 0) {
+    return const [];
+  }
+  final columns = _splitTrainingCsvLine(
+    lines[headerIndex].trim().trimLeft().replaceFirst('\uFEFF', ''),
+  );
+  if (columns.isEmpty) {
+    return const [];
+  }
+
+  final pointsByEpoch = <int, _TrainingMetricPoint>{};
+  for (final rawLine in lines.skip(headerIndex + 1)) {
+    final line = rawLine.trim();
+    if (line.isEmpty || line.toLowerCase().startsWith('epoch')) {
+      continue;
+    }
+    final values = _splitTrainingCsvLine(line);
+    final map = <String, double>{};
+    for (var index = 0; index < math.min(columns.length, values.length); index += 1) {
+      final parsed = double.tryParse(values[index]);
+      if (parsed != null) {
+        map[columns[index]] = parsed;
+      }
+    }
+    final rawEpoch = map['epoch'];
+    if (rawEpoch == null) {
+      continue;
+    }
+    final epoch = rawEpoch.round() + 1;
+    if (epoch <= 0) {
+      continue;
+    }
+    final metrics = _trainingMetricsFromResultsMap(map);
+    if (!_hasAnyTrainingMetric(metrics)) {
+      continue;
+    }
+    pointsByEpoch[epoch] = _TrainingMetricPoint(
+      epoch: epoch,
+      timestamp: DateTime.now(),
+      metrics: metrics,
+    );
+  }
+
+  final points = pointsByEpoch.values.toList()
+    ..sort((a, b) => a.epoch.compareTo(b.epoch));
+  return _trimTrainingMetricPoints(points);
+}
+
+List<String> _splitTrainingCsvLine(String line) {
+  return line.split(',').map((value) => value.trim()).toList();
+}
+
+_TrainingMetrics _trainingMetricsFromResultsMap(Map<String, double> map) {
+  return _TrainingMetrics(
+    trainLoss: _trainingCsvValue(map, const ['train/box_loss', 'train/loss']),
+    valLoss: _trainingCsvValue(map, const ['val/box_loss', 'val/loss']),
+    map50: _trainingCsvValue(
+      map,
+      const ['metrics/mAP50(B)', 'metrics/mAP_0.5'],
+    ),
+    map5095: _trainingCsvValue(
+      map,
+      const ['metrics/mAP50-95(B)', 'metrics/mAP_0.5:0.95'],
+    ),
+    precision: _trainingCsvValue(
+      map,
+      const ['metrics/precision(B)', 'metrics/precision'],
+    ),
+    recall: _trainingCsvValue(
+      map,
+      const ['metrics/recall(B)', 'metrics/recall'],
+    ),
+    lr: _trainingCsvValue(map, const ['lr/pg0', 'lr/0']),
+  );
+}
+
+double? _trainingCsvValue(Map<String, double> map, List<String> keys) {
+  for (final key in keys) {
+    final value = map[key];
+    if (value != null) {
+      return value;
+    }
+  }
+  return null;
+}
+
+bool _hasAnyTrainingMetric(_TrainingMetrics metrics) {
+  return metrics.trainLoss != null ||
+      metrics.valLoss != null ||
+      metrics.map50 != null ||
+      metrics.map5095 != null ||
+      metrics.precision != null ||
+      metrics.recall != null ||
+      metrics.lr != null;
+}
+
+List<_TrainingMetricPoint> _trimTrainingMetricPoints(
+  List<_TrainingMetricPoint> points,
+) {
+  if (points.length <= _trainingChartPointLimit) {
+    return points;
+  }
+  return points.sublist(points.length - _trainingChartPointLimit);
+}
+
 List<_TrainingDeviceOption> _detectNvidiaDevices() {
   try {
     final result = Process.runSync('nvidia-smi', [
@@ -1829,14 +2185,21 @@ String _parameterHelp(String name) {
 }
 
 class _TrainingProgressPanel extends StatelessWidget {
-  const _TrainingProgressPanel({required this.metrics, required this.points});
+  const _TrainingProgressPanel({
+    required this.metrics,
+    required this.points,
+    required this.colors,
+    required this.onColorChanged,
+  });
 
   final _TrainingMetrics metrics;
   final List<_TrainingMetricPoint> points;
+  final Map<String, int> colors;
+  final void Function(String key) onColorChanged;
 
   @override
   Widget build(BuildContext context) {
-    final seriesList = _buildTrainingSeries(points);
+    final seriesList = _buildTrainingSeries(points, colors);
     if (seriesList.isEmpty) {
       return Center(child: Text(t('train.chartPlaceholder')));
     }
@@ -1891,21 +2254,53 @@ class _TrainingProgressPanel extends StatelessWidget {
       ));
     }
 
+    Color legendColor(String key, int fallback) {
+      return Color(colors[key] ?? fallback);
+    }
+
     final legendItems = <(String, double?, Color)>[
       if (lossGroup.any((s) => s.label == 'Train Loss'))
-        ('Train Loss', metrics.trainLoss, const Color(0xFF2563EB)),
+        (
+          'Train Loss',
+          metrics.trainLoss,
+          legendColor('Train Loss', 0xFF2563EB),
+        ),
       if (lossGroup.any((s) => s.label == 'Val Loss'))
-        ('Val Loss', metrics.valLoss, const Color(0xFFDC2626)),
+        (
+          'Val Loss',
+          metrics.valLoss,
+          legendColor('Val Loss', 0xFFDC2626),
+        ),
       if (mapGroup.any((s) => s.label == 'mAP@0.5'))
-        ('mAP@0.5', metrics.map50, const Color(0xFF16A34A)),
+        (
+          'mAP@0.5',
+          metrics.map50,
+          legendColor('mAP@0.5', 0xFF16A34A),
+        ),
       if (mapGroup.any((s) => s.label == 'mAP@0.5:0.95'))
-        ('mAP@0.5:0.95', metrics.map5095, const Color(0xFF9333EA)),
+        (
+          'mAP@0.5:0.95',
+          metrics.map5095,
+          legendColor('mAP@0.5:0.95', 0xFF9333EA),
+        ),
       if (prGroup.any((s) => s.label == 'Precision'))
-        ('Precision', metrics.precision, const Color(0xFFEA580C)),
+        (
+          'Precision',
+          metrics.precision,
+          legendColor('Precision', 0xFFEA580C),
+        ),
       if (prGroup.any((s) => s.label == 'Recall'))
-        ('Recall', metrics.recall, const Color(0xFF0891B2)),
+        (
+          'Recall',
+          metrics.recall,
+          legendColor('Recall', 0xFF0891B2),
+        ),
       if (lrGroup.isNotEmpty)
-        ('LR', metrics.lr, const Color(0xFF64748B)),
+        (
+          'LR',
+          metrics.lr,
+          legendColor('LR', 0xFF64748B),
+        ),
     ].where((e) => e.$2 != null).toList();
 
     return Padding(
@@ -1929,12 +2324,24 @@ class _TrainingProgressPanel extends StatelessWidget {
                       padding: const EdgeInsets.only(bottom: 6),
                       child: Row(
                         children: [
-                          Container(
-                            width: 10,
-                            height: 10,
-                            decoration: BoxDecoration(
-                              color: color,
-                              borderRadius: BorderRadius.circular(2),
+                          GestureDetector(
+                            onTap: () => onColorChanged(label),
+                            child: Tooltip(
+                              message: t('label.classColor'),
+                              child: Container(
+                                width: 16,
+                                height: 16,
+                                decoration: BoxDecoration(
+                                  color: color,
+                                  borderRadius: BorderRadius.circular(2),
+                                  border: Border.all(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                                    width: 1,
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
                           const SizedBox(width: 6),
@@ -1943,14 +2350,22 @@ class _TrainingProgressPanel extends StatelessWidget {
                               label,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 12),
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurface,
+                              ),
                             ),
                           ),
                           Text(
                             value!.toStringAsFixed(4),
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontFamily: 'monospace',
                               fontSize: 11,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
                             ),
                           ),
                         ],
@@ -1981,7 +2396,9 @@ Widget _metricChart(
       children: [
         Text(
           title,
-          style: Theme.of(context).textTheme.titleSmall,
+          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
         ),
         const SizedBox(height: 6),
         SizedBox(
@@ -2111,6 +2528,7 @@ class _TrainingChartSeries {
 
 List<_TrainingChartSeries> _buildTrainingSeries(
   List<_TrainingMetricPoint> points,
+  Map<String, int> colors,
 ) {
   List<FlSpot> spotsFor(double? Function(_TrainingMetrics metrics) getter) {
     return [
@@ -2120,40 +2538,42 @@ List<_TrainingChartSeries> _buildTrainingSeries(
     ];
   }
 
+  Color seriesColor(String key, int fallback) => Color(colors[key] ?? fallback);
+
   return [
     _TrainingChartSeries(
       label: 'Train Loss',
-      color: const Color(0xFF2563EB),
+      color: seriesColor('Train Loss', 0xFF2563EB),
       spots: spotsFor((metrics) => metrics.trainLoss),
     ),
     _TrainingChartSeries(
       label: 'Val Loss',
-      color: const Color(0xFFDC2626),
+      color: seriesColor('Val Loss', 0xFFDC2626),
       spots: spotsFor((metrics) => metrics.valLoss),
     ),
     _TrainingChartSeries(
       label: 'mAP@0.5',
-      color: const Color(0xFF16A34A),
+      color: seriesColor('mAP@0.5', 0xFF16A34A),
       spots: spotsFor((metrics) => metrics.map50),
     ),
     _TrainingChartSeries(
       label: 'mAP@0.5:0.95',
-      color: const Color(0xFF9333EA),
+      color: seriesColor('mAP@0.5:0.95', 0xFF9333EA),
       spots: spotsFor((metrics) => metrics.map5095),
     ),
     _TrainingChartSeries(
       label: 'Precision',
-      color: const Color(0xFFEA580C),
+      color: seriesColor('Precision', 0xFFEA580C),
       spots: spotsFor((metrics) => metrics.precision),
     ),
     _TrainingChartSeries(
       label: 'Recall',
-      color: const Color(0xFF0891B2),
+      color: seriesColor('Recall', 0xFF0891B2),
       spots: spotsFor((metrics) => metrics.recall),
     ),
     _TrainingChartSeries(
       label: 'LR',
-      color: const Color(0xFF64748B),
+      color: seriesColor('LR', 0xFF64748B),
       spots: spotsFor((metrics) => metrics.lr),
     ),
   ].where((series) => series.spots.isNotEmpty).toList();
