@@ -1,10 +1,201 @@
 # YOLO Label Tool
 
-基于 Flutter + Rust 的 YOLO 图像标注、训练和视频处理工具。
+A YOLO image labeling, training, and video processing tool built with Flutter + Rust.
+
+> Click to switch language / 点击切换语言
+
+<details open>
+<summary><b>English</b></summary>
+
+## Overview
+
+- **Frontend**: Flutter (Dart) — UI, annotation interaction, charts, video playback
+- **Backend**: Rust — communicates with Flutter via Flutter Rust Bridge; training engine embeds Python through PyO3 to call Ultralytics
+- **Video**: Rust integrates FFmpeg for frame extraction, metadata reading, and hardware decoding
+
+## Current Features
+
+- HBB / OBB / SEG annotation interface.
+- `data.yaml` import, export, and Roboflow path compatibility.
+- Training page: select `.pt` model, read dataset statistics, configure hyperparameters.
+- Training engine uses PyO3 to call Python/Ultralytics for training.
+- Training charts use `fl_chart` to display loss, mAP, precision, recall, LR.
+- Resume training from `last.pt`: auto-detects `args.yaml` and `data.yaml`.
+- Training history saved locally (up to 40 entries) with timestamps.
+- Browse page includes Rust + FFmpeg video playback capabilities.
+
+## Project Structure
+
+```text
+├── Cargo.toml                  # Rust project config & dependencies
+├── flutter_rust_bridge.yaml    # FRB codegen config
+├── src/                        # Rust source
+│   ├── api.rs                  # Public API exposed to Flutter
+│   ├── training.rs             # PyO3 + Ultralytics training backend
+│   ├── detecting.rs            # PyO3 + Ultralytics YOLO inference
+│   ├── main.rs                 # Dev launcher
+│   └── frb_generated.rs        # FRB auto-generated glue code
+├── flutter/                    # Flutter frontend
+│   ├── pubspec.yaml
+│   └── lib/
+│       ├── main.dart           # App entry, global state, page routing
+│       ├── LabelPage.dart      # Annotation page
+│       ├── TrainPage.dart      # Training page
+│       ├── DetectVideoPage.dart # Browse / video playback page
+│       ├── CropPage.dart       # Video frame extraction page
+│       ├── ExportDialog.dart   # Annotation export dialog
+│       ├── ConfigStore.dart    # Config persistence
+│       ├── SettingsDialog.dart # Settings dialog
+│       ├── AnnotationModels.dart
+│       ├── ShortcutModels.dart
+│       ├── FloatingMessage.dart
+│       ├── RustVideoBackend.dart
+│       └── language/           # i18n resources
+├── models/                     # YOLO model files (git-ignored)
+├── datasets/                   # Export directory (configurable)
+└── ffmpeg/                     # FFmpeg binaries (download separately)
+```
+
+## Requirements
+
+- Windows 10 / 11
+- Rust toolchain
+- Flutter SDK
+- Visual Studio 2022 ("Desktop development with C++" workload)
+- Python environment with `ultralytics`, `torch`, `onnxruntime`
+- FFmpeg (for video frame extraction)
+
+## Getting Started
+
+### Launch
+
+```bash
+# Direct Flutter run
+cd flutter
+flutter pub get
+flutter run -d windows
+
+# Via Rust launcher
+cargo run --package yolo_label_bridge --bin yolo_label_cli
+```
+
+### Generate FRB Code
+
+After modifying `src/api.rs`:
+
+```bash
+flutter_rust_bridge_codegen generate
+```
+
+### Python Environment
+
+Open the app → Settings → Preferences → Python Environment Path. Select `python.exe` or a Python environment folder. Green checkmark confirms detection.
+
+### Training
+
+1. Configure Python environment and output path in Settings
+2. Training page: select `.pt` model → select `data.yaml` dataset
+3. Adjust hyperparameters → click "Start Training"
+4. Click "Stop" during training; "Continue Training" to resume
+5. Real-time charts for loss, mAP, precision, etc.
+
+### Video Frame Extraction
+
+1. Switch to the "Crop" page
+2. Import video files (mp4, avi, mov, mkv, etc.)
+3. Set frame interval, output format, quality
+4. Click "Start Extraction", choose output directory
+
+### Annotation Export
+
+Label page → right toolbar → Export button → configure options → exports YOLO directory structure.
+
+## FFmpeg Setup
+
+Video frame extraction requires FFmpeg. Use [gyan.dev](https://www.gyan.dev/ffmpeg/builds/packages/) Windows builds.
+
+### Download
+
+1. Open https://www.gyan.dev/ffmpeg/builds/packages/
+2. Download **ffmpeg-release-full.7z** (full build)
+3. Extract to project root under `ffmpeg/`
+
+### Search Order
+
+```text
+1. Environment variable FFMPEG_PATH
+2. Project root/ffmpeg/bin/ffmpeg.exe    ← recommended
+3. System PATH
+```
+
+Place the extracted files as:
+
+```text
+ffmpeg/
+└── bin/
+    ├── ffmpeg.exe
+    ├── ffprobe.exe
+    └── ...
+```
+
+### Notes
+
+- Must use the **full** build — essential build lacks codecs.
+- `ffmpeg/` is git-ignored.
+- Hardware decoder auto-detect: NVIDIA CUDA → Intel QSV → D3D11VA → CPU.
+- If extraction fails, verify `ffmpeg/bin/ffmpeg.exe` exists or set `FFMPEG_PATH`.
+
+## Config Files
+
+Stored at `%USERPROFILE%\.rustlabel\`:
+
+| File | Content |
+|------|---------|
+| `settings.json` | Python path, training output path, export path |
+| `history.json` | Recently opened files and folders |
+| `keybindings.json` | Custom keyboard shortcuts |
+| `training_preferences.json` | Training parameter preferences |
+| `training_history.json` | Recent training history records |
+
+## FAQ
+
+### Rust compilation fails
+
+Verify Rust: `rustc --version`. PyO3 errors: `conda activate yolo && cargo check`.
+
+### Training fails immediately
+
+Check Python green checkmark, `ultralytics` installed, `data.yaml` path valid, device exists.
+
+### Stop not immediate
+
+Safe interruption via Ultralytics callbacks at batch/epoch boundaries — short delay expected.
+
+### Page state lost after tab switch
+
+All pages kept alive via `IndexedStack` — training, playback, crop state preserved.
+
+</details>
+
+<details>
+<summary><b>简体中文</b></summary>
+
+## 概述
 
 - **前端**：Flutter（Dart），负责界面、标注交互、图表、视频播放
 - **后端**：Rust，通过 Flutter Rust Bridge 与前端通信；训练引擎通过 PyO3 嵌入 Python 调用 Ultralytics
 - **视频**：Rust 端集成 FFmpeg 实现视频取帧、元数据读取、硬件解码
+
+## 当前能力
+
+- HBB / OBB / SEG 标注界面。
+- `data.yaml` 导入、导出和 Roboflow 路径兼容。
+- 训练页支持选择 `.pt` 模型、读取数据集统计、设置超参数。
+- 训练引擎使用 PyO3 调用 Python / Ultralytics 执行训练。
+- 训练曲线使用 `fl_chart` 显示 loss、mAP、precision、recall、LR 等指标。
+- 支持从 `last.pt` 读取训练目录和 `args.yaml`，自动匹配 `data.yaml` 并启用 resume。
+- 最近训练记录保存到本地配置，最多保留 40 条，并显示明确时间点。
+- 浏览页包含 Rust + FFmpeg 视频处理能力。
 
 ## 项目结构
 
@@ -12,27 +203,28 @@
 ├── Cargo.toml                  # Rust 项目配置与依赖
 ├── flutter_rust_bridge.yaml    # FRB 代码生成配置
 ├── src/                        # Rust 源码
-│   ├── api.rs                  # 对 Flutter 暴露的接口（标注、视频、训练、裁剪）
+│   ├── api.rs                  # 对 Flutter 暴露的接口
 │   ├── training.rs             # PyO3 + Ultralytics 训练后端
-│   ├── main.rs                 # 开发启动器（构建 Rust 并启动 Flutter GUI）
+│   ├── detecting.rs            # PyO3 + Ultralytics YOLO 推理
+│   ├── main.rs                 # 开发启动器
 │   └── frb_generated.rs        # FRB 自动生成的胶水代码
 ├── flutter/                    # Flutter 前端
-│   ├── pubspec.yaml            # Dart 依赖配置
+│   ├── pubspec.yaml
 │   └── lib/
 │       ├── main.dart           # 应用入口、全局状态、页面路由
-│       ├── LabelPage.dart      # 标注页（画布、绘制、交互）
-│       ├── TrainPage.dart      # 训练页（模型选择、超参数、图表）
+│       ├── LabelPage.dart      # 标注页
+│       ├── TrainPage.dart      # 训练页
 │       ├── DetectVideoPage.dart # 浏览/视频播放页
 │       ├── CropPage.dart       # 视频取帧裁剪页
 │       ├── ExportDialog.dart   # 标注导出弹窗
-│       ├── ConfigStore.dart    # 配置持久化（JSON 读写）
+│       ├── ConfigStore.dart    # 配置持久化
 │       ├── SettingsDialog.dart # 设置弹窗
-│       ├── AnnotationModels.dart # 标注数据模型（HBB/OBB/SEG）
-│       ├── ShortcutModels.dart  # 快捷键模型
-│       ├── FloatingMessage.dart # 浮动提示组件
-│       ├── RustVideoBackend.dart # Rust FFI 视频后端封装
+│       ├── AnnotationModels.dart
+│       ├── ShortcutModels.dart
+│       ├── FloatingMessage.dart
+│       ├── RustVideoBackend.dart
 │       └── language/           # 多语言资源
-├── models/                     # YOLO 模型文件（.pt，不提交到 Git）
+├── models/                     # YOLO 模型文件（不提交到 Git）
 ├── datasets/                   # 标注导出目录（可配置）
 └── ffmpeg/                     # FFmpeg 二进制（需自行下载）
 ```
@@ -44,25 +236,25 @@
 - Flutter SDK
 - Visual Studio 2022（"使用 C++ 的桌面开发" 工作负载）
 - Python 环境（需安装 `ultralytics`、`torch`、`onnxruntime`）
-- FFmpeg（用于视频取帧，见下方说明）
+- FFmpeg（视频取帧依赖）
 
 ## 使用方法
 
 ### 启动
 
 ```bash
-# 方式一：直接启动 Flutter
+# 直接启动 Flutter
 cd flutter
 flutter pub get
 flutter run -d windows
 
-# 方式二：通过 Rust 启动器
+# 通过 Rust 启动器
 cargo run --package yolo_label_bridge --bin yolo_label_cli
 ```
 
-### 生成 Flutter Rust Bridge 代码
+### 生成桥接代码
 
-修改 `src/api.rs` 后需要重新生成绑定：
+修改 `src/api.rs` 后：
 
 ```bash
 flutter_rust_bridge_codegen generate
@@ -70,17 +262,17 @@ flutter_rust_bridge_codegen generate
 
 ### Python 环境
 
-打开软件 → 设置 → 首选项 → Python 环境路径，选择 `python.exe` 或环境文件夹。软件会自动检测 Python 环境并显示绿色勾确认可用。
+打开软件 → 设置 → 首选项 → Python 环境路径，选择 `python.exe` 或环境文件夹。绿色勾表示可用。
 
 ### 训练
 
 1. 设置中配置 Python 环境和训练输出路径
 2. 训练页选择 `.pt` 模型 → 选择 `data.yaml` 数据集
 3. 调整超参数 → 点击"开始训练"
-4. 训练过程中可点击"停止"，后续可"继续训练"
+4. 训练中可点击"停止"，后续可"继续训练"
 5. 训练曲线实时显示 loss、mAP、precision 等指标
 
-### 视频取帧（裁剪页）
+### 视频取帧
 
 1. 切换到"裁剪"页面
 2. 导入视频文件（支持 mp4、avi、mov、mkv 等）
@@ -89,7 +281,7 @@ flutter_rust_bridge_codegen generate
 
 ### 标注导出
 
-标注页右侧工具栏 → 导出按钮 → 配置是否跳过空标注、是否导出图片、train/val/test 比例 → 导出 YOLO 目录结构。
+标注页右侧工具栏 → 导出按钮 → 配置选项 → 导出 YOLO 目录结构。
 
 ## FFmpeg 配置
 
@@ -98,20 +290,18 @@ flutter_rust_bridge_codegen generate
 ### 下载
 
 1. 打开 https://www.gyan.dev/ffmpeg/builds/packages/
-2. 下载 **ffmpeg-release-full.7z**（推荐 full 版本，编解码器最全）
+2. 下载 **ffmpeg-release-full.7z**（full 版本）
 3. 解压到项目根目录下的 `ffmpeg/` 文件夹
 
-### 目录结构
-
-项目运行时按以下顺序查找 FFmpeg：
+### 查找顺序
 
 ```text
-1. 环境变量 FFMPEG_PATH 指向的路径
-2. 项目目录/ffmpeg/bin/ffmpeg.exe    ← 推荐此方式
+1. 环境变量 FFMPEG_PATH
+2. 项目目录/ffmpeg/bin/ffmpeg.exe    ← 推荐
 3. 系统 PATH 中的 ffmpeg
 ```
 
-推荐将解压后的 `bin/` 目录放到项目 `ffmpeg/` 下：
+目录放置：
 
 ```text
 ffmpeg/
@@ -123,37 +313,39 @@ ffmpeg/
 
 ### 注意事项
 
-- **必须下载 full 版本**，essential 版本缺少部分编解码器，可能导致某些视频格式无法处理。
+- **必须下载 full 版本**，essential 版本缺少部分编解码器。
 - `ffmpeg/` 目录已在 `.gitignore` 中排除，不会提交到 Git。
-- 硬件解码器会自动检测（优先 NVIDIA CUDA → Intel QSV → D3D11VA → CPU），无需额外配置。
-- 如果视频取帧失败，检查 `ffmpeg/bin/ffmpeg.exe` 是否存在，或设置环境变量 `FFMPEG_PATH` 指向 ffmpeg.exe 所在目录。
+- 硬件解码器自动检测（优先 NVIDIA CUDA → Intel QSV → D3D11VA → CPU）。
+- 取帧失败时检查 `ffmpeg/bin/ffmpeg.exe` 是否存在，或设置 `FFMPEG_PATH`。
 
 ## 配置文件
 
-配置保存在 `%USERPROFILE%\.rustlabel\`：
+保存在 `%USERPROFILE%\.rustlabel\`：
 
 | 文件 | 内容 |
 |------|------|
 | `settings.json` | Python 路径、训练输出路径、导出路径 |
 | `history.json` | 最近打开的文件和文件夹 |
 | `keybindings.json` | 自定义快捷键 |
-| `training_preferences.json` | 训练参数偏好（模型、超参数、图表颜色） |
+| `training_preferences.json` | 训练参数偏好 |
 | `training_history.json` | 最近训练操作记录 |
 
 ## 常见问题
 
 ### Rust 编译失败
 
-确认 Rust 工具链已安装：`rustc --version`。如果 PyO3 链接错误，先激活 Python 环境再编译：`conda activate yolo && cargo check`。
+确认 Rust：`rustc --version`。PyO3 链接错误：`conda activate yolo && cargo check`。
 
 ### 训练启动后立刻失败
 
-检查设置页 Python 环境是否显示绿色勾、是否安装了 `ultralytics`、`data.yaml` 路径是否正确、`device` 参数中的 GPU 是否存在。
+检查 Python 绿色勾、`ultralytics` 已安装、`data.yaml` 路径正确、device 存在。
 
-### 点击停止不会立刻终止
+### 停止不立即生效
 
-停止逻辑通过 Ultralytics callback 安全中断，在 batch 或 epoch 回调时生效，可能有短暂延迟。
+通过 Ultralytics callback 安全中断，在 batch/epoch 回调时生效，短暂延迟正常。
 
 ### 页面切换后状态丢失
 
-已使用 `IndexedStack` 保持所有页面存活，切换页面不会丢失训练进度、视频播放或裁剪状态。
+使用 `IndexedStack` 保持所有页面存活，切换时保留训练进度、播放和裁剪状态。
+
+</details>
