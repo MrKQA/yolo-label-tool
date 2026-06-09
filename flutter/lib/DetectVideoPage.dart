@@ -522,6 +522,7 @@ class _DetectVideoSession extends ChangeNotifier {
     if (value) {
       predictVideo = false;
       predictAll = false;
+      showPredictionResult = false;
     }
     saveResult = saveResult && canSaveResult;
     if (value) {
@@ -585,12 +586,7 @@ class _DetectVideoSession extends ChangeNotifier {
     predictionOutputPath = path;
     final input = selectedInput;
     if (input != null) {
-      final key = _pathKey(input);
-      if (path == null) {
-        _predictionOutputsByInput.remove(key);
-      } else {
-        _predictionOutputsByInput[key] = path;
-      }
+      cachePredictionOutputForInput(input, path);
     }
     showPredictionResult = path != null;
     if (path != null && _isImagePath(path)) {
@@ -599,6 +595,32 @@ class _DetectVideoSession extends ChangeNotifier {
     await _resetVideoController();
     _emit();
     await loadSelectedVideoIfNeeded();
+  }
+
+  void cachePredictionOutputForInput(String input, String? path) {
+    final key = _pathKey(input);
+    if (path == null) {
+      _predictionOutputsByInput.remove(key);
+    } else {
+      _predictionOutputsByInput[key] = path;
+    }
+  }
+
+  void clearPredictionEffects({String? input}) {
+    if (input == null) {
+      _predictionOutputsByInput.clear();
+    } else {
+      _predictionOutputsByInput.remove(_pathKey(input));
+    }
+    final selectedKey = _pathKey(selectedInput ?? '');
+    final clearCurrent = input == null || _pathKey(input) == selectedKey;
+    if (clearCurrent) {
+      predictionOutputPath = null;
+    }
+    showPredictionResult = true;
+    predictVideo = false;
+    predictAll = false;
+    saveResult = saveResult && canSaveResult;
   }
 
   void setSaveResult(bool value) {
@@ -801,7 +823,12 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
   final FocusNode _focusNode = FocusNode(debugLabel: 'detect-video');
   late final TextEditingController _confController;
   late final List<_TrainingDeviceOption> _nvidiaDeviceOptions;
+  late final String _autoFallbackDeviceLabel;
+  String? _activePredictionCancelPath;
+  int? _pendingPredictionStartFrame;
   Timer? _previewHideTimer;
+  Timer? _parameterHideTimer;
+  bool _parameterPanelVisible = true;
 
   _DetectVideoSession get _session => widget.session;
 
@@ -812,6 +839,8 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
       text: _session.detectConf.toStringAsFixed(2),
     );
     _nvidiaDeviceOptions = _detectNvidiaDevices();
+    _autoFallbackDeviceLabel = _detectPrimaryProcessorName();
+    _session.predictAll = false;
     _session.addListener(_handleSessionChanged);
     _schedulePreviewHide();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -835,6 +864,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
   @override
   void dispose() {
     _previewHideTimer?.cancel();
+    _parameterHideTimer?.cancel();
     _session.removeListener(_handleSessionChanged);
     _confController.dispose();
     _focusNode.dispose();
@@ -861,8 +891,20 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
     }
   }
 
+  Future<void> _chooseDetectModel() async {
+    final model = await _DetectVideoSession._chooseDetectModel(widget.settings);
+    if (model == null) {
+      return;
+    }
+    _session.detectModelPath = model;
+    _session.clearPredictionEffects();
+    await _session._resetVideoController();
+    _session._emit();
+    await _session.loadSelectedVideoIfNeeded();
+  }
+
   Future<void> _handlePredict() async {
-    await _runDetection(save: false);
+    await _runDetection(save: false, currentOnly: true);
   }
 
   Future<void> _handlePredictButton() async {
@@ -879,11 +921,20 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
     await _handlePredict();
   }
 
-  Future<void> _handleSave() async {
-    await _runDetection(save: true);
+  Future<void> _handleSaveCurrent() async {
+    await _runDetection(save: true, currentOnly: true);
   }
 
-  Future<void> _runDetection({required bool save}) async {
+  Future<void> _handleSaveAll() async {
+    await _runDetection(save: true, allImages: true);
+  }
+
+  Future<void> _runDetection({
+    required bool save,
+    int startFrame = 0,
+    bool currentOnly = false,
+    bool allImages = false,
+  }) async {
     if (_session.predicting) {
       return;
     }
@@ -900,71 +951,273 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
     await _ensureDetectModel();
     final modelPath = _session.detectModelPath;
     if (modelPath == null) return;
-    final isVideo = _isVideoPath(input);
+    final targets = _detectionTargets(
+      input,
+      currentOnly: currentOnly,
+      allImages: allImages,
+    );
+    if (targets.isEmpty) {
+      _showDetectMessage(t('detect.noImageTargets'));
+      return;
+    }
+    if (!save && targets.any(_isVideoPath)) {
+      _session.playVideo = false;
+      _session.predictVideo = true;
+      await _session._resetVideoController();
+    }
     _session.predicting = true;
     _session.showPredictionResult = true;
     _session.videoStatus = t('detect.predicting');
     _session._emit();
     try {
-      final result = await _RustVideoBackend.detect(
-        mode: isVideo ? 'video' : 'image',
-        pythonPath: pythonPath,
+      var completed = 0;
+      var totalLabels = 0;
+      final outputDir = await _detectOutputDirectory(
+        save: save,
         modelPath: modelPath,
-        inputPath: input,
-        outputDir: _detectOutputDirectory(save: save),
-        outputName: _detectOutputName(input, save: save),
-        confThreshold: _session.detectConf,
-        iouThreshold: 0.45,
-        imgsz: _session.detectImageSize,
-        device: _session.detectDevice,
+        pythonPath: pythonPath,
       );
-      if (!mounted) {
-        return;
+      for (final target in targets) {
+        if (!mounted) {
+          return;
+        }
+        final isVideo = _isVideoPath(target);
+        _session.videoStatus =
+            '${t('detect.predicting')} ${completed + 1}/${targets.length}: '
+            '${_fileName(target)}';
+        _session._emit();
+        final outputName = _detectOutputName(target, save: save);
+        final previewVideo = isVideo && !save;
+        final cancelPath = previewVideo ? _detectCancelPath(target) : '';
+        if (previewVideo) {
+          _activePredictionCancelPath = cancelPath;
+          _clearCancelFile(cancelPath);
+          final manifestPath = _joinPath(outputDir, outputName);
+          _writeEmptyPredictionManifest(manifestPath, startFrame: startFrame);
+          _session.cachePredictionOutputForInput(target, manifestPath);
+          if (_pathKey(target) == _pathKey(_session.selectedInput ?? '')) {
+            _session.predictVideo = true;
+            _session.showPredictionResult = true;
+            await _session.setPredictionOutput(manifestPath);
+          }
+        }
+        final result = await _RustVideoBackend.detect(
+          mode: isVideo ? 'video' : 'image',
+          pythonPath: pythonPath,
+          modelPath: modelPath,
+          inputPath: target,
+          outputDir: outputDir,
+          outputName: outputName,
+          confThreshold: _session.detectConf,
+          iouThreshold: 0.45,
+          imgsz: _session.detectImageSize,
+          device: _session.detectDevice,
+          previewFrames: previewVideo,
+          cancelPath: cancelPath,
+          startFrame: previewVideo ? startFrame : 0,
+        );
+        if (_pathKey(_activePredictionCancelPath ?? '') ==
+            _pathKey(cancelPath)) {
+          _activePredictionCancelPath = null;
+        }
+        if (!mounted) {
+          return;
+        }
+        if (!result.ok) {
+          final error = result.error ?? t('detect.detectFailed');
+          _session.videoStatus = '${t('detect.detectFailed')}: $error';
+          _showDetectMessage(_session.videoStatus!);
+          return;
+        }
+        completed += 1;
+        totalLabels += result.labelCount;
+        _session.cachePredictionOutputForInput(target, result.outputPath);
+        if (_pathKey(target) == _pathKey(_session.selectedInput ?? '')) {
+          _session.predictVideo = isVideo;
+          _session.showPredictionResult = true;
+          await _session.setPredictionOutput(result.outputPath);
+        }
       }
-      if (!result.ok) {
-        final error = result.error ?? t('detect.detectFailed');
-        _session.videoStatus = '${t('detect.detectFailed')}: $error';
-        _showDetectMessage(_session.videoStatus!);
-        return;
-      }
-      _session.predictVideo = isVideo;
-      _session.showPredictionResult = true;
-      await _session.setPredictionOutput(result.outputPath);
       _session.videoStatus =
           '${save ? t('detect.saveDone') : t('detect.detectDone')} '
-          '(${t('detect.detectCount')}: ${result.labelCount})';
+          '${targets.length}/${targets.length} '
+          '(${t('detect.detectCount')}: $totalLabels)';
       _showDetectMessage(_session.videoStatus!);
     } finally {
       if (mounted) {
         _session.predicting = false;
         _session._emit();
       }
+      final restartFrame = _pendingPredictionStartFrame;
+      _pendingPredictionStartFrame = null;
+      if (mounted && restartFrame != null) {
+        await _runDetection(
+          save: false,
+          startFrame: restartFrame,
+          currentOnly: true,
+        );
+      }
     }
   }
 
-  String _detectOutputDirectory({required bool save}) {
+  List<String> _detectionTargets(
+    String currentInput, {
+    required bool currentOnly,
+    required bool allImages,
+  }) {
+    if (currentOnly || !allImages) {
+      return [currentInput];
+    }
+    final targets = _session.folderItems
+        .where(_isImagePath)
+        .toList(growable: false);
+    if (targets.isNotEmpty) {
+      return targets;
+    }
+    return _isImagePath(currentInput) ? [currentInput] : const [];
+  }
+
+  Future<String> _detectOutputDirectory({
+    required bool save,
+    String? modelPath,
+    String? pythonPath,
+  }) async {
     final root = widget.settings.outputPath.trim().isNotEmpty
         ? widget.settings.outputPath.trim()
         : _ConfigStore.defaultRunsDirectory.path;
-    final directory = Directory(
-      _joinPath(root, save ? 'detect_exports' : 'detect_preview'),
-    );
+    final directory = save
+        ? _nextDetectRunDirectory(
+            root,
+            await _detectTaskFolderName(
+              modelPath: modelPath,
+              pythonPath: pythonPath,
+            ),
+          )
+        : Directory(_joinPath(root, 'detect_preview'));
     directory.createSync(recursive: true);
     return directory.path;
   }
 
+  Directory _nextDetectRunDirectory(String root, String taskFolder) {
+    final taskRoot = Directory(_joinPath(root, taskFolder));
+    taskRoot.createSync(recursive: true);
+    var index = 1;
+    while (true) {
+      final folderName = index == 1 ? 'detect' : 'detect$index';
+      final candidate = Directory(_joinPath(taskRoot.path, folderName));
+      if (!candidate.existsSync()) {
+        return candidate;
+      }
+      index += 1;
+    }
+  }
+
+  Future<String> _detectTaskFolderName({
+    required String? modelPath,
+    required String? pythonPath,
+  }) async {
+    if (modelPath == null || modelPath.trim().isEmpty) {
+      return 'hbb';
+    }
+    if (pythonPath == null || pythonPath.trim().isEmpty) {
+      return 'hbb';
+    }
+    try {
+      final result = await _RustVideoBackend.detectModelTask(
+        pythonPath: pythonPath,
+        modelPath: modelPath,
+      );
+      if (result.ok && result.folder.trim().isNotEmpty) {
+        return result.folder.trim();
+      }
+    } on Object {
+      // Fall back to HBB if model inspection fails.
+    }
+    return 'hbb';
+  }
+
   String _detectOutputName(String input, {required bool save}) {
     final stem = _baseNameWithoutExtension(input);
-    final extension = _isVideoPath(input) ? '.mp4' : '.jpg';
-    final suffix = save ? _timestampFileSuffix() : 'preview';
+    final extension = _isVideoPath(input) ? (save ? '.mp4' : '.json') : '.jpg';
+    final suffix = save ? 'pred' : 'preview_${_pathHash(input)}';
     return '${stem}_$suffix$extension';
   }
 
-  String _timestampFileSuffix() {
-    final now = DateTime.now();
-    String two(int value) => value.toString().padLeft(2, '0');
-    return '${now.year}${two(now.month)}${two(now.day)}_'
-        '${two(now.hour)}${two(now.minute)}${two(now.second)}';
+  String _detectCancelPath(String input) {
+    return _joinPath(
+      _detectPreviewDirectory(),
+      '${_baseNameWithoutExtension(input)}_${_pathHash(input)}.cancel',
+    );
+  }
+
+  String _detectPreviewDirectory() {
+    final root = widget.settings.outputPath.trim().isNotEmpty
+        ? widget.settings.outputPath.trim()
+        : _ConfigStore.defaultRunsDirectory.path;
+    final directory = Directory(_joinPath(root, 'detect_preview'));
+    directory.createSync(recursive: true);
+    return directory.path;
+  }
+
+  void _clearCancelFile(String path) {
+    if (path.isEmpty) {
+      return;
+    }
+    try {
+      final file = File(path);
+      if (file.existsSync()) {
+        file.deleteSync();
+      }
+    } on Object {
+      // Best effort; the Python side will still start if the path is absent.
+    }
+  }
+
+  void _cancelActivePrediction() {
+    final path = _activePredictionCancelPath;
+    if (path == null || path.isEmpty) {
+      return;
+    }
+    try {
+      File(path).writeAsStringSync('cancel');
+    } on Object catch (error) {
+      _showDetectMessage('${t('detect.detectFailed')}: $error');
+    }
+  }
+
+  void _requestPredictionSeek(int frameNumber) {
+    if (_session.selectedInput == null ||
+        !_isVideoPath(_session.selectedInput!)) {
+      return;
+    }
+    final targetFrame = math.max(0, frameNumber);
+    if (_session.predicting) {
+      _pendingPredictionStartFrame = targetFrame;
+      _cancelActivePrediction();
+    } else {
+      _runDetection(save: false, startFrame: targetFrame, currentOnly: true);
+    }
+  }
+
+  void _writeEmptyPredictionManifest(String path, {required int startFrame}) {
+    final file = File(path);
+    file.parent.createSync(recursive: true);
+    file.writeAsStringSync(
+      jsonEncode({
+        'ok': true,
+        'type': 'frames',
+        'fps': 25.0,
+        'totalFrames': 0,
+        'startFrame': startFrame,
+        'complete': false,
+        'canceled': false,
+        'frames': const [],
+      }),
+    );
+  }
+
+  String _pathHash(String input) {
+    return _pathKey(input).hashCode.toUnsigned(32).toRadixString(16);
   }
 
   void _applyConfText() {
@@ -1005,6 +1258,54 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
     _session.showPreviewPanel();
   }
 
+  void _showParameterPanel() {
+    _parameterHideTimer?.cancel();
+    if (!_parameterPanelVisible && mounted) {
+      setState(() => _parameterPanelVisible = true);
+    }
+  }
+
+  void _scheduleParameterHide() {
+    _parameterHideTimer?.cancel();
+    _parameterHideTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) {
+        setState(() => _parameterPanelVisible = false);
+      }
+    });
+  }
+
+  Future<void> _resetPredictionEffect() async {
+    final input = _session.selectedInput;
+    _session.clearPredictionEffects(input: input);
+    await _session._resetVideoController();
+    _session._emit();
+    await _session.loadSelectedVideoIfNeeded();
+  }
+
+  Future<void> _handleTogglePredictionResult() async {
+    final selectedInput = _session.selectedInput;
+    final switchingToPrediction = !_session.showPredictionResult;
+    final cachedPrediction = _session.predictionOutputPath;
+    final hasCachedPrediction =
+        cachedPrediction != null && File(cachedPrediction).existsSync();
+    _session.togglePredictionResult();
+    if (!switchingToPrediction ||
+        hasCachedPrediction ||
+        selectedInput == null ||
+        !_isVideoPath(selectedInput) ||
+        _session.predicting) {
+      return;
+    }
+    final startFrame = _currentVideoFrame();
+    await _runDetection(save: false, startFrame: startFrame, currentOnly: true);
+  }
+
+  int _currentVideoFrame() {
+    final fps = _session.videoInfo?.fps;
+    final safeFps = fps == null || fps <= 0 ? 25.0 : fps;
+    return math.max(0, (_session.positionSeconds * safeFps).round());
+  }
+
   Future<void> _chooseMediaFile() async {
     _focusPage();
     await _session.chooseMediaFile();
@@ -1017,6 +1318,21 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    final key = event.logicalKey;
+    final predictionPreviewActive =
+        _session.predicting ||
+        _isPredictionManifestPath(_session.predictionOutputPath ?? '');
+    if (predictionPreviewActive &&
+        (widget.shortcutConfig.matches(_ShortcutAction.videoFastForward, key) ||
+            widget.shortcutConfig.matches(_ShortcutAction.videoRewind, key))) {
+      return KeyEventResult.handled;
+    }
+    if (_session.predicting &&
+        event is KeyDownEvent &&
+        widget.shortcutConfig.matches(_ShortcutAction.videoPlayPause, key)) {
+      _cancelActivePrediction();
+      return KeyEventResult.handled;
+    }
     return _session.handleShortcutKey(event, widget.shortcutConfig);
   }
 
@@ -1028,261 +1344,167 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
     final nvidiaDeviceLabel =
         _nvidiaDeviceOptions.firstOrNullValue?.label ??
         t('detect.deviceNvUnavailable');
-    final content = Expanded(
-      child: Focus(
-        focusNode: _focusNode,
-        autofocus: true,
-        descendantsAreFocusable: false,
-        descendantsAreTraversable: false,
-        onKeyEvent: _handleKeyEvent,
-        child: Listener(
-          behavior: HitTestBehavior.translucent,
-          onPointerDown: (_) => _focusPage(),
-          child: Container(
-            color: _workspaceColor(context),
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  t('detect.title'),
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                const SizedBox(height: 16),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    OutlinedButton.icon(
-                      onPressed: _chooseMediaFile,
-                      icon: const Icon(Icons.perm_media_outlined),
-                      label: Text(t('detect.chooseFile')),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: _chooseFolder,
-                      icon: const Icon(Icons.folder_open),
-                      label: Text(t('detect.chooseFolder')),
-                    ),
-                    _DetectCheckbox(
-                      value: _session.playVideo,
-                      label: t('detect.playVideo'),
-                      onChanged: (value) => _session.setPlayMode(value),
-                    ),
-                    FilledButton.icon(
-                      onPressed:
-                          _session.predicting ||
-                              (_session.detectModelPath != null &&
-                                  _session.selectedInput == null)
-                          ? null
-                          : () => _handlePredictButton(),
-                      icon: _session.predicting
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Icon(Icons.visibility),
-                      label: Text(
-                        _session.predicting
-                            ? t('detect.predicting')
-                            : _session.detectModelPath == null
-                            ? t('detect.chooseModel')
-                            : t('detect.predict'),
+    final autoDeviceLabel =
+        '${t('detect.deviceAuto')} | '
+        '${_friendlyDeviceLabel(_nvidiaDeviceOptions.firstOrNullValue?.label ?? _autoFallbackDeviceLabel)}';
+    return Expanded(
+      child: Row(
+        children: [
+          Expanded(
+            child: Focus(
+              focusNode: _focusNode,
+              autofocus: true,
+              descendantsAreFocusable: false,
+              descendantsAreTraversable: false,
+              onKeyEvent: _handleKeyEvent,
+              child: Listener(
+                behavior: HitTestBehavior.translucent,
+                onPointerDown: (_) => _focusPage(),
+                child: Container(
+                  color: _workspaceColor(context),
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        t('detect.title'),
+                        style: Theme.of(context).textTheme.headlineSmall,
                       ),
-                    ),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Checkbox(
-                          value: _session.predictAll,
-                          onChanged: _session.predicting || _session.playVideo
-                              ? null
-                              : (v) => _session.setPredictAllMode(
-                                  v ?? false,
-                                  widget.settings,
-                                ),
-                          visualDensity: VisualDensity.compact,
-                        ),
-                        Text(t('detect.predictAll')),
-                      ],
-                    ),
-                    FilledButton.icon(
-                      onPressed:
-                          _session.selectedInput == null || _session.predicting
-                          ? null
-                          : () => _handleSave(),
-                      icon: const Icon(Icons.save_alt),
-                      label: Text(t('detect.saveResult')),
-                    ),
-                    if (_session.showPredictionResult)
-                      OutlinedButton.icon(
-                        onPressed: _session.togglePredictionResult,
-                        icon: const Icon(Icons.compare),
-                        label: Text(t('detect.showOriginal')),
-                      )
-                    else
-                      OutlinedButton.icon(
-                        onPressed: _session.togglePredictionResult,
-                        icon: const Icon(Icons.compare),
-                        label: Text(t('detect.showPredicted')),
-                      ),
-                    SizedBox(
-                      width: 104,
-                      child: DropdownButtonFormField<int>(
-                        initialValue: _session.detectImageSize,
-                        items: [
-                          for (final size in _detectImageSizeOptions)
-                            DropdownMenuItem(value: size, child: Text('$size')),
+                      const SizedBox(height: 16),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          OutlinedButton.icon(
+                            onPressed: _chooseMediaFile,
+                            icon: const Icon(Icons.perm_media_outlined),
+                            label: Text(t('detect.chooseFile')),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: _chooseFolder,
+                            icon: const Icon(Icons.folder_open),
+                            label: Text(t('detect.chooseFolder')),
+                          ),
                         ],
-                        onChanged: _session.predicting
-                            ? null
-                            : (value) {
-                                if (value == null) return;
-                                _session.detectImageSize = value;
-                                _session._emit();
-                              },
-                        decoration: InputDecoration(
-                          labelText: t('detect.imgsz'),
-                          isDense: true,
-                        ),
                       ),
-                    ),
-                    SizedBox(
-                      width: 104,
-                      child: TextField(
-                        controller: _confController,
-                        enabled: !_session.predicting,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
+                      const SizedBox(height: 12),
+                      if (_session.selectedInput != null)
+                        Text(
+                          '${t('detect.fileName')}: ${_fileName(_session.selectedInput!)}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        onEditingComplete: _applyConfText,
-                        onSubmitted: (_) => _applyConfText(),
-                        decoration: InputDecoration(
-                          labelText: t('detect.conf'),
-                          isDense: true,
+                      if (widget.settings.outputPath.isNotEmpty)
+                        Text(
+                          '${t('path.trainingOutput')}: ${widget.settings.outputPath}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                      ),
-                    ),
-                    SizedBox(
-                      width: 220,
-                      child: Tooltip(
-                        message: t('detect.deviceHelp'),
-                        waitDuration: const Duration(milliseconds: 500),
-                        child: DropdownButtonFormField<String>(
-                          initialValue: deviceValue,
-                          items: [
-                            DropdownMenuItem(
-                              value: 'auto',
-                              child: Text(t('detect.deviceAuto')),
-                            ),
-                            DropdownMenuItem(
-                              value: 'nv',
-                              child: Text(
-                                nvidiaDeviceLabel,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                      const SizedBox(height: 20),
+                      Expanded(
+                        child: Row(
+                          children: [
+                            if (_session.folderItems.isNotEmpty)
+                              MouseRegion(
+                                onEnter: (_) => _showPreviewPanel(),
+                                onHover: (_) => _showPreviewPanel(),
+                                onExit: (_) => _schedulePreviewHide(),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 180),
+                                  width: _session.previewPanelVisible ? 220 : 8,
+                                  margin: const EdgeInsets.only(right: 12),
+                                  decoration: BoxDecoration(
+                                    color: _panelColor(context),
+                                    border: Border.all(
+                                      color: _borderColor(context),
+                                    ),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: ClipRect(
+                                    child: _session.previewPanelVisible
+                                        ? _DetectPreviewList(
+                                            items: _session.folderItems,
+                                            selectedInput:
+                                                _session.selectedInput,
+                                            onSelected: (path) {
+                                              _focusPage();
+                                              _session.selectInput(path);
+                                            },
+                                          )
+                                        : const SizedBox.expand(),
+                                  ),
+                                ),
                               ),
-                            ),
-                            DropdownMenuItem(
-                              value: 'cpu',
-                              child: Text(t('detect.deviceCpu')),
+                            Expanded(
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: _panelColor(context),
+                                  border: Border.all(
+                                    color: _borderColor(context),
+                                  ),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: _DetectPlaybackSurface(
+                                  session: _session,
+                                  onCancelPrediction: _cancelActivePrediction,
+                                  onSeekPredictionFrame: _requestPredictionSeek,
+                                ),
+                              ),
                             ),
                           ],
-                          onChanged: _session.predicting
-                              ? null
-                              : (value) {
-                                  if (value == null) return;
-                                  _session.detectDevice = value;
-                                  _session._emit();
-                                },
-                          decoration: InputDecoration(
-                            labelText: t('detect.device'),
-                            isDense: true,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                if (_session.selectedInput != null)
-                  Text(
-                    '${t('detect.fileName')}: ${_fileName(_session.selectedInput!)}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                if (widget.settings.outputPath.isNotEmpty)
-                  Text(
-                    '${t('path.trainingOutput')}: ${widget.settings.outputPath}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                if (_session.detectModelPath != null)
-                  Text(
-                    '${t('path.model')}: ${_fileName(_session.detectModelPath!)}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                const SizedBox(height: 20),
-                Expanded(
-                  child: Row(
-                    children: [
-                      if (_session.folderItems.isNotEmpty)
-                        MouseRegion(
-                          onEnter: (_) => _showPreviewPanel(),
-                          onHover: (_) => _showPreviewPanel(),
-                          onExit: (_) => _schedulePreviewHide(),
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 180),
-                            width: _session.previewPanelVisible ? 220 : 8,
-                            margin: const EdgeInsets.only(right: 12),
-                            decoration: BoxDecoration(
-                              color: _panelColor(context),
-                              border: Border.all(color: _borderColor(context)),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: ClipRect(
-                              child: _session.previewPanelVisible
-                                  ? _DetectPreviewList(
-                                      items: _session.folderItems,
-                                      selectedInput: _session.selectedInput,
-                                      onSelected: (path) {
-                                        _focusPage();
-                                        _session.selectInput(path);
-                                      },
-                                    )
-                                  : const SizedBox.expand(),
-                            ),
-                          ),
-                        ),
-                      Expanded(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: _panelColor(context),
-                            border: Border.all(color: _borderColor(context)),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: _DetectPlaybackSurface(
-                            session: _session,
-                            onToggleResult: _session.togglePredictionResult,
-                          ),
                         ),
                       ),
                     ],
                   ),
                 ),
-              ],
+              ),
             ),
           ),
-        ),
+          MouseRegion(
+            onEnter: (_) => _showParameterPanel(),
+            onHover: (_) => _showParameterPanel(),
+            onExit: (_) => _scheduleParameterHide(),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              width: _parameterPanelVisible ? 320 : 8,
+              decoration: BoxDecoration(
+                color: _panelColor(context),
+                border: Border(left: BorderSide(color: _borderColor(context))),
+              ),
+              child: ClipRect(
+                child: _parameterPanelVisible
+                    ? _DetectParameterPanel(
+                        session: _session,
+                        confController: _confController,
+                        deviceValue: deviceValue,
+                        autoDeviceLabel: autoDeviceLabel,
+                        nvidiaDeviceLabel: nvidiaDeviceLabel,
+                        onChooseModel: () => unawaited(_chooseDetectModel()),
+                        onResetEffect: () =>
+                            unawaited(_resetPredictionEffect()),
+                        onPredict: () => unawaited(_handlePredictButton()),
+                        onSaveCurrent: () => unawaited(_handleSaveCurrent()),
+                        onSaveAll: () => unawaited(_handleSaveAll()),
+                        onToggleResult: () =>
+                            unawaited(_handleTogglePredictionResult()),
+                        onApplyConf: _applyConfText,
+                        onImageSizeChanged: (value) {
+                          _session.detectImageSize = value;
+                          _session._emit();
+                        },
+                        onDeviceChanged: (value) {
+                          _session.detectDevice = value;
+                          _session._emit();
+                        },
+                      )
+                    : const SizedBox.expand(),
+              ),
+            ),
+          ),
+        ],
       ),
     );
-
-    return content;
   }
 }
 
@@ -1352,25 +1574,268 @@ class _DetectPreviewList extends StatelessWidget {
   }
 }
 
-class _DetectPlaybackSurface extends StatelessWidget {
-  const _DetectPlaybackSurface({
+class _DetectParameterPanel extends StatelessWidget {
+  const _DetectParameterPanel({
     required this.session,
+    required this.confController,
+    required this.deviceValue,
+    required this.autoDeviceLabel,
+    required this.nvidiaDeviceLabel,
+    required this.onChooseModel,
+    required this.onResetEffect,
+    required this.onPredict,
+    required this.onSaveCurrent,
+    required this.onSaveAll,
     required this.onToggleResult,
+    required this.onApplyConf,
+    required this.onImageSizeChanged,
+    required this.onDeviceChanged,
   });
 
   final _DetectVideoSession session;
+  final TextEditingController confController;
+  final String deviceValue;
+  final String autoDeviceLabel;
+  final String nvidiaDeviceLabel;
+  final VoidCallback onChooseModel;
+  final VoidCallback onResetEffect;
+  final VoidCallback onPredict;
+  final VoidCallback onSaveCurrent;
+  final VoidCallback onSaveAll;
   final VoidCallback onToggleResult;
+  final VoidCallback onApplyConf;
+  final ValueChanged<int> onImageSizeChanged;
+  final ValueChanged<String> onDeviceChanged;
+
+  bool get _hasFolderImageTargets => session.folderItems.any(_isImagePath);
+
+  bool get _canRunCurrent =>
+      !session.predicting && session.selectedInput != null;
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedModel = session.detectModelPath;
+    final hasPrediction = session.predictionOutputPath != null;
+    return Padding(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            t('detect.parameters'),
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 10),
+          Expanded(
+            child: ListView(
+              children: [
+                _ParameterSectionTitle(title: t('detect.model')),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Tooltip(
+                        message: selectedModel ?? t('detect.chooseModel'),
+                        waitDuration: const Duration(milliseconds: 500),
+                        child: OutlinedButton.icon(
+                          onPressed: session.predicting ? null : onChooseModel,
+                          icon: const Icon(Icons.folder_open, size: 16),
+                          label: Text(
+                            selectedModel == null
+                                ? t('detect.chooseModel')
+                                : _fileName(selectedModel),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                    ),
+                    if (selectedModel != null) ...[
+                      const SizedBox(width: 8),
+                      OutlinedButton.icon(
+                        onPressed: session.predicting ? null : onResetEffect,
+                        icon: const Icon(Icons.restart_alt, size: 16),
+                        label: Text(t('detect.resetEffect')),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 14),
+                _ParameterSectionTitle(title: t('detect.actions')),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: Text(t('detect.playVideo')),
+                  value: session.playVideo,
+                  onChanged: session.predicting
+                      ? null
+                      : (value) => unawaited(session.setPlayMode(value)),
+                ),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: session.predicting ? null : onPredict,
+                    icon: session.predicting
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.visibility, size: 16),
+                    label: Text(
+                      session.predicting
+                          ? t('detect.predicting')
+                          : selectedModel == null
+                          ? t('detect.chooseModel')
+                          : t('detect.predict'),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _canRunCurrent ? onSaveCurrent : null,
+                        icon: const Icon(Icons.save_alt, size: 16),
+                        label: Text(t('detect.saveCurrent')),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: !session.predicting && _hasFolderImageTargets
+                            ? onSaveAll
+                            : null,
+                        icon: const Icon(Icons.library_add_check, size: 16),
+                        label: Text(t('detect.saveAll')),
+                      ),
+                    ),
+                  ],
+                ),
+                if (hasPrediction) ...[
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: onToggleResult,
+                      icon: const Icon(Icons.compare, size: 16),
+                      label: Text(
+                        session.showPredictionResult
+                            ? t('detect.showOriginal')
+                            : t('detect.showPredicted'),
+                      ),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 14),
+                _ParameterSectionTitle(title: t('detect.inferenceParams')),
+                DropdownButtonFormField<int>(
+                  initialValue: session.detectImageSize,
+                  items: [
+                    for (final size in _detectImageSizeOptions)
+                      DropdownMenuItem(value: size, child: Text('$size')),
+                  ],
+                  onChanged: session.predicting
+                      ? null
+                      : (value) {
+                          if (value != null) {
+                            onImageSizeChanged(value);
+                          }
+                        },
+                  decoration: InputDecoration(
+                    labelText: t('detect.imgsz'),
+                    isDense: true,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: confController,
+                  enabled: !session.predicting,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  onEditingComplete: onApplyConf,
+                  onSubmitted: (_) => onApplyConf(),
+                  decoration: InputDecoration(
+                    labelText: t('detect.conf'),
+                    isDense: true,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Tooltip(
+                  message: t('detect.deviceHelp'),
+                  waitDuration: const Duration(milliseconds: 500),
+                  child: DropdownButtonFormField<String>(
+                    isExpanded: true,
+                    initialValue: deviceValue,
+                    items: [
+                      DropdownMenuItem(
+                        value: 'auto',
+                        child: Text(
+                          autoDeviceLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      DropdownMenuItem(
+                        value: 'nv',
+                        child: Text(
+                          nvidiaDeviceLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      DropdownMenuItem(
+                        value: 'cpu',
+                        child: Text(t('detect.deviceCpu')),
+                      ),
+                    ],
+                    onChanged: session.predicting
+                        ? null
+                        : (value) {
+                            if (value != null) {
+                              onDeviceChanged(value);
+                            }
+                          },
+                    decoration: InputDecoration(
+                      labelText: t('detect.device'),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DetectPlaybackSurface extends StatelessWidget {
+  const _DetectPlaybackSurface({
+    required this.session,
+    required this.onCancelPrediction,
+    required this.onSeekPredictionFrame,
+  });
+
+  final _DetectVideoSession session;
+  final VoidCallback onCancelPrediction;
+  final ValueChanged<int> onSeekPredictionFrame;
 
   @override
   Widget build(BuildContext context) {
     final input = session.displayInput;
-    final isPredictionMode =
+    final showPredictionStatus =
         session.predictVideo ||
         session.predictAll ||
         session.predictionOutputPath != null;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: isPredictionMode ? onToggleResult : null,
+      onTap: null,
       child: Stack(
         children: [
           Positioned.fill(
@@ -1380,12 +1845,23 @@ class _DetectPlaybackSurface extends StatelessWidget {
                   : _isImagePath(input)
                   ? Padding(
                       padding: const EdgeInsets.all(12),
-                      child: Image.file(File(input), fit: BoxFit.contain),
+                      child: Image.file(
+                        File(input),
+                        fit: BoxFit.contain,
+                        gaplessPlayback: true,
+                      ),
+                    )
+                  : _isPredictionManifestPath(input)
+                  ? _PredictedFrameSequencePanel(
+                      manifestPath: input,
+                      predicting: session.predicting,
+                      onCancelPrediction: onCancelPrediction,
+                      onSeekFrame: onSeekPredictionFrame,
                     )
                   : _VideoPlayerPanel(session: session),
             ),
           ),
-          if (input != null && isPredictionMode)
+          if (input != null && showPredictionStatus)
             Positioned(
               right: 14,
               top: 14,
@@ -1412,6 +1888,485 @@ class _DetectPlaybackSurface extends StatelessWidget {
       ),
     );
   }
+}
+
+class _PredictedFrameSequencePanel extends StatefulWidget {
+  const _PredictedFrameSequencePanel({
+    required this.manifestPath,
+    required this.predicting,
+    required this.onCancelPrediction,
+    required this.onSeekFrame,
+  });
+
+  final String manifestPath;
+  final bool predicting;
+  final VoidCallback onCancelPrediction;
+  final ValueChanged<int> onSeekFrame;
+
+  @override
+  State<_PredictedFrameSequencePanel> createState() =>
+      _PredictedFrameSequencePanelState();
+}
+
+class _PredictedFrameSequencePanelState
+    extends State<_PredictedFrameSequencePanel> {
+  Timer? _timer;
+  Timer? _pollTimer;
+  _PredictionFrameManifest? _manifest;
+  String? _error;
+  double? _scrubFrame;
+  bool _paused = false;
+  bool _advancingFrame = false;
+  int _frameRequestSerial = 0;
+  int _index = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadManifest();
+  }
+
+  @override
+  void didUpdateWidget(covariant _PredictedFrameSequencePanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.manifestPath != widget.manifestPath) {
+      _loadManifest();
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
+  void _loadManifest() {
+    _timer?.cancel();
+    _pollTimer?.cancel();
+    _timer = null;
+    _pollTimer = null;
+    _advancingFrame = false;
+    _frameRequestSerial += 1;
+    _index = 0;
+    _paused = false;
+    _scrubFrame = null;
+    _refreshManifest(resetPlayback: true);
+    _pollTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {
+      _refreshManifest(resetPlayback: false);
+    });
+  }
+
+  void _refreshManifest({required bool resetPlayback}) {
+    try {
+      final manifest = _PredictionFrameManifest.load(widget.manifestPath);
+      final previous = _manifest;
+      final previousLength = previous?.frames.length ?? 0;
+      final changed =
+          resetPlayback ||
+          previous == null ||
+          previous.frames.length != manifest.frames.length ||
+          previous.complete != manifest.complete ||
+          previous.canceled != manifest.canceled ||
+          previous.totalFrames != manifest.totalFrames ||
+          previous.startFrame != manifest.startFrame;
+      if (!changed) {
+        return;
+      }
+      setState(() {
+        _manifest = manifest;
+        _error = null;
+        if (_index >= manifest.frames.length) {
+          _index = math.max(0, manifest.frames.length - 1);
+        }
+      });
+      if (resetPlayback || previousLength <= 1 && manifest.frames.length > 1) {
+        _startPlayback(manifest);
+      }
+    } on Object catch (error) {
+      setState(() {
+        _manifest = null;
+        _error = '$error';
+      });
+    }
+  }
+
+  void _startPlayback(_PredictionFrameManifest manifest) {
+    _timer?.cancel();
+    if (_paused) {
+      return;
+    }
+    if (manifest.frames.length <= 1) {
+      return;
+    }
+    final fps = manifest.fps.clamp(1.0, 60.0).toDouble();
+    final intervalMs = math.max(16, (1000 / fps).round());
+    _timer = Timer.periodic(Duration(milliseconds: intervalMs), (_) {
+      if (!mounted || manifest.frames.isEmpty) {
+        return;
+      }
+      final current = _manifest;
+      if (current == null || current.frames.isEmpty || _paused) {
+        return;
+      }
+      if (!_advancingFrame && _index + 1 < current.frames.length) {
+        unawaited(_showFrameIndex(_index + 1));
+      }
+    });
+  }
+
+  Future<void> _showFrameIndex(int targetIndex) async {
+    final current = _manifest;
+    if (!mounted || current == null || current.frames.isEmpty) {
+      return;
+    }
+    final nextIndex = targetIndex.clamp(0, current.frames.length - 1).toInt();
+    if (nextIndex == _index) {
+      return;
+    }
+
+    final requestSerial = _frameRequestSerial + 1;
+    _frameRequestSerial = requestSerial;
+    _advancingFrame = true;
+    try {
+      await precacheImage(
+        FileImage(File(current.frames[nextIndex].path)),
+        context,
+      );
+    } on Object {
+      // If an output frame is corrupt or still locked, keep moving so the
+      // normal image error path can surface instead of freezing playback.
+    } finally {
+      if (requestSerial == _frameRequestSerial) {
+        _advancingFrame = false;
+      }
+    }
+
+    if (!mounted || requestSerial != _frameRequestSerial) {
+      return;
+    }
+    final latest = _manifest;
+    if (latest == null || latest.frames.isEmpty) {
+      return;
+    }
+    final safeIndex = nextIndex.clamp(0, latest.frames.length - 1).toInt();
+    setState(() => _index = safeIndex);
+  }
+
+  void _togglePause() {
+    if (widget.predicting) {
+      widget.onCancelPrediction();
+      return;
+    }
+    setState(() => _paused = !_paused);
+    if (_paused) {
+      _timer?.cancel();
+      _timer = null;
+    } else {
+      final manifest = _manifest;
+      if (manifest != null) {
+        _startPlayback(manifest);
+      }
+    }
+  }
+
+  void _seekTo(double value) {
+    final target = value.round();
+    final generatedIndex = _nearestGeneratedFrameIndex(target);
+    final generatedFrames = _manifest?.frames ?? const <_PredictionFrameInfo>[];
+    final generatedFrameValue = generatedFrames.isEmpty
+        ? null
+        : generatedFrames[generatedIndex].frameNumber.toDouble();
+    setState(() {
+      _scrubFrame = generatedFrameValue;
+    });
+    unawaited(
+      _showFrameIndex(generatedIndex).whenComplete(() {
+        if (mounted) {
+          setState(() => _scrubFrame = null);
+        }
+      }),
+    );
+    widget.onSeekFrame(target);
+  }
+
+  int _nearestGeneratedFrameIndex(int frameNumber) {
+    final frames = _manifest?.frames ?? const <_PredictionFrameInfo>[];
+    if (frames.isEmpty) {
+      return 0;
+    }
+    var bestIndex = 0;
+    var bestDistance = (frames.first.frameNumber - frameNumber).abs();
+    for (var i = 1; i < frames.length; i += 1) {
+      final distance = (frames[i].frameNumber - frameNumber).abs();
+      if (distance < bestDistance) {
+        bestIndex = i;
+        bestDistance = distance;
+      }
+    }
+    return bestIndex;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final manifest = _manifest;
+    if (_error != null) {
+      return Center(
+        child: Text(
+          '${t('detect.decodeFailed')}: $_error',
+          style: const TextStyle(color: Colors.white),
+        ),
+      );
+    }
+    if (manifest == null || manifest.frames.isEmpty) {
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          Center(
+            child: _PredictionWaitingIndicator(
+              text: t('detect.predictingFrame'),
+            ),
+          ),
+          _PredictionFrameControls(
+            frameValue: _scrubFrame ?? manifest?.startFrame.toDouble() ?? 0,
+            maxFrame: math.max(1, manifest?.totalFrames ?? 1).toDouble(),
+            predicting: widget.predicting,
+            paused: _paused,
+            onPause: _togglePause,
+            onChanged: (value) => setState(() => _scrubFrame = value),
+            onChangeEnd: _seekTo,
+          ),
+        ],
+      );
+    }
+    final frame = manifest.frames[_index.clamp(0, manifest.frames.length - 1)];
+    final waitingForNextFrame =
+        widget.predicting &&
+        !manifest.complete &&
+        _index >= manifest.frames.length - 1;
+    final maxFrame = math.max(
+      frame.frameNumber + 1,
+      manifest.totalFrames > 0 ? manifest.totalFrames - 1 : frame.frameNumber,
+    );
+    return ColoredBox(
+      color: Colors.black,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Image.file(
+              File(frame.path),
+              fit: BoxFit.contain,
+              gaplessPlayback: true,
+            ),
+          ),
+          if (waitingForNextFrame)
+            Center(
+              child: _PredictionWaitingIndicator(
+                text: t('detect.predictingFrame'),
+              ),
+            ),
+          Positioned(
+            left: 18,
+            top: 18,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: Colors.black.withAlpha(182),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                child: Text(
+                  'pre ${frame.preprocessMs.toStringAsFixed(1)} ms  |  '
+                  'infer ${frame.inferenceMs.toStringAsFixed(1)} ms  |  '
+                  'post ${frame.postprocessMs.toStringAsFixed(1)} ms',
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ),
+            ),
+          ),
+          _PredictionFrameControls(
+            frameValue: _scrubFrame ?? frame.frameNumber.toDouble(),
+            maxFrame: math.max(1, maxFrame).toDouble(),
+            predicting: widget.predicting,
+            paused: _paused,
+            onPause: _togglePause,
+            onChanged: (value) => setState(() => _scrubFrame = value),
+            onChangeEnd: _seekTo,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PredictionFrameControls extends StatelessWidget {
+  const _PredictionFrameControls({
+    required this.frameValue,
+    required this.maxFrame,
+    required this.predicting,
+    required this.paused,
+    required this.onPause,
+    required this.onChanged,
+    required this.onChangeEnd,
+  });
+
+  final double frameValue;
+  final double maxFrame;
+  final bool predicting;
+  final bool paused;
+  final VoidCallback onPause;
+  final ValueChanged<double> onChanged;
+  final ValueChanged<double> onChangeEnd;
+
+  @override
+  Widget build(BuildContext context) {
+    final value = frameValue.clamp(0.0, maxFrame).toDouble();
+    return Positioned(
+      left: 18,
+      right: 18,
+      bottom: 18,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: Colors.black.withAlpha(182),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: Row(
+            children: [
+              IconButton(
+                color: Colors.white,
+                tooltip: predicting ? t('detect.paused') : t('detect.playing'),
+                onPressed: onPause,
+                icon: Icon(
+                  predicting || !paused ? Icons.pause : Icons.play_arrow,
+                ),
+              ),
+              Expanded(
+                child: Slider(
+                  value: value,
+                  min: 0,
+                  max: maxFrame,
+                  onChanged: onChanged,
+                  onChangeEnd: onChangeEnd,
+                ),
+              ),
+              SizedBox(
+                width: 92,
+                child: Text(
+                  '${value.round()} / ${maxFrame.round()}',
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PredictionWaitingIndicator extends StatelessWidget {
+  const _PredictionWaitingIndicator({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.black.withAlpha(182),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text(text, style: const TextStyle(color: Colors.white)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PredictionFrameManifest {
+  const _PredictionFrameManifest({
+    required this.fps,
+    required this.totalFrames,
+    required this.startFrame,
+    required this.complete,
+    required this.canceled,
+    required this.frames,
+  });
+
+  final double fps;
+  final int totalFrames;
+  final int startFrame;
+  final bool complete;
+  final bool canceled;
+  final List<_PredictionFrameInfo> frames;
+
+  static _PredictionFrameManifest load(String path) {
+    final decoded = jsonDecode(File(path).readAsStringSync());
+    if (decoded is! Map<String, dynamic>) {
+      throw StateError('Invalid prediction manifest');
+    }
+    final rawFrames = decoded['frames'];
+    if (rawFrames is! List) {
+      throw StateError('Prediction manifest has no frames');
+    }
+    return _PredictionFrameManifest(
+      fps: (decoded['fps'] as num?)?.toDouble() ?? 25.0,
+      totalFrames: (decoded['totalFrames'] as num?)?.round() ?? 0,
+      startFrame: (decoded['startFrame'] as num?)?.round() ?? 0,
+      complete: decoded['complete'] == true,
+      canceled: decoded['canceled'] == true,
+      frames: [
+        for (final item in rawFrames)
+          if (item is Map)
+            _PredictionFrameInfo(
+              path: '${item['path'] ?? ''}'.replaceAll('/', '\\'),
+              frameNumber: (item['frameNumber'] as num?)?.round() ?? 0,
+              preprocessMs: (item['preprocessMs'] as num?)?.toDouble() ?? 0,
+              inferenceMs: (item['inferenceMs'] as num?)?.toDouble() ?? 0,
+              postprocessMs: (item['postprocessMs'] as num?)?.toDouble() ?? 0,
+            ),
+      ],
+    );
+  }
+}
+
+class _PredictionFrameInfo {
+  const _PredictionFrameInfo({
+    required this.path,
+    required this.frameNumber,
+    required this.preprocessMs,
+    required this.inferenceMs,
+    required this.postprocessMs,
+  });
+
+  final String path;
+  final int frameNumber;
+  final double preprocessMs;
+  final double inferenceMs;
+  final double postprocessMs;
 }
 
 class _VideoFullscreenOverlay extends StatefulWidget {
@@ -2010,15 +2965,6 @@ class _VideoPlayerShellState extends State<_VideoPlayerShell> {
                                           .bodySmall
                                           ?.merge(controlTextStyle),
                                     ),
-                                  if (session.predictVideo ||
-                                      session.predictAll)
-                                    Text(
-                                      t('detect.clickToggleResult'),
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodySmall
-                                          ?.merge(controlTextStyle),
-                                    ),
                                 ],
                               ),
                             ),
@@ -2319,28 +3265,6 @@ class _VolumeIndicator extends StatelessWidget {
   }
 }
 
-class _DetectCheckbox extends StatelessWidget {
-  const _DetectCheckbox({
-    required this.value,
-    required this.label,
-    required this.onChanged,
-  });
-
-  final bool value;
-  final String label;
-  final ValueChanged<bool> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return FilterChip(
-      selected: value,
-      label: Text(label),
-      onSelected: onChanged,
-      avatar: Icon(value ? Icons.check_box : Icons.check_box_outline_blank),
-    );
-  }
-}
-
 List<String> _mediaFilesInDirectory(String folderPath) {
   final directory = Directory(folderPath);
   if (!directory.existsSync()) {
@@ -2357,10 +3281,30 @@ List<String> _mediaFilesInDirectory(String folderPath) {
   return files;
 }
 
+String _friendlyDeviceLabel(String label) {
+  return label.replaceFirst(RegExp(r'^GPU\s+\d+\s+-\s+'), '').trim();
+}
+
+String _detectPrimaryProcessorName() {
+  final identifier = Platform.environment['PROCESSOR_IDENTIFIER']?.trim();
+  if (identifier != null && identifier.isNotEmpty) {
+    return identifier;
+  }
+  final architecture = Platform.environment['PROCESSOR_ARCHITECTURE']?.trim();
+  if (architecture != null && architecture.isNotEmpty) {
+    return architecture;
+  }
+  return 'CPU';
+}
+
 bool _isVideoPath(String path) {
   final dotIndex = path.lastIndexOf('.');
   if (dotIndex < 0 || dotIndex == path.length - 1) {
     return false;
   }
   return _videoExtensions.contains(path.substring(dotIndex + 1).toLowerCase());
+}
+
+bool _isPredictionManifestPath(String path) {
+  return path.toLowerCase().endsWith('.json') && File(path).existsSync();
 }

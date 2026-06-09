@@ -189,6 +189,20 @@ pub unsafe extern "C" fn rust_label_detect_json(
     vec_into_ffi_buffer(result.into_bytes())
 }
 
+/// C ABI: inspect a YOLO model and return its `model.task`.
+#[frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn rust_label_detect_model_task_json(
+    request_ptr: *const u8,
+    request_len: usize,
+) -> RustLabelByteBuffer {
+    let result = string_from_ffi(request_ptr, request_len)
+        .and_then(|request| detect_model_task_from_json_request(&request))
+        .map(detect_model_task_result_json)
+        .unwrap_or_else(error_json);
+    vec_into_ffi_buffer(result.into_bytes())
+}
+
 /// C ABI: free buffers returned by `rust_label_*` FFI functions.
 #[frb(ignore)]
 #[no_mangle]
@@ -729,6 +743,30 @@ fn detect_result_json(result: detecting_mod::DetectResult) -> String {
     }
 }
 
+fn detect_model_task_result_json(result: detecting_mod::DetectModelTaskResult) -> String {
+    if result.ok {
+        format!(
+            "{{\"ok\":true,\"task\":\"{}\",\"folder\":\"{}\"}}",
+            json_escape(&result.task),
+            json_escape(&result.folder),
+        )
+    } else {
+        error_json(
+            result
+                .error
+                .unwrap_or_else(|| "Failed to inspect model task".to_string()),
+        )
+    }
+}
+
+fn detect_model_task_from_json_request(
+    request: &str,
+) -> Result<detecting_mod::DetectModelTaskResult, String> {
+    let python_path = required_json_string(request, "pythonPath")?;
+    let model_path = required_json_string(request, "modelPath")?;
+    Ok(detecting_mod::detect_model_task(&python_path, &model_path))
+}
+
 fn detect_from_json_request(request: &str) -> Result<detecting_mod::DetectResult, String> {
     let mode = json_string_field(request, "mode").unwrap_or_else(|| "image".to_string());
     let python_path = required_json_string(request, "pythonPath")?;
@@ -747,6 +785,9 @@ fn detect_from_json_request(request: &str) -> Result<detecting_mod::DetectResult
     let iou_threshold = json_f64_field(request, "iouThreshold").unwrap_or(0.45);
     let imgsz = json_u32_field(request, "imgsz").unwrap_or(640);
     let device = json_string_field(request, "device").unwrap_or_else(|| "auto".to_string());
+    let preview_frames = json_bool_field(request, "previewFrames").unwrap_or(false);
+    let cancel_path = json_string_field(request, "cancelPath").unwrap_or_default();
+    let start_frame = json_u32_field(request, "startFrame").unwrap_or(0);
 
     if mode.eq_ignore_ascii_case("video") {
         let ffmpeg_path = match json_string_field(request, "ffmpegPath") {
@@ -769,6 +810,9 @@ fn detect_from_json_request(request: &str) -> Result<detecting_mod::DetectResult
             imgsz,
             device,
             ffmpeg_path,
+            preview_frames,
+            cancel_path,
+            start_frame,
         };
         Ok(detecting_mod::detect_video(&req))
     } else {
@@ -852,6 +896,14 @@ fn json_u32_field(input: &str, key: &str) -> Option<u32> {
             .filter(|number| number.is_finite() && *number >= 0.0)
             .map(|number| number.round() as u32)
     })
+}
+
+fn json_bool_field(input: &str, key: &str) -> Option<bool> {
+    match json_raw_scalar(input, key)?.to_ascii_lowercase().as_str() {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    }
 }
 
 fn json_raw_scalar(input: &str, key: &str) -> Option<String> {
@@ -1058,6 +1110,9 @@ pub fn detect_video(
         iou_threshold,
         imgsz,
         device,
+        preview_frames: false,
+        cancel_path: String::new(),
+        start_frame: 0,
     };
     detecting_mod::detect_video(&req)
 }

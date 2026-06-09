@@ -92,6 +92,9 @@ class _RustVideoBackend {
     required double iouThreshold,
     required int imgsz,
     required String device,
+    bool previewFrames = false,
+    String cancelPath = '',
+    int startFrame = 0,
   }) {
     return Isolate.run(
       () => _detectSync(
@@ -105,7 +108,19 @@ class _RustVideoBackend {
         iouThreshold: iouThreshold,
         imgsz: imgsz,
         device: device,
+        previewFrames: previewFrames,
+        cancelPath: cancelPath,
+        startFrame: startFrame,
       ),
+    );
+  }
+
+  static Future<_DetectModelTaskResult> detectModelTask({
+    required String pythonPath,
+    required String modelPath,
+  }) {
+    return Isolate.run(
+      () => _detectModelTaskSync(pythonPath: pythonPath, modelPath: modelPath),
     );
   }
 
@@ -170,6 +185,9 @@ class _RustVideoBackend {
     required double iouThreshold,
     required int imgsz,
     required String device,
+    required bool previewFrames,
+    required String cancelPath,
+    required int startFrame,
   }) {
     final bindings = _RustVideoBindings.open();
     final request = jsonEncode({
@@ -183,6 +201,9 @@ class _RustVideoBackend {
       'iouThreshold': iouThreshold,
       'imgsz': imgsz,
       'device': device,
+      'previewFrames': previewFrames,
+      'cancelPath': cancelPath,
+      'startFrame': startFrame,
     });
     final requestBytes = Uint8List.fromList(utf8.encode(request));
     final requestPtr = bindings.allocator.allocate(requestBytes);
@@ -203,6 +224,38 @@ class _RustVideoBackend {
       bindings.allocator.free(requestPtr);
     }
   }
+
+  static _DetectModelTaskResult _detectModelTaskSync({
+    required String pythonPath,
+    required String modelPath,
+  }) {
+    final bindings = _RustVideoBindings.open();
+    final request = jsonEncode({
+      'pythonPath': pythonPath,
+      'modelPath': modelPath,
+    });
+    final requestBytes = Uint8List.fromList(utf8.encode(request));
+    final requestPtr = bindings.allocator.allocate(requestBytes);
+    try {
+      final buffer = bindings.detectModelTaskJson(
+        requestPtr,
+        requestBytes.length,
+      );
+      final jsonText = bindings.takeUtf8(buffer);
+      final decoded = jsonDecode(jsonText);
+      if (decoded is! Map<String, dynamic>) {
+        throw StateError('Invalid model task response');
+      }
+      return _DetectModelTaskResult(
+        ok: decoded['ok'] == true,
+        task: '${decoded['task'] ?? ''}',
+        folder: '${decoded['folder'] ?? 'hbb'}',
+        error: decoded['error']?.toString(),
+      );
+    } finally {
+      bindings.allocator.free(requestPtr);
+    }
+  }
 }
 
 class _DetectResult {
@@ -217,6 +270,20 @@ class _DetectResult {
   final String outputPath;
   final String? error;
   final int labelCount;
+}
+
+class _DetectModelTaskResult {
+  const _DetectModelTaskResult({
+    required this.ok,
+    required this.task,
+    required this.folder,
+    required this.error,
+  });
+
+  final bool ok;
+  final String task;
+  final String folder;
+  final String? error;
 }
 
 class _RustVideoInfo {
@@ -278,6 +345,10 @@ typedef _DetectJsonNative =
     _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
 typedef _DetectJsonDart =
     _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+typedef _DetectModelTaskJsonNative =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef _DetectModelTaskJsonDart =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 
 typedef _FreeByteBufferNative = ffi.Void Function(_RustVideoByteBuffer);
 typedef _FreeByteBufferDart = void Function(_RustVideoByteBuffer);
@@ -296,6 +367,10 @@ class _RustVideoBindings {
       detectJson = library.lookupFunction<_DetectJsonNative, _DetectJsonDart>(
         'rust_label_detect_json',
       ),
+      detectModelTaskJson = library
+          .lookupFunction<_DetectModelTaskJsonNative, _DetectModelTaskJsonDart>(
+            'rust_label_detect_model_task_json',
+          ),
       _freeByteBuffer = library
           .lookupFunction<_FreeByteBufferNative, _FreeByteBufferDart>(
             'rust_label_free_byte_buffer',
@@ -305,6 +380,7 @@ class _RustVideoBindings {
   final _VideoInfoJsonDart videoInfoJson;
   final _DecodeVideoFrameDart decodeVideoFramePng;
   final _DetectJsonDart detectJson;
+  final _DetectModelTaskJsonDart detectModelTaskJson;
   final _FreeByteBufferDart _freeByteBuffer;
 
   static _RustVideoBindings open() {
