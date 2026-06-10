@@ -1,24 +1,72 @@
+// =============================================================================
+// ConfigStore.dart - Configuration Persistence / 配置持久化
+// =============================================================================
+// JSON-based local config for history, settings, keybindings,
+// training preferences, and training history. Files stored under
+// %USERPROFILE%\.rustlabel\.
+//
+// 基于 JSON 的本地配置读写：历史记录、设置、快捷键、训练偏好、
+// 训练历史。文件保存在 %USERPROFILE%\.rustlabel\ 目录下。
+// =============================================================================
+
 // ignore_for_file: file_names
 
 part of 'main.dart';
 
 /// 最近文件历史。
 /// Recent file and folder history.
+class _RecentEntry {
+  const _RecentEntry({required this.path, required this.timestamp});
+
+  final String path;
+  final DateTime timestamp;
+
+  Map<String, Object> toJson() => {
+    'path': path,
+    'timestamp': timestamp.toIso8601String(),
+  };
+
+  static _RecentEntry? fromJson(Object? value, int fallbackOrder) {
+    if (value is String) {
+      return _RecentEntry(
+        path: value,
+        timestamp: DateTime.fromMillisecondsSinceEpoch(fallbackOrder),
+      );
+    }
+    if (value is! Map) {
+      return null;
+    }
+    final path = value['path'];
+    if (path is! String || path.trim().isEmpty) {
+      return null;
+    }
+    return _RecentEntry(
+      path: path,
+      timestamp:
+          DateTime.tryParse('${value['timestamp'] ?? ''}') ??
+          DateTime.fromMillisecondsSinceEpoch(fallbackOrder),
+    );
+  }
+}
+
 class _HistoryConfig {
   const _HistoryConfig({required this.folders, required this.files});
 
-  final List<String> folders;
-  final List<String> files;
+  final List<_RecentEntry> folders;
+  final List<_RecentEntry> files;
 
-  Map<String, Object> toJson() => {'folders': folders, 'files': files};
+  Map<String, Object> toJson() => {
+    'folders': [for (final entry in folders) entry.toJson()],
+    'files': [for (final entry in files) entry.toJson()],
+  };
 
   static _HistoryConfig fromJson(Object? value) {
     if (value is! Map) {
       return const _HistoryConfig(folders: [], files: []);
     }
     return _HistoryConfig(
-      folders: _stringListFromJson(value['folders']),
-      files: _stringListFromJson(value['files']),
+      folders: _recentEntriesFromJson(value['folders']),
+      files: _recentEntriesFromJson(value['files']),
     );
   }
 }
@@ -70,7 +118,9 @@ class _TrainingHistoryEntry {
     return _TrainingHistoryEntry(
       action: action,
       timestamp: timestamp,
-      modelPath: value['modelPath'] is String ? value['modelPath'] as String : '',
+      modelPath: value['modelPath'] is String
+          ? value['modelPath'] as String
+          : '',
       datasetPath: value['datasetPath'] is String
           ? value['datasetPath'] as String
           : '',
@@ -110,29 +160,34 @@ class _AppSettings {
     required this.pythonPath,
     required this.outputPath,
     required this.exportPath,
+    this.logLevelIndex = 2, // warning by default
   });
 
   factory _AppSettings.empty() {
-    return _AppSettings(
+    return const _AppSettings(
       pythonPath: '',
-      outputPath: _ConfigStore.defaultRunsDirectory.path,
-      exportPath: _ConfigStore.defaultDatasetsDirectory.path,
+      outputPath: '',
+      exportPath: '',
+      logLevelIndex: 2,
     );
   }
 
   final String pythonPath;
   final String outputPath;
   final String exportPath;
+  final int logLevelIndex; // 0=debug, 1=info, 2=warning, 3=error
 
   _AppSettings copyWith({
     String? pythonPath,
     String? outputPath,
     String? exportPath,
+    int? logLevelIndex,
   }) {
     return _AppSettings(
       pythonPath: pythonPath ?? this.pythonPath,
       outputPath: outputPath ?? this.outputPath,
       exportPath: exportPath ?? this.exportPath,
+      logLevelIndex: logLevelIndex ?? this.logLevelIndex,
     );
   }
 
@@ -140,6 +195,7 @@ class _AppSettings {
     'pythonPath': pythonPath,
     'outputPath': outputPath,
     'exportPath': exportPath,
+    'logLevelIndex': logLevelIndex,
   };
 
   static _AppSettings fromJson(Object? value) {
@@ -158,8 +214,16 @@ class _AppSettings {
       exportPath: exportPath is String && exportPath.isNotEmpty
           ? exportPath
           : _ConfigStore.defaultDatasetsDirectory.path,
+      logLevelIndex: _logLevelIndexFromJson(value['logLevelIndex']),
     );
   }
+}
+
+int _logLevelIndexFromJson(Object? value) {
+  if (value is num) {
+    return value.round().clamp(0, _LogLevel.values.length - 1).toInt();
+  }
+  return 2;
 }
 
 /// 训练参数偏好，在程序重启后恢复上次选择。
@@ -174,6 +238,7 @@ class _TrainingPreferences {
     required this.batchRatio,
     this.ampEnabled = false,
     required this.selectedDeviceIds,
+    this.manualDeviceSelection = false,
     required this.chartColors,
   });
 
@@ -185,6 +250,7 @@ class _TrainingPreferences {
   final double batchRatio;
   final bool ampEnabled;
   final List<String> selectedDeviceIds;
+  final bool manualDeviceSelection;
   final Map<String, int> chartColors;
 
   Map<String, Object> toJson() => {
@@ -196,6 +262,7 @@ class _TrainingPreferences {
     'batchRatio': batchRatio,
     'ampEnabled': ampEnabled,
     'selectedDeviceIds': selectedDeviceIds,
+    'manualDeviceSelection': manualDeviceSelection,
     'chartColors': chartColors.map((k, v) => MapEntry(k, v)),
   };
 
@@ -207,6 +274,7 @@ class _TrainingPreferences {
         batchSize: 16,
         batchRatio: 0.70,
         selectedDeviceIds: ['cpu'],
+        manualDeviceSelection: false,
         chartColors: {},
       );
     }
@@ -220,16 +288,27 @@ class _TrainingPreferences {
       }
     }
     return _TrainingPreferences(
-      modelPath: value['modelPath'] is String ? value['modelPath'] as String : null,
-      datasetPath: value['datasetPath'] is String ? value['datasetPath'] as String : null,
+      modelPath: value['modelPath'] is String
+          ? value['modelPath'] as String
+          : null,
+      datasetPath: value['datasetPath'] is String
+          ? value['datasetPath'] as String
+          : null,
       parameters: params,
-      batchModeIndex: value['batchModeIndex'] is int ? value['batchModeIndex'] as int : 0,
-      batchSize: value['batchSize'] is num ? (value['batchSize'] as num).toDouble() : 16,
-      batchRatio: value['batchRatio'] is num ? (value['batchRatio'] as num).toDouble() : 0.70,
+      batchModeIndex: value['batchModeIndex'] is int
+          ? value['batchModeIndex'] as int
+          : 0,
+      batchSize: value['batchSize'] is num
+          ? (value['batchSize'] as num).toDouble()
+          : 16,
+      batchRatio: value['batchRatio'] is num
+          ? (value['batchRatio'] as num).toDouble()
+          : 0.70,
       ampEnabled: value['ampEnabled'] == true,
       selectedDeviceIds: _stringListFromJson(value['selectedDeviceIds']).isEmpty
           ? ['cpu']
           : _stringListFromJson(value['selectedDeviceIds']),
+      manualDeviceSelection: value['manualDeviceSelection'] == true,
       chartColors: _intMapFromJson(value['chartColors']),
     );
   }
@@ -248,6 +327,26 @@ Map<String, int> _intMapFromJson(Object? value) {
 
 /// 本地配置文件读写。路径使用当前系统用户目录，不写死 Windows 用户名。
 /// Local config store. The path is derived from the current user home.
+List<_RecentEntry> _recentEntriesFromJson(Object? value) {
+  if (value is! List) {
+    return const [];
+  }
+  final base = DateTime.now().millisecondsSinceEpoch;
+  final entries = <_RecentEntry>[];
+  final seen = <String>{};
+  for (var index = 0; index < value.length; index++) {
+    final entry = _RecentEntry.fromJson(value[index], base - index);
+    if (entry == null) {
+      continue;
+    }
+    if (seen.add(_pathKey(entry.path))) {
+      entries.add(entry);
+    }
+  }
+  entries.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+  return entries.take(_recentHistoryLimit).toList();
+}
+
 class _ConfigStore {
   static Directory get projectDirectory {
     final current = Directory.current;
@@ -263,7 +362,11 @@ class _ConfigStore {
   static Directory get defaultDatasetsDirectory =>
       Directory('${projectDirectory.path}\\datasets');
 
-  static Directory get logsDirectory => Directory('${projectDirectory.path}\\logs');
+  static Directory get logsDirectory =>
+      Directory('${projectDirectory.path}\\logs');
+
+  static Directory get appLogsDirectory =>
+      Directory('${logsDirectory.path}\\app');
 
   static Directory get configDirectory {
     final homeDirectory =

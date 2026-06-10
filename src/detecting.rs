@@ -1,7 +1,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use once_cell::sync::Lazy;
 
@@ -9,6 +11,8 @@ use once_cell::sync::Lazy;
 use std::os::windows::process::CommandExt;
 
 static DETECT_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+static ACTIVE_PYTHON_CHILDREN: Lazy<Mutex<Vec<u32>>> = Lazy::new(|| Mutex::new(Vec::new()));
+static PYTHON_SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -59,6 +63,30 @@ pub struct DetectModelTaskResult {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct AiAnnotateImageRequest {
+    pub python_path: String,
+    pub model_path: String,
+    pub input_path: String,
+    pub class_ids_csv: String,
+    pub conf_threshold: f64,
+    pub iou_threshold: f64,
+    pub imgsz: u32,
+    pub device: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct AiAnnotateBatchRequest {
+    pub python_path: String,
+    pub model_path: String,
+    pub input_paths_text: String,
+    pub class_ids_csv: String,
+    pub conf_threshold: f64,
+    pub iou_threshold: f64,
+    pub imgsz: u32,
+    pub device: String,
+}
+
 pub fn detect_model_task(python_path: &str, model_path: &str) -> DetectModelTaskResult {
     let python = verify_python(python_path);
     if let Err(e) = python {
@@ -75,11 +103,11 @@ pub fn detect_model_task(python_path: &str, model_path: &str) -> DetectModelTask
 os.environ["ULTRALYTICS_TQDM"] = "false"
 os.environ["YOLO_VERBOSE"] = "false"
 from ultralytics import YOLO
-model = YOLO(r'{model_path}')
+model = YOLO({model_path})
 task = str(getattr(model, "task", "") or "detect")
 print(json.dumps({{"ok": True, "task": task}}))
 "##,
-        model_path = model_path.replace('\\', "\\\\"),
+        model_path = python_string_literal(model_path),
     );
     match run_python_script(&python, &script, None) {
         Ok(stdout) => {
@@ -98,6 +126,192 @@ print(json.dumps({{"ok": True, "task": task}}))
             error: Some(e),
         },
     }
+}
+
+pub fn ai_model_classes_json(python_path: &str, model_path: &str) -> Result<String, String> {
+    let python = verify_python(python_path)?;
+    let script = format!(
+        r##"import json, os
+os.environ["ULTRALYTICS_TQDM"] = "false"
+os.environ["YOLO_VERBOSE"] = "false"
+from ultralytics import YOLO
+model = YOLO({model_path})
+names = getattr(model, "names", {{}}) or {{}}
+items = []
+if isinstance(names, dict):
+    for key, value in names.items():
+        try:
+            items.append({{"id": int(key), "name": str(value)}})
+        except Exception:
+            pass
+else:
+    for index, value in enumerate(names):
+        items.append({{"id": int(index), "name": str(value)}})
+items.sort(key=lambda item: item["id"])
+task = str(getattr(model, "task", "") or "detect")
+print(json.dumps({{"ok": True, "task": task, "classes": items}}, ensure_ascii=False))
+"##,
+        model_path = python_string_literal(model_path),
+    );
+    run_python_script(&python, &script, None)
+}
+
+pub fn ai_annotate_image_json(req: &AiAnnotateImageRequest) -> Result<String, String> {
+    let python = verify_python(&req.python_path)?;
+    let script = format!(
+        r##"import sys, json, os
+os.environ["ULTRALYTICS_TQDM"] = "false"
+os.environ["YOLO_VERBOSE"] = "false"
+from ultralytics import YOLO
+model = YOLO({model_path})
+device_value = {device}.strip()
+if device_value.lower() in ("", "auto", "cuda", "nv", "nvidia"):
+    try:
+        import torch
+        device_value = "0" if torch.cuda.is_available() and torch.cuda.device_count() > 0 else "cpu"
+    except Exception:
+        device_value = "cpu"
+classes_raw = {class_ids_csv}.strip()
+class_filter = None
+if classes_raw:
+    class_filter = [int(item) for item in classes_raw.split(",") if item.strip()]
+
+def _rustlabel_predict():
+    global device_value
+    kwargs = dict(source={input_path}, save=False, imgsz={imgsz},
+        conf={conf}, iou={iou}, device=device_value, verbose=False, stream=False)
+    if class_filter is not None:
+        kwargs["classes"] = class_filter
+    try:
+        return model.predict(**kwargs)
+    except Exception as error:
+        if str(device_value).lower() != "cpu":
+            print(f"[rustlabel] CUDA predict failed, fallback to CPU: {{error}}", file=sys.stderr)
+            device_value = "cpu"
+            kwargs["device"] = "cpu"
+            return model.predict(**kwargs)
+        raise
+
+results = _rustlabel_predict()
+names = getattr(model, "names", {{}}) or {{}}
+boxes = []
+width = 0
+height = 0
+for r in results:
+    shape = getattr(r, "orig_shape", None)
+    if shape and len(shape) >= 2:
+        height = int(shape[0])
+        width = int(shape[1])
+    if getattr(r, "boxes", None) is None:
+        continue
+    for box in r.boxes:
+        cls_id = int(box.cls[0].item()) if getattr(box, "cls", None) is not None else 0
+        conf_value = float(box.conf[0].item()) if getattr(box, "conf", None) is not None else 0.0
+        xyxy = box.xyxy[0].tolist()
+        name = names.get(cls_id, f"class_{{cls_id}}") if isinstance(names, dict) else (
+            names[cls_id] if cls_id < len(names) else f"class_{{cls_id}}"
+        )
+        boxes.append({{
+            "classId": cls_id,
+            "className": str(name),
+            "confidence": conf_value,
+            "left": float(xyxy[0]),
+            "top": float(xyxy[1]),
+            "right": float(xyxy[2]),
+            "bottom": float(xyxy[3]),
+        }})
+print(json.dumps({{"ok": True, "width": width, "height": height, "boxes": boxes}}, ensure_ascii=False))
+"##,
+        model_path = python_string_literal(&req.model_path),
+        input_path = python_string_literal(&req.input_path),
+        class_ids_csv = python_string_literal(&req.class_ids_csv),
+        imgsz = req.imgsz,
+        conf = req.conf_threshold,
+        iou = req.iou_threshold,
+        device = req.device,
+    );
+    run_python_script(&python, &script, None)
+}
+
+pub fn ai_annotate_images_json(req: &AiAnnotateBatchRequest) -> Result<String, String> {
+    let python = verify_python(&req.python_path)?;
+    let script = format!(
+        r##"import sys, json, os
+os.environ["ULTRALYTICS_TQDM"] = "false"
+os.environ["YOLO_VERBOSE"] = "false"
+from ultralytics import YOLO
+model = YOLO({model_path})
+source_paths = {input_paths}
+device_value = {device}.strip()
+if device_value.lower() in ("", "auto", "cuda", "nv", "nvidia"):
+    try:
+        import torch
+        device_value = "0" if torch.cuda.is_available() and torch.cuda.device_count() > 0 else "cpu"
+    except Exception:
+        device_value = "cpu"
+classes_raw = {class_ids_csv}.strip()
+class_filter = None
+if classes_raw:
+    class_filter = [int(item) for item in classes_raw.split(",") if item.strip()]
+
+def _rustlabel_predict():
+    global device_value
+    kwargs = dict(source=source_paths, save=False, imgsz={imgsz},
+        conf={conf}, iou={iou}, device=device_value, verbose=False, stream=True)
+    if class_filter is not None:
+        kwargs["classes"] = class_filter
+    try:
+        return model.predict(**kwargs)
+    except Exception as error:
+        if str(device_value).lower() != "cpu":
+            print(f"[rustlabel] CUDA batch predict failed, fallback to CPU: {{error}}", file=sys.stderr)
+            device_value = "cpu"
+            kwargs["device"] = "cpu"
+            return model.predict(**kwargs)
+        raise
+
+names = getattr(model, "names", {{}}) or {{}}
+images = []
+for index, r in enumerate(_rustlabel_predict()):
+    shape = getattr(r, "orig_shape", None)
+    height = int(shape[0]) if shape and len(shape) >= 2 else 0
+    width = int(shape[1]) if shape and len(shape) >= 2 else 0
+    input_path = str(getattr(r, "path", "") or (source_paths[index] if index < len(source_paths) else ""))
+    boxes = []
+    if getattr(r, "boxes", None) is not None:
+        for box in r.boxes:
+            cls_id = int(box.cls[0].item()) if getattr(box, "cls", None) is not None else 0
+            conf_value = float(box.conf[0].item()) if getattr(box, "conf", None) is not None else 0.0
+            xyxy = box.xyxy[0].tolist()
+            name = names.get(cls_id, f"class_{{cls_id}}") if isinstance(names, dict) else (
+                names[cls_id] if cls_id < len(names) else f"class_{{cls_id}}"
+            )
+            boxes.append({{
+                "classId": cls_id,
+                "className": str(name),
+                "confidence": conf_value,
+                "left": float(xyxy[0]),
+                "top": float(xyxy[1]),
+                "right": float(xyxy[2]),
+                "bottom": float(xyxy[3]),
+            }})
+    images.append({{
+        "inputPath": input_path,
+        "width": width,
+        "height": height,
+        "boxes": boxes,
+    }})
+print(json.dumps({{"ok": True, "images": images}}, ensure_ascii=False))
+"##,
+        model_path = python_string_literal(&req.model_path),
+        input_paths = python_string_list_literal(&req.input_paths_text),
+        class_ids_csv = python_string_literal(&req.class_ids_csv),
+        imgsz = req.imgsz,
+        conf = req.conf_threshold,
+        iou = req.iou_threshold,
+        device = req.device,
+    );
+    run_python_script(&python, &script, None)
 }
 
 pub fn detect_image(req: &DetectImageRequest) -> DetectResult {
@@ -587,8 +801,42 @@ fn verify_python(path: &str) -> Result<String, String> {
     Ok(trimmed.to_string())
 }
 
+fn python_string_literal(value: &str) -> String {
+    let mut result = String::from("'");
+    for ch in value.chars() {
+        match ch {
+            '\\' => result.push_str("\\\\"),
+            '\'' => result.push_str("\\'"),
+            '\n' => result.push_str("\\n"),
+            '\r' => result.push_str("\\r"),
+            '\t' => result.push_str("\\t"),
+            _ => result.push(ch),
+        }
+    }
+    result.push('\'');
+    result
+}
+
+fn python_string_list_literal(lines: &str) -> String {
+    let values = lines
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(python_string_literal)
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("[{values}]")
+}
+
 fn run_python_script(python: &str, script: &str, cwd: Option<&Path>) -> Result<String, String> {
-    let tmp = std::env::temp_dir().join(format!("_yolo_detect_{}.py", std::process::id()));
+    if PYTHON_SHUTDOWN_REQUESTED.load(Ordering::SeqCst) {
+        return Err("Python backend is shutting down".to_string());
+    }
+    let tmp = std::env::temp_dir().join(format!(
+        "_yolo_detect_{}_{}.py",
+        std::process::id(),
+        unix_millis_now()
+    ));
     fs::write(&tmp, script).map_err(|e| format!("write script: {e}"))?;
 
     let mut cmd = Command::new(python);
@@ -598,9 +846,15 @@ fn run_python_script(python: &str, script: &str, cwd: Option<&Path>) -> Result<S
     }
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
-    let output = cmd.output().map_err(|e| format!("python start: {e}"))?;
+    let child = cmd.spawn().map_err(|e| format!("python start: {e}"))?;
+    let child_id = child.id();
+    register_python_child(child_id);
+    let output = child.wait_with_output();
+    unregister_python_child(child_id);
     let _ = fs::remove_file(&tmp);
+    let output = output.map_err(|e| format!("python wait: {e}"))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     if !output.status.success() {
@@ -608,6 +862,55 @@ fn run_python_script(python: &str, script: &str, cwd: Option<&Path>) -> Result<S
         return Err(format!("python error: {stderr}"));
     }
     Ok(stdout)
+}
+
+pub fn shutdown_python_children() -> usize {
+    PYTHON_SHUTDOWN_REQUESTED.store(true, Ordering::SeqCst);
+    let children = {
+        let mut active = ACTIVE_PYTHON_CHILDREN.lock().unwrap();
+        let children = active.clone();
+        active.clear();
+        children
+    };
+    for child_id in &children {
+        terminate_process_tree(*child_id);
+    }
+    children.len()
+}
+
+fn register_python_child(child_id: u32) {
+    ACTIVE_PYTHON_CHILDREN.lock().unwrap().push(child_id);
+}
+
+fn unregister_python_child(child_id: u32) {
+    let mut active = ACTIVE_PYTHON_CHILDREN.lock().unwrap();
+    active.retain(|id| *id != child_id);
+}
+
+fn terminate_process_tree(process_id: u32) {
+    #[cfg(windows)]
+    {
+        let mut command = Command::new("taskkill");
+        command.args(["/PID", &process_id.to_string(), "/T", "/F"]);
+        command.stdout(Stdio::null()).stderr(Stdio::null());
+        command.creation_flags(CREATE_NO_WINDOW);
+        let _ = command.status();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = Command::new("kill")
+            .args(["-TERM", &process_id.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+}
+
+fn unix_millis_now() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0)
 }
 
 fn parse_label_count(stdout: &str) -> u32 {

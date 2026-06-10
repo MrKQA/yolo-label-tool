@@ -1,8 +1,15 @@
+// =============================================================================
+// ShortcutModels.dart - Keyboard Shortcuts / 快捷键模型
+// =============================================================================
+// Configurable keyboard shortcuts with default bindings and JSON persistence.
+// 可自定义快捷键的数据模型、默认绑定与 JSON 持久化。
+// =============================================================================
+
 // ignore_for_file: file_names
 
 part of 'main.dart';
 
-/// 可配置快捷键动作。
+/// Configurable shortcut action / 可配置快捷键动作
 /// User-configurable shortcut actions.
 enum _ShortcutAction {
   previousImage,
@@ -21,6 +28,8 @@ enum _ShortcutAction {
   videoPlayPause,
   videoRewind,
   videoFastForward,
+  aiAnnotateCurrent,
+  aiAnnotateAll,
 }
 
 extension _ShortcutActionLabel on _ShortcutAction {
@@ -41,6 +50,13 @@ extension _ShortcutActionLabel on _ShortcutAction {
     _ShortcutAction.videoPlayPause => 'shortcut.videoPlayPause',
     _ShortcutAction.videoRewind => 'shortcut.videoRewind',
     _ShortcutAction.videoFastForward => 'shortcut.videoFastForward',
+    _ShortcutAction.aiAnnotateCurrent => 'shortcut.aiAnnotateCurrent',
+    _ShortcutAction.aiAnnotateAll => 'shortcut.aiAnnotateAll',
+  };
+
+  bool get isAiAction => switch (this) {
+    _ShortcutAction.aiAnnotateCurrent || _ShortcutAction.aiAnnotateAll => true,
+    _ => false,
   };
 }
 
@@ -48,6 +64,8 @@ extension _ShortcutActionLabel on _ShortcutAction {
 /// Single shortcut key binding.
 class _ShortcutBinding {
   const _ShortcutBinding(this.keyId, this.fallbackLabel);
+
+  const _ShortcutBinding.unassigned() : this(0, '-');
 
   factory _ShortcutBinding.fromKey(LogicalKeyboardKey key) {
     return _ShortcutBinding(key.keyId, _keyboardLabel(key));
@@ -142,6 +160,8 @@ class _ShortcutConfig {
       _ShortcutAction.videoFastForward: _ShortcutBinding.fromKey(
         LogicalKeyboardKey.arrowRight,
       ),
+      _ShortcutAction.aiAnnotateCurrent: const _ShortcutBinding.unassigned(),
+      _ShortcutAction.aiAnnotateAll: const _ShortcutBinding.unassigned(),
     });
   }
 

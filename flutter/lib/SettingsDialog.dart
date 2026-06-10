@@ -25,6 +25,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   late final TextEditingController _pythonController;
   late final TextEditingController _outputController;
   late final TextEditingController _exportController;
+  late int _logLevelIndex;
   late int _cacheSizeBytes;
   _PythonEnvironmentCheck? _pythonCheck;
   bool _checkingPython = false;
@@ -44,13 +45,11 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     _exportController = TextEditingController(
       text: widget.initialSettings.exportPath,
     );
+    _lastCheckedPythonPath = _pythonController.text.trim();
+    _logLevelIndex = widget.initialSettings.logLevelIndex
+        .clamp(0, _LogLevel.values.length - 1)
+        .toInt();
     _cacheSizeBytes = widget.cacheSizeBytes;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final pythonPath = _pythonController.text.trim();
-      if (mounted && pythonPath.isNotEmpty) {
-        _validatePythonPath(pythonPath, updateController: false);
-      }
-    });
   }
 
   @override
@@ -105,6 +104,11 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     final generation = ++_pythonCheckGeneration;
     final executable = _resolvePythonExecutable(selectedPath);
     if (executable == null) {
+      _log(
+        'SETTINGS',
+        'Python environment check failed: executable not found for $selectedPath',
+        level: _LogLevel.warning,
+      );
       setState(() {
         _lastCheckedPythonPath = selectedPath;
         _checkingPython = false;
@@ -115,6 +119,11 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       });
       return;
     }
+    _log(
+      'SETTINGS',
+      'Python environment check started: $executable',
+      level: _LogLevel.debug,
+    );
     if (updateController && _pythonController.text.trim() != executable) {
       _lastCheckedPythonPath = executable;
       _pythonController.text = executable;
@@ -132,6 +141,11 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       _checkingPython = false;
       _pythonCheck = check;
     });
+    _log(
+      'SETTINGS',
+      'Python environment check ${check.valid ? 'passed' : 'failed'}: $executable, ${check.message}',
+      level: check.valid ? _LogLevel.info : _LogLevel.warning,
+    );
   }
 
   Future<void> _chooseOutputFolder() async {
@@ -174,8 +188,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         pythonPath: _pythonController.text.trim(),
         outputPath: _outputController.text.trim(),
         exportPath: _exportController.text.trim(),
+        logLevelIndex: _logLevelIndex,
       ),
     );
+    _setLogLevel(_logLevelFromIndex(_logLevelIndex), writeLog: true);
     Navigator.of(context).pop();
   }
 
@@ -194,75 +210,106 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       },
       child: AlertDialog(
         title: Text(t('settings.title')),
-      content: SizedBox(
-        width: 560,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _SettingsReadOnlyRow(
-              label: t('settings.configPath'),
-              value: _ConfigStore.configDirectory.path,
-            ),
-            const SizedBox(height: 12),
-            _PathSettingRow(
-              label: t('settings.pythonPath'),
-              controller: _pythonController,
-              buttonLabel: t('settings.choosePython'),
-              onPressed: _choosePythonExecutable,
-              secondaryButtonLabel: t('settings.chooseFolder'),
-              onSecondaryPressed: _choosePythonFolder,
-              trailing: _PythonCheckIndicator(
-                checking: _checkingPython,
-                check: _pythonCheck,
+        content: SizedBox(
+          width: 560,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _SettingsReadOnlyRow(
+                label: t('settings.configPath'),
+                value: _ConfigStore.configDirectory.path,
               ),
-              statusText: _checkingPython
-                  ? t('settings.pythonChecking')
-                  : _pythonCheck?.message,
-            ),
-            const SizedBox(height: 12),
-            _PathSettingRow(
-              label: t('settings.outputPath'),
-              controller: _outputController,
-              buttonLabel: t('settings.chooseFolder'),
-              onPressed: _chooseOutputFolder,
-            ),
-            const SizedBox(height: 12),
-            _PathSettingRow(
-              label: t('settings.exportPath'),
-              controller: _exportController,
-              buttonLabel: t('settings.chooseFolder'),
-              onPressed: () async {
-                final folder = await getDirectoryPath();
-                if (folder != null) {
-                  _exportController.text = folder;
-                }
-              },
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '${t('settings.cacheSize')}: ${_formatBytes(_cacheSizeBytes)}',
+              const SizedBox(height: 12),
+              _PathSettingRow(
+                label: t('settings.pythonPath'),
+                controller: _pythonController,
+                buttonLabel: t('settings.choosePython'),
+                onPressed: _choosePythonExecutable,
+                secondaryButtonLabel: t('settings.chooseFolder'),
+                onSecondaryPressed: _choosePythonFolder,
+                trailing: _PythonCheckIndicator(
+                  checking: _checkingPython,
+                  check: _pythonCheck,
+                ),
+                statusText: _checkingPython
+                    ? t('settings.pythonChecking')
+                    : _pythonCheck?.message,
+              ),
+              const SizedBox(height: 12),
+              _PathSettingRow(
+                label: t('settings.outputPath'),
+                controller: _outputController,
+                buttonLabel: t('settings.chooseFolder'),
+                onPressed: _chooseOutputFolder,
+              ),
+              const SizedBox(height: 12),
+              _PathSettingRow(
+                label: t('settings.exportPath'),
+                controller: _exportController,
+                buttonLabel: t('settings.chooseFolder'),
+                onPressed: () async {
+                  final folder = await getDirectoryPath();
+                  if (folder != null) {
+                    _exportController.text = folder;
+                  }
+                },
+              ),
+              const SizedBox(height: 12),
+              Text(
+                t('settings.logLevel'),
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              const SizedBox(height: 4),
+              Wrap(
+                spacing: 8,
+                children: [
+                  for (var i = 0; i < 4; i++)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Radio<int>(
+                          value: i,
+                          groupValue: _logLevelIndex,
+                          onChanged: (v) {
+                            if (v != null) setState(() => _logLevelIndex = v);
+                          },
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        GestureDetector(
+                          onTap: () => setState(() => _logLevelIndex = i),
+                          child: Text(
+                            const ['Debug', 'Info', 'Warning', 'Error'][i],
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '${t('settings.cacheSize')}: ${_formatBytes(_cacheSizeBytes)}',
+                    ),
                   ),
-                ),
-                OutlinedButton(
-                  onPressed: _clearCache,
-                  child: Text(t('settings.clearCache')),
-                ),
-              ],
-            ),
-          ],
+                  OutlinedButton(
+                    onPressed: _clearCache,
+                    child: Text(t('settings.clearCache')),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: Text(t('action.cancel')),
-        ),
-        TextButton(onPressed: _save, child: Text(t('action.save'))),
-      ],
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(t('action.cancel')),
+          ),
+          TextButton(onPressed: _save, child: Text(t('action.save'))),
+        ],
       ),
     );
   }
@@ -332,10 +379,7 @@ class _PathSettingRow extends StatelessWidget {
                 child: Text(secondaryButtonLabel!),
               ),
             ],
-            if (trailing != null) ...[
-              const SizedBox(width: 8),
-              trailing!,
-            ],
+            if (trailing != null) ...[const SizedBox(width: 8), trailing!],
           ],
         ),
         if (statusText != null && statusText!.isNotEmpty) ...[
@@ -399,7 +443,10 @@ class _PythonEnvironmentCheck {
     );
   }
 
-  factory _PythonEnvironmentCheck.invalid(String executablePath, String reason) {
+  factory _PythonEnvironmentCheck.invalid(
+    String executablePath,
+    String reason,
+  ) {
     return _PythonEnvironmentCheck(
       valid: false,
       executablePath: executablePath,
@@ -475,14 +522,15 @@ print(json.dumps({
 }, ensure_ascii=False))
 ''';
   try {
-    final result = await Process.run(
-      executablePath,
-      ['-c', script],
-      runInShell: false,
-    ).timeout(
-      const Duration(seconds: 20),
-      onTimeout: () => ProcessResult(0, 124, '', t('settings.pythonTimeout')),
-    );
+    final result =
+        await Process.run(executablePath, [
+          '-c',
+          script,
+        ], runInShell: false).timeout(
+          const Duration(seconds: 20),
+          onTimeout: () =>
+              ProcessResult(0, 124, '', t('settings.pythonTimeout')),
+        );
     if (result.exitCode != 0) {
       final errorText = result.stderr.toString().trim();
       return _PythonEnvironmentCheck.invalid(

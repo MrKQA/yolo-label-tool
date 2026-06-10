@@ -55,6 +55,11 @@ const _bottomBarHeight = 80.0;
 const _paneHeaderHeight = 52.0;
 const _expandedSidebarWidth = 112.0;
 const _collapsedSidebarWidth = 56.0;
+const _aiAssistPanelMinWidth = 320.0;
+const _aiAssistPanelMinHeight = 360.0;
+const _aiAssistPanelMaxWidth = 640.0;
+const _aiAssistPanelMaxHeight = 760.0;
+const _aiAssistPanelMargin = 12.0;
 const _recentHistoryLimit = 20;
 const _recentMenuVisibleCount = 5;
 const _fontFamily = 'Microsoft YaHei';
@@ -96,6 +101,64 @@ const _yamlTypeGroup = XTypeGroup(label: 'YAML', extensions: ['yaml', 'yml']);
 const _datasetSplits = ['train', 'val', 'test'];
 
 const _imageExtensions = {'jpg', 'jpeg', 'png', 'bmp', 'gif', 'webp'};
+
+// Logging / 日志系统
+// Logs are written to logs/app/ with date-based filenames.
+// 日志写入 logs/app/ 目录，按日期分文件。
+enum _LogLevel { debug, info, warning, error }
+
+_LogLevel _logLevel = _LogLevel.warning;
+final List<String> _pendingLogs = [];
+Timer? _logFlushTimer;
+
+void _log(String tag, String message, {_LogLevel level = _LogLevel.info}) {
+  if (level.index < _logLevel.index) return;
+  _appendLogLine(tag, message, level: level);
+}
+
+void _appendLogLine(String tag, String message, {required _LogLevel level}) {
+  final ts = DateTime.now()
+      .toIso8601String()
+      .substring(0, 19)
+      .replaceAll('T', ' ');
+  final line = '[$ts] [${level.name.toUpperCase()}] [$tag] $message';
+  debugPrint(line);
+  _pendingLogs.add(line);
+  _logFlushTimer?.cancel();
+  _logFlushTimer = Timer(const Duration(seconds: 3), _flushLogs);
+}
+
+void _flushLogs() {
+  if (_pendingLogs.isEmpty) return;
+  try {
+    final dir = _ConfigStore.appLogsDirectory;
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    final date = DateTime.now().toIso8601String().substring(0, 10);
+    final file = File('${dir.path}\\$date.log');
+    file.writeAsStringSync(
+      '${_pendingLogs.join('\n')}\n',
+      mode: FileMode.append,
+    );
+    _pendingLogs.clear();
+  } on Object {
+    // silently ignore write failures / 写入失败静默忽略
+  }
+}
+
+void _setLogLevel(_LogLevel level, {bool writeLog = false}) {
+  _logLevel = level;
+  if (writeLog) {
+    _appendLogLine(
+      'LOG',
+      'Log level set to ${level.name}',
+      level: _LogLevel.info,
+    );
+  }
+}
+
+_LogLevel _logLevelFromIndex(int index) {
+  return _LogLevel.values[index.clamp(0, _LogLevel.values.length - 1)];
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -274,8 +337,29 @@ class _LanguageStrings {
     'shortcut.videoPlayPause': '视频播放 / 暂停',
     'shortcut.videoRewind': '视频回退',
     'shortcut.videoFastForward': '视频三倍速快进',
+    'shortcut.aiAnnotateCurrent': '当前 AI 标注',
+    'shortcut.aiAnnotateAll': '所有 AI 标注',
+    'shortcut.normalGroup': '普通功能',
+    'shortcut.aiGroup': 'AI 功能',
     'shortcut.note': '鼠标滚轮缩放、右键图片添加/删除保持固定。',
     'shortcut.waiting': '按下键盘...',
+    'ai.configTitle': 'AI 辅助标注配置',
+    'ai.chooseModel': '选择模型',
+    'ai.noModel': '未选择模型',
+    'ai.onnxNotSupported': 'ONNX 模型暂未适配，请先选择 PT 模型',
+    'ai.readClassesFailed': '读取模型类别失败',
+    'ai.chooseModelFirst': '请先选择模型',
+    'ai.classes': '参与辅助标注的类别',
+    'ai.selectAllClasses': '全选类别',
+    'ai.confidence': '置信度',
+    'ai.startImageIndex': '图片索引',
+    'ai.endImageIndex': '图片索引',
+    'ai.annotateCurrent': '当前图片单次标注',
+    'ai.annotateAll': '按索引全部标注',
+    'ai.noSelectedClasses': '请至少选择一个类别',
+    'ai.annotating': 'AI 辅助标注中...',
+    'ai.done': 'AI 标注完成',
+    'ai.failed': 'AI 标注失败',
     'train.title': '训练',
     'train.parameters': '超参数',
     'train.chooseModel': '选择 PT 模型',
@@ -616,8 +700,8 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   Timer? _topMenuHideTimer;
 
   final List<_ImageItem> _images = [];
-  final List<String> _recentFolders = [];
-  final List<String> _recentFiles = [];
+  final List<_RecentEntry> _recentFolders = [];
+  final List<_RecentEntry> _recentFiles = [];
   final List<_LabelClass> _labelClasses = [];
   final Map<String, List<_AnnotationRegion>> _annotationsByImage = {};
   final Map<String, String> _imageSplits = {};
@@ -641,6 +725,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   String _activeLanguageCode = _languageCode;
   String? _selectedAnnotationId;
   bool _showClassLabels = true;
+  bool _aiPanelVisible = false;
   int? _activeClassId;
   int _classSerial = 1;
   int _annotationSerial = 1;
@@ -651,6 +736,10 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   _ShortcutConfig _shortcutConfig = _ShortcutConfig.defaults();
   _AppSettings _appSettings = _AppSettings.empty();
   _ImportedDataset? _importedDataset;
+  _AiAssistConfig? _aiAssistConfig;
+  bool _aiAnnotating = false;
+  Offset? _aiAssistPanelOffset;
+  Size _aiAssistPanelSize = const Size(320, 360);
 
   _ImageItem? get _selectedImage {
     if (_images.isEmpty) {
@@ -700,7 +789,10 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
 
   @override
   void dispose() {
+    _log('APP', 'Shutdown requested');
     _topMenuHideTimer?.cancel();
+    _logFlushTimer?.cancel();
+    _flushLogs();
     _detectVideoSession.removeListener(_handleDetectVideoSessionChanged);
     _detectVideoSession.dispose();
     _keyboardFocusNode.dispose();
@@ -724,13 +816,19 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     setState(() {
       _recentFolders
         ..clear()
-        ..addAll(_dedupePaths(history.folders));
+        ..addAll(history.folders);
       _recentFiles
         ..clear()
-        ..addAll(_dedupePaths(history.files));
+        ..addAll(history.files);
       _shortcutConfig = keybindings;
       _appSettings = settings;
     });
+    _setLogLevel(_logLevelFromIndex(settings.logLevelIndex));
+    _log(
+      'APP',
+      'Config loaded: recentFolders=${_recentFolders.length}, recentFiles=${_recentFiles.length}, logLevel=${_logLevel.name}',
+      level: _LogLevel.debug,
+    );
   }
 
   Future<void> _loadAvailableLanguages() async {
@@ -752,6 +850,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     _appText = strings;
     _languageStringsNotifier.value = strings;
     setState(() => _activeLanguageCode = code);
+    _log('SETTINGS', 'Language changed: $code');
     _showTopMenu();
   }
 
@@ -822,14 +921,18 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     if (file == null) {
       return;
     }
+    _log('LABEL', 'Open image file: ${file.path}');
 
     final existingIndex = _imageIndexOfPath(file.path);
     if (existingIndex >= 0) {
+      if (_touchRecent(_recentFiles, file.path)) {
+        _saveHistory();
+      }
       _selectImage(existingIndex);
       return;
     }
 
-    if (_addRecent(_recentFiles, file.path)) {
+    if (_touchRecent(_recentFiles, file.path)) {
       _saveHistory();
     }
     _importedDataset = null;
@@ -843,7 +946,12 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     }
 
     final files = _imageFilesInDirectory(folderPath);
-    if (_addRecent(_recentFolders, folderPath)) {
+    _log(
+      'LABEL',
+      'Open image folder: $folderPath, images=${files.length}',
+      level: files.isEmpty ? _LogLevel.warning : _LogLevel.info,
+    );
+    if (_touchRecent(_recentFolders, folderPath)) {
       _saveHistory();
     }
     setState(() {
@@ -861,6 +969,10 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   }
 
   void _openRecentFile(String path) {
+    _log('LABEL', 'Open recent file: $path');
+    if (_touchRecent(_recentFiles, path)) {
+      _saveHistory();
+    }
     final existingIndex = _imageIndexOfPath(path);
     if (existingIndex >= 0) {
       _selectImage(existingIndex);
@@ -892,6 +1004,10 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       _redoStack.clear();
       _activeSection = 'label';
     });
+    _log(
+      'LABEL',
+      'Images inserted: count=${newPaths.length}, total=${_images.length}',
+    );
   }
 
   int _imageIndexOfPath(String path) {
@@ -904,6 +1020,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       return;
     }
 
+    final removedPath = _images[index].path;
     setState(() {
       final removed = _images.removeAt(index);
       _imageSplits.remove(_pathKey(removed.path));
@@ -914,6 +1031,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       _undoStack.clear();
       _redoStack.clear();
     });
+    _log('LABEL', 'Image removed: $removedPath, total=${_images.length}');
   }
 
   void _setSelectedImageSplit(String split) {
@@ -1016,6 +1134,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     setState(() => _importingDataset = true);
     await WidgetsBinding.instance.endOfFrame;
     try {
+      _log('IMPORT', 'Dataset import started: ${file.path}');
       final parsed = _parseImportYoloDataYaml(file.path);
       final imageEntries = <_DatasetImageEntry>[];
       for (final split in _datasetSplits) {
@@ -1032,6 +1151,11 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
 
       final uniqueEntries = _dedupeDatasetEntries(imageEntries);
       if (uniqueEntries.isEmpty) {
+        _log(
+          'IMPORT',
+          'Dataset import found no images: ${file.path}',
+          level: _LogLevel.warning,
+        );
         _showFloatingMessage(t('import.noImages'));
         return;
       }
@@ -1106,8 +1230,21 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
         _redoStack.clear();
         _activeSection = 'label';
       });
+      final annotationCount = importedAnnotations.values.fold<int>(
+        0,
+        (sum, annotations) => sum + annotations.length,
+      );
+      _log(
+        'IMPORT',
+        'Dataset import completed: images=${uniqueEntries.length}, classes=${importedClasses.length}, annotations=$annotationCount, yaml=${file.path}',
+      );
       _showFloatingMessage('${t('import.done')} (${uniqueEntries.length})');
-    } on Object {
+    } on Object catch (error) {
+      _log(
+        'IMPORT',
+        'Dataset import failed: ${file.path}, error=$error',
+        level: _LogLevel.error,
+      );
       _showFloatingMessage(t('import.failed'));
     } finally {
       if (mounted) {
@@ -1402,6 +1539,11 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       _selectedAnnotationId = annotation.id;
       _activeTool = 'draw';
     });
+    _log(
+      'ANNOTATION',
+      'Created ${annotation.mode.name}: image=${_selectedImage?.name ?? '-'}, classId=$classId',
+      level: _LogLevel.debug,
+    );
   }
 
   void _createSegAnnotation(List<Offset> points, int classId) {
@@ -1426,6 +1568,11 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       _selectedAnnotationId = annotation.id;
       _activeTool = 'draw';
     });
+    _log(
+      'ANNOTATION',
+      'Created seg: image=${_selectedImage?.name ?? '-'}, classId=$classId, points=${points.length}',
+      level: _LogLevel.debug,
+    );
   }
 
   void _selectAnnotation(String? id) {
@@ -1465,6 +1612,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       return;
     }
     _pushAnnotationSnapshot();
+    var changed = false;
     setState(() {
       final annotations = _annotationsByImage[imageKey];
       if (annotations == null) {
@@ -1474,8 +1622,16 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       if (index >= 0) {
         annotations[index] = annotations[index].copyWith(classId: classId);
         _activeClassId = classId;
+        changed = true;
       }
     });
+    if (changed) {
+      _log(
+        'ANNOTATION',
+        'Class changed: annotation=$annotationId, classId=$classId',
+        level: _LogLevel.debug,
+      );
+    }
   }
 
   void _deleteAnnotation(String id) {
@@ -1492,6 +1648,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
         _selectedAnnotationId = null;
       }
     });
+    _log('ANNOTATION', 'Deleted annotation: $id', level: _LogLevel.debug);
   }
 
   void _deleteSelectedAnnotation() {
@@ -1524,6 +1681,303 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     Future<void>.delayed(const Duration(milliseconds: 950), () {
       entry.remove();
     });
+  }
+
+  Size _clampAiAssistPanelSize(Size size, Size viewport) {
+    final maxWidth = math.min(
+      _aiAssistPanelMaxWidth,
+      math.max(
+        _aiAssistPanelMinWidth,
+        viewport.width - _aiAssistPanelMargin * 2,
+      ),
+    );
+    final maxHeight = math.min(
+      _aiAssistPanelMaxHeight,
+      math.max(
+        _aiAssistPanelMinHeight,
+        viewport.height - _aiAssistPanelMargin * 2,
+      ),
+    );
+    return Size(
+      size.width.clamp(_aiAssistPanelMinWidth, maxWidth).toDouble(),
+      size.height.clamp(_aiAssistPanelMinHeight, maxHeight).toDouble(),
+    );
+  }
+
+  Offset _clampAiAssistPanelOffset(
+    Offset offset,
+    Size viewport,
+    Size panelSize,
+  ) {
+    final maxX = math.max(
+      _aiAssistPanelMargin,
+      viewport.width - panelSize.width - _aiAssistPanelMargin,
+    );
+    final maxY = math.max(
+      _aiAssistPanelMargin,
+      viewport.height - panelSize.height - _aiAssistPanelMargin,
+    );
+    return Offset(
+      offset.dx.clamp(_aiAssistPanelMargin, maxX).toDouble(),
+      offset.dy.clamp(_aiAssistPanelMargin, maxY).toDouble(),
+    );
+  }
+
+  void _moveAiAssistPanel(
+    Offset delta,
+    Size viewport,
+    Size panelSize,
+    Offset fallbackOffset,
+  ) {
+    setState(() {
+      final current = _aiAssistPanelOffset ?? fallbackOffset;
+      _aiAssistPanelOffset = _clampAiAssistPanelOffset(
+        current + delta,
+        viewport,
+        panelSize,
+      );
+    });
+  }
+
+  void _resizeAiAssistPanel(
+    Offset delta,
+    Size viewport,
+    Size panelSize,
+    Offset fallbackOffset,
+  ) {
+    setState(() {
+      final currentOffset = _aiAssistPanelOffset ?? fallbackOffset;
+      final nextSize = _clampAiAssistPanelSize(
+        Size(panelSize.width + delta.dx, panelSize.height + delta.dy),
+        viewport,
+      );
+      _aiAssistPanelSize = nextSize;
+      _aiAssistPanelOffset = _clampAiAssistPanelOffset(
+        currentOffset,
+        viewport,
+        nextSize,
+      );
+    });
+  }
+
+  void _saveAiAssistConfig(_AiAssistConfig config) {
+    setState(() => _aiAssistConfig = config);
+    _log(
+      'AI',
+      'AI assist config saved: model=${_fileName(config.modelPath)}, classes=${config.selectedClassIds.length}, conf=${config.confThreshold.toStringAsFixed(2)}, imgsz=${config.imageSize}, range=${config.startIndex}-${config.endIndex}',
+    );
+  }
+
+  Future<_AiAssistConfig?> _ensureAiAssistConfig() async {
+    final config = _aiAssistConfig;
+    if (config != null) {
+      return config;
+    }
+    setState(() => _aiPanelVisible = true);
+    _showFloatingMessage(t('ai.chooseModelFirst'));
+    return null;
+  }
+
+  Future<void> _runAiAnnotateCurrent() async {
+    final config = await _ensureAiAssistConfig();
+    if (config == null) {
+      return;
+    }
+    await _runAiAnnotateCurrentWithConfig(config);
+  }
+
+  Future<void> _runAiAnnotateCurrentWithConfig(_AiAssistConfig config) async {
+    if (_selectedImage == null) {
+      return;
+    }
+    await _runAiAnnotateForIndices([_selectedImageIndex], config);
+  }
+
+  Future<void> _runAiAnnotateAll() async {
+    final config = await _ensureAiAssistConfig();
+    if (config == null) {
+      return;
+    }
+    await _runAiAnnotateAllWithConfig(config);
+  }
+
+  Future<void> _runAiAnnotateAllWithConfig(_AiAssistConfig config) async {
+    if (_images.isEmpty) {
+      return;
+    }
+    final start = (config.startIndex - 1).clamp(0, _images.length - 1);
+    final end = (config.endIndex - 1).clamp(0, _images.length - 1);
+    if (start > end) {
+      return;
+    }
+    await _runAiAnnotateForIndices([
+      for (var index = start; index <= end; index++) index,
+    ], config);
+  }
+
+  Future<void> _runAiAnnotateForIndices(
+    List<int> indices,
+    _AiAssistConfig config,
+  ) async {
+    if (_aiAnnotating || indices.isEmpty) {
+      return;
+    }
+    if (_appSettings.pythonPath.trim().isEmpty) {
+      _log(
+        'AI',
+        'AI annotation blocked: Python path is empty',
+        level: _LogLevel.warning,
+      );
+      _showFloatingMessage(t('detect.pythonNotConfigured'));
+      return;
+    }
+    if (config.selectedClassIds.isEmpty) {
+      _log(
+        'AI',
+        'AI annotation blocked: no classes selected',
+        level: _LogLevel.warning,
+      );
+      _showFloatingMessage(t('ai.noSelectedClasses'));
+      return;
+    }
+    final targetIndices = [
+      for (final index in indices)
+        if (index >= 0 && index < _images.length) index,
+    ];
+    if (targetIndices.isEmpty) {
+      _log(
+        'AI',
+        'AI annotation blocked: no valid target indices',
+        level: _LogLevel.warning,
+      );
+      return;
+    }
+    _log(
+      'AI',
+      'AI annotation started: targets=${targetIndices.length}, model=${_fileName(config.modelPath)}, classes=${config.selectedClassIds.length}, conf=${config.confThreshold.toStringAsFixed(2)}, imgsz=${config.imageSize}',
+    );
+
+    setState(() => _aiAnnotating = true);
+    await WidgetsBinding.instance.endOfFrame;
+    var added = 0;
+    try {
+      if (targetIndices.length == 1 &&
+          targetIndices.first == _selectedImageIndex) {
+        _pushAnnotationSnapshot();
+      }
+      if (targetIndices.length == 1) {
+        final image = _images[targetIndices.first];
+        final result = await _RustVideoBackend.aiAnnotateImage(
+          pythonPath: _appSettings.pythonPath.trim(),
+          modelPath: config.modelPath,
+          inputPath: image.path,
+          classIds: config.selectedClassIds.toList()..sort(),
+          confThreshold: config.confThreshold,
+          iouThreshold: 0.45,
+          imgsz: config.imageSize,
+          device: 'auto',
+        );
+        final displaySize = await _computeImageDisplaySize(image.path);
+        added += _applyAiAnnotationResult(
+          imagePath: image.path,
+          displaySize: displaySize,
+          result: result,
+        );
+      } else if (targetIndices.isNotEmpty) {
+        final targetImages = [
+          for (final index in targetIndices) _images[index],
+        ];
+        final results = await _RustVideoBackend.aiAnnotateImages(
+          pythonPath: _appSettings.pythonPath.trim(),
+          modelPath: config.modelPath,
+          inputPaths: [for (final image in targetImages) image.path],
+          classIds: config.selectedClassIds.toList()..sort(),
+          confThreshold: config.confThreshold,
+          iouThreshold: 0.45,
+          imgsz: config.imageSize,
+          device: 'auto',
+        );
+        for (final result in results) {
+          final imagePath = result.inputPath.isEmpty ? null : result.inputPath;
+          if (imagePath == null || !File(imagePath).existsSync()) {
+            continue;
+          }
+          final displaySize = await _computeImageDisplaySize(imagePath);
+          added += _applyAiAnnotationResult(
+            imagePath: imagePath,
+            displaySize: displaySize,
+            result: result,
+          );
+        }
+      }
+      if (mounted) {
+        setState(() {});
+      }
+      _log(
+        'AI',
+        'AI annotation completed: targets=${targetIndices.length}, added=$added',
+      );
+      _showFloatingMessage('${t('ai.done')} ($added)');
+    } on Object catch (error) {
+      _log('AI', 'AI annotation failed: $error', level: _LogLevel.error);
+      _showFloatingMessage('${t('ai.failed')}: $error');
+    } finally {
+      if (mounted) {
+        setState(() => _aiAnnotating = false);
+      }
+    }
+  }
+
+  int _applyAiAnnotationResult({
+    required String imagePath,
+    required Size displaySize,
+    required _AiAnnotationResult result,
+  }) {
+    if (result.boxes.isEmpty || result.width <= 0 || result.height <= 0) {
+      return 0;
+    }
+    final imageKey = _pathKey(imagePath);
+    final annotations = _annotationsByImage.putIfAbsent(imageKey, () => []);
+    var count = 0;
+    for (final box in result.boxes) {
+      final classId = _ensureLabelClassByName(box.className);
+      final rect = Rect.fromLTRB(
+        box.rect.left / result.width * displaySize.width,
+        box.rect.top / result.height * displaySize.height,
+        box.rect.right / result.width * displaySize.width,
+        box.rect.bottom / result.height * displaySize.height,
+      ).intersect(Offset.zero & displaySize);
+      if (rect.width < 2 || rect.height < 2) {
+        continue;
+      }
+      annotations.add(
+        _AnnotationRegion.fromRect(
+          id: 'ann_${_annotationSerial++}',
+          mode: _AnnotationMode.hbb,
+          rect: rect,
+          classId: classId,
+        ),
+      );
+      count += 1;
+    }
+    return count;
+  }
+
+  int _ensureLabelClassByName(String rawName) {
+    final name = rawName.trim().isEmpty
+        ? 'class_${_labelClasses.length}'
+        : rawName.trim();
+    for (final labelClass in _labelClasses) {
+      if (labelClass.name.toLowerCase() == name.toLowerCase()) {
+        return labelClass.id;
+      }
+    }
+    final id = _classSerial++;
+    _labelClasses.add(
+      _LabelClass(id: id, name: name, colorValue: _nextClassColor().toARGB32()),
+    );
+    _activeClassId ??= id;
+    return id;
   }
 
   Future<void> _showExportDialog() async {
@@ -1589,12 +2043,21 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       final displaySize = Size(w * scale, h * scale);
       _imageDisplaySizes[_pathKey(imagePath)] = displaySize;
       return displaySize;
-    } on Object {
+    } on Object catch (error) {
+      _log(
+        'LABEL',
+        'Image size decode failed: $imagePath, error=$error',
+        level: _LogLevel.warning,
+      );
       return const Size(1, 1);
     }
   }
 
   Future<void> _exportAnnotations(_ExportConfig config) async {
+    _log(
+      'EXPORT',
+      'Export started: ${config.folderName} (train=${config.trainRatio.toStringAsFixed(0)}% val=${config.valRatio.toStringAsFixed(0)}% test=${config.testRatio.toStringAsFixed(0)}%)',
+    );
     final exportRoot = _appSettings.exportPath;
     final baseDir = Directory('$exportRoot\\${config.folderName}');
     if (baseDir.existsSync()) {
@@ -1611,6 +2074,11 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       }
     }
     if (entries.isEmpty) {
+      _log(
+        'EXPORT',
+        'Export skipped: no images or annotations to export',
+        level: _LogLevel.warning,
+      );
       _showFloatingMessage(t('export.noData'));
       return;
     }
@@ -1753,6 +2221,14 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       if (testSet.isNotEmpty) copyImages(testSet, 'test');
     }
 
+    final annotationCount = entries.fold<int>(
+      0,
+      (sum, entry) => sum + entry.annotations.length,
+    );
+    _log(
+      'EXPORT',
+      'Export completed: path=${baseDir.path}, images=${entries.length}, annotations=$annotationCount, train=${trainSet.length}, val=${valSet.length}, test=${testSet.length}, exportImages=${config.exportImages}, skipEmpty=${config.skipEmpty}',
+    );
     _showFloatingMessage(
       '${t('export.done')} (${t('export.folderName')}: ${config.folderName})',
     );
@@ -1762,11 +2238,20 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     _ExportConfig config,
     _ImportedDataset dataset,
   ) async {
+    _log(
+      'EXPORT',
+      'Overwrite imported dataset started: yaml=${dataset.dataYamlPath}',
+    );
     final entries = <_ExportEntry>[
       for (final image in _images)
         _ExportEntry(image.path, _annotationsForImagePath(image.path).toList()),
     ];
     if (entries.isEmpty) {
+      _log(
+        'EXPORT',
+        'Overwrite imported dataset skipped: no data',
+        level: _LogLevel.warning,
+      );
       _showFloatingMessage(t('export.noData'));
       return;
     }
@@ -1840,6 +2325,14 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     File(dataset.dataYamlPath).writeAsStringSync(
       '${_datasetYamlContent(dataset, grouped, _labelClasses)}\n',
     );
+    final annotationCount = entries.fold<int>(
+      0,
+      (sum, entry) => sum + entry.annotations.length,
+    );
+    _log(
+      'EXPORT',
+      'Overwrite imported dataset completed: yaml=${dataset.dataYamlPath}, images=${entries.length}, annotations=$annotationCount, train=${grouped['train']?.length ?? 0}, val=${grouped['val']?.length ?? 0}, test=${grouped['test']?.length ?? 0}, exportImages=${config.exportImages}, skipEmpty=${config.skipEmpty}',
+    );
     _showFloatingMessage(t('export.done'));
   }
 
@@ -1855,6 +2348,11 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       _annotationsByImage.putIfAbsent(imageKey, () => []).add(pasted);
       _selectedAnnotationId = pasted.id;
     });
+    _log(
+      'ANNOTATION',
+      'Pasted annotation: source=${copied.id}, pasted=${pasted.id}',
+      level: _LogLevel.debug,
+    );
   }
 
   void _rotateSelectedAnnotation(double deltaDegrees) {
@@ -1994,6 +2492,14 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     }
     if (_shortcutConfig.matches(_ShortcutAction.rotateObbRight5, key)) {
       _rotateSelectedAnnotation(5);
+      return KeyEventResult.handled;
+    }
+    if (_shortcutConfig.matches(_ShortcutAction.aiAnnotateCurrent, key)) {
+      unawaited(_runAiAnnotateCurrent());
+      return KeyEventResult.handled;
+    }
+    if (_shortcutConfig.matches(_ShortcutAction.aiAnnotateAll, key)) {
+      unawaited(_runAiAnnotateAll());
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
@@ -2211,8 +2717,10 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
               children: [
                 _TopMenuBar(
                   visible: _topMenuVisible,
-                  recentFolders: _recentFolders,
-                  recentFiles: _recentFiles,
+                  recentFolders: _recentFolders
+                      .map((entry) => entry.path)
+                      .toList(),
+                  recentFiles: _recentFiles.map((entry) => entry.path).toList(),
                   languageOptions: _languageOptions,
                   activeLanguageCode: _activeLanguageCode,
                   onOpenFile: () => _openImageFile(),
@@ -2245,6 +2753,11 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                           setState(() => _sidebarCollapsed = value);
                         },
                         onSectionSelected: (section) {
+                          _log(
+                            'NAV',
+                            'Switched to: $section',
+                            level: _LogLevel.debug,
+                          );
                           setState(() => _activeSection = section);
                         },
                       ),
@@ -2296,6 +2809,12 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                                 () => _showClassLabels = !_showClassLabels,
                               ),
                               onAnnotationClassChanged: _changeAnnotationClass,
+                              aiPanelVisible: _aiPanelVisible,
+                              onAiConfigPressed: () {
+                                setState(
+                                  () => _aiPanelVisible = !_aiPanelVisible,
+                                );
+                              },
                               onImageDisplaySizeChanged: (size) {
                                 _imageDisplaySize = size;
                                 final key = _selectedImageKey;
@@ -2329,8 +2848,74 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                   ),
               ],
             ),
+            if (labelPage && _aiPanelVisible)
+              Positioned.fill(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final viewport = Size(
+                      constraints.maxWidth,
+                      constraints.maxHeight,
+                    );
+                    final panelSize = _clampAiAssistPanelSize(
+                      _aiAssistPanelSize,
+                      viewport,
+                    );
+                    final defaultOffset = Offset(
+                      math.max(
+                        _aiAssistPanelMargin,
+                        constraints.maxWidth -
+                            panelSize.width -
+                            _toolbarWidth -
+                            16,
+                      ),
+                      _topMenuHeight + 18,
+                    );
+                    final panelOffset = _clampAiAssistPanelOffset(
+                      _aiAssistPanelOffset ?? defaultOffset,
+                      viewport,
+                      panelSize,
+                    );
+                    return Stack(
+                      children: [
+                        Positioned(
+                          left: panelOffset.dx,
+                          top: panelOffset.dy,
+                          child: _AiAssistFloatingPanel(
+                            width: panelSize.width,
+                            height: panelSize.height,
+                            initialConfig: _aiAssistConfig,
+                            imageCount: _images.length,
+                            pythonPath: _appSettings.pythonPath,
+                            onClose: () =>
+                                setState(() => _aiPanelVisible = false),
+                            onDrag: (delta) => _moveAiAssistPanel(
+                              delta,
+                              viewport,
+                              panelSize,
+                              panelOffset,
+                            ),
+                            onResize: (delta) => _resizeAiAssistPanel(
+                              delta,
+                              viewport,
+                              panelSize,
+                              panelOffset,
+                            ),
+                            onConfigSaved: _saveAiAssistConfig,
+                            onAnnotateCurrent: _runAiAnnotateCurrentWithConfig,
+                            onAnnotateAll: _runAiAnnotateAllWithConfig,
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
             if (_importingDataset)
               const Positioned.fill(child: _ImportBlockingOverlay()),
+            if (_aiAnnotating)
+              Positioned.fill(
+                child: _ImportBlockingOverlay(message: t('ai.annotating')),
+              ),
             if (_videoFullscreenVisible)
               Positioned.fill(
                 child: _VideoFullscreenOverlay(
@@ -2382,6 +2967,509 @@ class _ImportBlockingOverlay extends StatelessWidget {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AiAssistConfig {
+  const _AiAssistConfig({
+    required this.modelPath,
+    required this.classes,
+    required this.selectedClassIds,
+    required this.startIndex,
+    required this.endIndex,
+    this.confThreshold = 0.25,
+    this.imageSize = 640,
+  });
+
+  final String modelPath;
+  final List<_AiModelClass> classes;
+  final Set<int> selectedClassIds;
+  final int startIndex;
+  final int endIndex;
+  final double confThreshold;
+  final int imageSize;
+}
+
+double _normalizeAiConfidence(double value) {
+  if (!value.isFinite) {
+    return 0.25;
+  }
+  return ((value / 0.05).round() * 0.05).clamp(0.05, 0.95).toDouble();
+}
+
+class _AiAssistFloatingPanel extends StatefulWidget {
+  const _AiAssistFloatingPanel({
+    required this.initialConfig,
+    required this.imageCount,
+    required this.pythonPath,
+    required this.width,
+    required this.height,
+    required this.onClose,
+    required this.onDrag,
+    required this.onResize,
+    required this.onConfigSaved,
+    required this.onAnnotateCurrent,
+    required this.onAnnotateAll,
+  });
+
+  final _AiAssistConfig? initialConfig;
+  final int imageCount;
+  final String pythonPath;
+  final double width;
+  final double height;
+  final VoidCallback onClose;
+  final ValueChanged<Offset> onDrag;
+  final ValueChanged<Offset> onResize;
+  final ValueChanged<_AiAssistConfig> onConfigSaved;
+  final Future<void> Function(_AiAssistConfig config) onAnnotateCurrent;
+  final Future<void> Function(_AiAssistConfig config) onAnnotateAll;
+
+  @override
+  State<_AiAssistFloatingPanel> createState() => _AiAssistFloatingPanelState();
+}
+
+class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
+  late final TextEditingController _startController;
+  late final TextEditingController _endController;
+  String? _modelPath;
+  List<_AiModelClass> _classes = const [];
+  Set<int> _selectedClassIds = <int>{};
+  double _confThreshold = 0.25;
+  bool _loadingClasses = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    final initial = widget.initialConfig;
+    _modelPath = initial?.modelPath;
+    _classes = initial?.classes ?? const [];
+    _selectedClassIds = initial?.selectedClassIds.toSet() ?? <int>{};
+    _confThreshold = _normalizeAiConfidence(initial?.confThreshold ?? 0.25);
+    _startController = TextEditingController(
+      text: (initial?.startIndex ?? 1).toString(),
+    );
+    _endController = TextEditingController(
+      text: (initial?.endIndex ?? math.max(1, widget.imageCount)).toString(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _startController.dispose();
+    _endController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _chooseModel() async {
+    final file = await openFile(
+      acceptedTypeGroups: const [
+        XTypeGroup(label: 'YOLO AI model', extensions: ['pt', 'onnx']),
+      ],
+    );
+    if (file == null) {
+      return;
+    }
+    final path = file.path;
+    if (!path.toLowerCase().endsWith('.pt')) {
+      setState(() {
+        _modelPath = path;
+        _classes = const [];
+        _selectedClassIds = <int>{};
+        _error = t('ai.onnxNotSupported');
+      });
+      return;
+    }
+    final pythonPath = widget.pythonPath.trim();
+    if (pythonPath.isEmpty) {
+      setState(() => _error = t('detect.pythonNotConfigured'));
+      return;
+    }
+    setState(() {
+      _modelPath = path;
+      _loadingClasses = true;
+      _error = null;
+    });
+    try {
+      final result = await _RustVideoBackend.aiModelClasses(
+        pythonPath: pythonPath,
+        modelPath: path,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _classes = result.classes;
+        _selectedClassIds = result.classes.map((item) => item.id).toSet();
+        _loadingClasses = false;
+      });
+    } on Object catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _classes = const [];
+        _selectedClassIds = <int>{};
+        _loadingClasses = false;
+        _error = '${t('ai.readClassesFailed')}: $error';
+      });
+    }
+  }
+
+  _AiAssistConfig? _configFromFields() {
+    final modelPath = _modelPath;
+    if (modelPath == null || modelPath.trim().isEmpty) {
+      setState(() => _error = t('ai.chooseModelFirst'));
+      return null;
+    }
+    if (_selectedClassIds.isEmpty) {
+      setState(() => _error = t('ai.noSelectedClasses'));
+      return null;
+    }
+    final start = int.tryParse(_startController.text.trim()) ?? 1;
+    final end = int.tryParse(_endController.text.trim()) ?? start;
+    final maxIndex = math.max(1, widget.imageCount);
+    final normalizedStart = start.clamp(1, maxIndex).toInt();
+    final normalizedEnd = end.clamp(normalizedStart, maxIndex).toInt();
+    return _AiAssistConfig(
+      modelPath: modelPath,
+      classes: _classes,
+      selectedClassIds: _selectedClassIds.toSet(),
+      startIndex: normalizedStart,
+      endIndex: normalizedEnd,
+      confThreshold: _normalizeAiConfidence(_confThreshold),
+      imageSize: 640,
+    );
+  }
+
+  void _save() {
+    final config = _configFromFields();
+    if (config == null) {
+      return;
+    }
+    widget.onConfigSaved(config);
+    setState(() => _error = null);
+  }
+
+  Future<void> _annotateCurrent() async {
+    final config = _configFromFields();
+    if (config == null) {
+      return;
+    }
+    widget.onConfigSaved(config);
+    setState(() => _error = null);
+    await widget.onAnnotateCurrent(config);
+  }
+
+  Future<void> _annotateAll() async {
+    final config = _configFromFields();
+    if (config == null) {
+      return;
+    }
+    widget.onConfigSaved(config);
+    setState(() => _error = null);
+    await widget.onAnnotateAll(config);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final modelPath = _modelPath;
+    final textTheme = Theme.of(context).textTheme;
+    final disabled = _loadingClasses;
+
+    return Material(
+      elevation: 18,
+      color: _panelColor(context),
+      borderRadius: BorderRadius.circular(8),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        width: widget.width,
+        height: widget.height,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  border: Border.all(color: _borderColor(context)),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  children: [
+                    MouseRegion(
+                      cursor: SystemMouseCursors.move,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onPanUpdate: (details) => widget.onDrag(details.delta),
+                        child: Container(
+                          height: 46,
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                          decoration: BoxDecoration(
+                            color: _controlColor(context),
+                            border: Border(
+                              bottom: BorderSide(color: _borderColor(context)),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.auto_awesome, size: 18),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  t('ai.configTitle'),
+                                  style: textTheme.titleMedium,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: t('action.close'),
+                                onPressed: widget.onClose,
+                                icon: const Icon(Icons.close, size: 18),
+                                visualDensity: VisualDensity.compact,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    modelPath ?? t('ai.noModel'),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                OutlinedButton.icon(
+                                  onPressed: disabled ? null : _chooseModel,
+                                  icon: const Icon(Icons.folder_open, size: 16),
+                                  label: Text(t('ai.chooseModel')),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 14),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: TextField(
+                                    controller: _startController,
+                                    keyboardType: TextInputType.number,
+                                    decoration: InputDecoration(
+                                      labelText: t('ai.startImageIndex'),
+                                      isDense: true,
+                                    ),
+                                  ),
+                                ),
+                                const Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 8),
+                                  child: Text('-'),
+                                ),
+                                Expanded(
+                                  child: TextField(
+                                    controller: _endController,
+                                    keyboardType: TextInputType.number,
+                                    decoration: InputDecoration(
+                                      labelText: t('ai.endImageIndex'),
+                                      isDense: true,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 14),
+                            Text(
+                              '${t('ai.confidence')} ${_confThreshold.toStringAsFixed(2)}',
+                              style: textTheme.bodyMedium,
+                            ),
+                            Slider(
+                              min: 0.05,
+                              max: 0.95,
+                              divisions: 18,
+                              value: _normalizeAiConfidence(_confThreshold),
+                              label: _normalizeAiConfidence(
+                                _confThreshold,
+                              ).toStringAsFixed(2),
+                              onChanged: disabled
+                                  ? null
+                                  : (value) {
+                                      setState(() {
+                                        _confThreshold = _normalizeAiConfidence(
+                                          value,
+                                        );
+                                      });
+                                    },
+                            ),
+                            const SizedBox(height: 8),
+                            if (_loadingClasses)
+                              const Center(
+                                child: Padding(
+                                  padding: EdgeInsets.all(18),
+                                  child: CircularProgressIndicator(),
+                                ),
+                              )
+                            else
+                              DecoratedBox(
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                    color: _borderColor(context),
+                                  ),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: ExpansionTile(
+                                  initiallyExpanded: true,
+                                  title: Text(t('ai.classes')),
+                                  subtitle: Text(
+                                    '${_selectedClassIds.length} / ${_classes.length}',
+                                  ),
+                                  children: [
+                                    CheckboxListTile(
+                                      dense: true,
+                                      value:
+                                          _classes.isNotEmpty &&
+                                          _selectedClassIds.length ==
+                                              _classes.length,
+                                      onChanged: _classes.isEmpty
+                                          ? null
+                                          : (value) {
+                                              setState(() {
+                                                _selectedClassIds =
+                                                    value == true
+                                                    ? _classes
+                                                          .map(
+                                                            (item) => item.id,
+                                                          )
+                                                          .toSet()
+                                                    : <int>{};
+                                              });
+                                            },
+                                      title: Text(t('ai.selectAllClasses')),
+                                    ),
+                                    for (final item in _classes)
+                                      CheckboxListTile(
+                                        dense: true,
+                                        value: _selectedClassIds.contains(
+                                          item.id,
+                                        ),
+                                        onChanged: (value) {
+                                          setState(() {
+                                            if (value == true) {
+                                              _selectedClassIds.add(item.id);
+                                            } else {
+                                              _selectedClassIds.remove(item.id);
+                                            }
+                                          });
+                                        },
+                                        title: Text('${item.id}: ${item.name}'),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            if (_error != null) ...[
+                              const SizedBox(height: 10),
+                              Text(
+                                _error!,
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.error,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: FilledButton.tonalIcon(
+                                  onPressed: disabled ? null : _annotateCurrent,
+                                  icon: const Icon(
+                                    Icons.image_search_outlined,
+                                    size: 17,
+                                  ),
+                                  label: Text(t('ai.annotateCurrent')),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: FilledButton.icon(
+                                  onPressed: disabled ? null : _annotateAll,
+                                  icon: const Icon(
+                                    Icons.auto_awesome_motion,
+                                    size: 17,
+                                  ),
+                                  label: Text(t('ai.annotateAll')),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              TextButton(
+                                onPressed: widget.onClose,
+                                child: Text(t('action.cancel')),
+                              ),
+                              const SizedBox(width: 10),
+                              OutlinedButton(
+                                onPressed: disabled ? null : _save,
+                                child: Text(t('action.save')),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Positioned(
+              right: 0,
+              bottom: 0,
+              child: MouseRegion(
+                cursor: SystemMouseCursors.resizeUpLeftDownRight,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onPanUpdate: (details) => widget.onResize(details.delta),
+                  child: SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: Align(
+                      alignment: Alignment.bottomRight,
+                      child: Padding(
+                        padding: const EdgeInsets.all(6),
+                        child: Icon(
+                          Icons.open_in_full,
+                          size: 14,
+                          color: _primaryTextColor(
+                            context,
+                          ).withValues(alpha: 0.72),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -2914,7 +4002,22 @@ class _ShortcutSettingsDialogState extends State<_ShortcutSettingsDialog> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  for (final action in _ShortcutAction.values)
+                  _ShortcutSectionTitle(title: t('shortcut.normalGroup')),
+                  for (final action in _ShortcutAction.values.where(
+                    (action) => !action.isAiAction,
+                  ))
+                    _ShortcutEditRow(
+                      action: action,
+                      label: t(action.labelKey),
+                      shortcut: config.binding(action).displayLabel,
+                      waiting: _waitingAction == action,
+                      onPressed: _startCapture,
+                    ),
+                  const SizedBox(height: 10),
+                  _ShortcutSectionTitle(title: t('shortcut.aiGroup')),
+                  for (final action in _ShortcutAction.values.where(
+                    (action) => action.isAiAction,
+                  ))
                     _ShortcutEditRow(
                       action: action,
                       label: t(action.labelKey),
@@ -2949,6 +4052,23 @@ class _ShortcutSettingsDialogState extends State<_ShortcutSettingsDialog> {
           child: Text(t('action.close')),
         ),
       ],
+    );
+  }
+}
+
+class _ShortcutSectionTitle extends StatelessWidget {
+  const _ShortcutSectionTitle({required this.title});
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 6, bottom: 4),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Text(title, style: Theme.of(context).textTheme.titleSmall),
+      ),
     );
   }
 }
@@ -3550,12 +4670,17 @@ bool _isImagePath(String path) {
   return _imageExtensions.contains(path.substring(dotIndex + 1).toLowerCase());
 }
 
-bool _addRecent(List<String> items, String value) {
-  final key = _pathKey(value);
-  if (items.any((item) => _pathKey(item) == key)) {
+bool _touchRecent(List<_RecentEntry> items, String value) {
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) {
     return false;
   }
-  items.insert(0, value);
+  final key = _pathKey(trimmed);
+  final existingIndex = items.indexWhere((item) => _pathKey(item.path) == key);
+  if (existingIndex >= 0) {
+    items.removeAt(existingIndex);
+  }
+  items.insert(0, _RecentEntry(path: trimmed, timestamp: DateTime.now()));
   if (items.length > _recentHistoryLimit) {
     items.removeRange(_recentHistoryLimit, items.length);
   }

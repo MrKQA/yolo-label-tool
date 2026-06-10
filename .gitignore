@@ -9,6 +9,9 @@ flutter/.flutter-plugins-dependencies
 # FFmpeg
 ffmpeg/
 
+#FEATURES
+FEATURES.md
+
 # IDE
 .idea/
 .vscode/

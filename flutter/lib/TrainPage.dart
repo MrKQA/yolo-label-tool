@@ -73,6 +73,7 @@ class _TrainPageState extends State<_TrainPage> {
     _TrainingDeviceOption(id: 'cpu', label: 'CPU'),
   ];
   Set<String> _selectedDeviceIds = const {'cpu'};
+  bool _manualDeviceSelection = false;
   _BatchMode _batchMode = _BatchMode.fixed;
   double _batchSize = 16;
   double _batchRatio = 0.70;
@@ -112,7 +113,7 @@ class _TrainPageState extends State<_TrainPage> {
       return 'cpu';
     }
     final ids = _selectedDeviceIds.toList()..sort(_naturalCompare);
-    return ids.length == 1 ? ids.first : '[${ids.join(', ')}]';
+    return ids.join(',');
   }
 
   @override
@@ -145,10 +146,7 @@ class _TrainPageState extends State<_TrainPage> {
             .map((file) => file.path)
             .where(_isSupportedYoloPtModel);
       });
-      _modelOptions = _dedupeModelOptions(
-        discovered,
-        preferredPath: previous,
-      );
+      _modelOptions = _dedupeModelOptions(discovered, preferredPath: previous);
       if (preserveSelection &&
           previous != null &&
           _modelOptions.any((path) => _pathKey(path) == _pathKey(previous))) {
@@ -157,6 +155,11 @@ class _TrainPageState extends State<_TrainPage> {
         _modelPath = _modelOptions.isEmpty ? null : _modelOptions.first;
       }
     });
+    _log(
+      'TRAIN',
+      'Model options loaded: count=${_modelOptions.length}, selected=${_modelPath == null ? '-' : _fileName(_modelPath!)}',
+      level: _LogLevel.debug,
+    );
     _refreshResumeInfo();
   }
 
@@ -220,15 +223,19 @@ class _TrainPageState extends State<_TrainPage> {
         _batchSize = prefs.batchSize;
         _batchRatio = prefs.batchRatio;
         _ampEnabled = prefs.ampEnabled;
-        if (prefs.selectedDeviceIds.isNotEmpty) {
-          _selectedDeviceIds = prefs.selectedDeviceIds.toSet();
+        _manualDeviceSelection = prefs.manualDeviceSelection;
+        if (_manualDeviceSelection && prefs.selectedDeviceIds.isNotEmpty) {
+          _selectedDeviceIds = _normalizeTrainingDeviceSelection(
+            prefs.selectedDeviceIds.toSet(),
+          );
         }
         if (prefs.modelPath != null && File(prefs.modelPath!).existsSync()) {
           _modelOptions = _dedupeModelOptions(
             _modelOptions,
             preferredPath: prefs.modelPath,
           );
-          _modelPath = _matchingModelOption(prefs.modelPath!) ?? prefs.modelPath;
+          _modelPath =
+              _matchingModelOption(prefs.modelPath!) ?? prefs.modelPath;
         }
         if (prefs.datasetPath != null &&
             File(prefs.datasetPath!).existsSync()) {
@@ -249,6 +256,7 @@ class _TrainPageState extends State<_TrainPage> {
       batchRatio: _batchRatio,
       ampEnabled: _ampEnabled,
       selectedDeviceIds: _selectedDeviceIds.toList(),
+      manualDeviceSelection: _manualDeviceSelection,
       chartColors: Map<String, int>.from(_chartColors),
     );
     _ConfigStore.saveTrainingPreferences(prefs);
@@ -277,7 +285,8 @@ class _TrainPageState extends State<_TrainPage> {
       _batchSize = 16;
       _batchRatio = 0.70;
       _ampEnabled = false;
-      _selectedDeviceIds = const {'cpu'};
+      _manualDeviceSelection = false;
+      _selectedDeviceIds = _autoTrainingDeviceSelection();
     });
     _savePreferences();
   }
@@ -300,14 +309,38 @@ class _TrainPageState extends State<_TrainPage> {
   }
 
   void _loadDeviceOptions() {
-    final devices = _detectNvidiaDevices();
+    final devices = _detectNvidiaDevices()
+      ..sort((a, b) => _naturalCompare(a.id, b.id));
     if (devices.isEmpty) {
       _deviceOptions = const [_TrainingDeviceOption(id: 'cpu', label: 'CPU')];
       _selectedDeviceIds = const {'cpu'};
       return;
     }
-    _deviceOptions = devices;
-    _selectedDeviceIds = {devices.first.id};
+    _deviceOptions = [
+      ...devices,
+      const _TrainingDeviceOption(id: 'cpu', label: 'CPU'),
+    ];
+    _selectedDeviceIds = _autoTrainingDeviceSelection();
+  }
+
+  Set<String> _autoTrainingDeviceSelection() {
+    final firstGpu = _deviceOptions
+        .where((option) => option.id != 'cpu')
+        .map((option) => option.id)
+        .firstOrNullValue;
+    return firstGpu == null ? const {'cpu'} : {firstGpu};
+  }
+
+  Set<String> _normalizeTrainingDeviceSelection(Set<String> selectedIds) {
+    final availableIds = _deviceOptions.map((option) => option.id).toSet();
+    final validIds = selectedIds.intersection(availableIds);
+    if (validIds.isEmpty) {
+      return _autoTrainingDeviceSelection();
+    }
+    if (validIds.contains('cpu')) {
+      return const {'cpu'};
+    }
+    return validIds;
   }
 
   List<Directory> _modelsDirectoryCandidates() {
@@ -377,6 +410,7 @@ class _TrainPageState extends State<_TrainPage> {
     if (file == null) {
       return;
     }
+    _log('TRAIN', 'Model selected: ${file.path}');
     setState(() {
       _modelOptions = _dedupeModelOptions(
         _modelOptions,
@@ -439,6 +473,7 @@ class _TrainPageState extends State<_TrainPage> {
     setState(() => _datasetLoading = true);
     try {
       final path = file.path;
+      _log('TRAIN', 'Dataset summary loading: $path');
       final summary = await _loadDatasetSummaryInBackground(path);
       if (!mounted) {
         return;
@@ -450,7 +485,16 @@ class _TrainPageState extends State<_TrainPage> {
       });
       _refreshResumeInfo();
       _savePreferences();
+      _log(
+        'TRAIN',
+        'Dataset summary loaded: path=$path, classes=${summary.classes.length}, train=${summary.trainCount}, val=${summary.valCount}, test=${summary.testCount}, cls_pw=${summary.recommendedClsPw.toStringAsFixed(2)}, imbalance=${summary.imbalanceRatio.toStringAsFixed(2)}',
+      );
     } on Object catch (error) {
+      _log(
+        'TRAIN',
+        'Dataset summary failed: ${file.path}, error=$error',
+        level: _LogLevel.error,
+      );
       if (mounted) {
         _showWarning('${t('train.datasetLoadFailed')}: $error');
       }
@@ -464,12 +508,18 @@ class _TrainPageState extends State<_TrainPage> {
   void _toggleTrainingDevice(String id, bool selected) {
     setState(() {
       final next = {..._selectedDeviceIds};
+      _manualDeviceSelection = true;
+      if (id == 'cpu') {
+        _selectedDeviceIds = const {'cpu'};
+        return;
+      }
       if (selected) {
+        next.remove('cpu');
         next.add(id);
-      } else if (next.length > 1) {
+      } else {
         next.remove(id);
       }
-      _selectedDeviceIds = next.isEmpty ? {id} : next;
+      _selectedDeviceIds = next.isEmpty ? const {'cpu'} : next;
     });
   }
 
@@ -483,10 +533,22 @@ class _TrainPageState extends State<_TrainPage> {
 
   Future<void> _startTraining() async {
     if (_trainingRunning) return;
-    if (_modelPath == null || _datasetPath == null) return;
+    if (_modelPath == null || _datasetPath == null) {
+      _log(
+        'TRAIN',
+        'Training start blocked: modelPath=${_modelPath ?? '-'}, datasetPath=${_datasetPath ?? '-'}',
+        level: _LogLevel.warning,
+      );
+      return;
+    }
     final pythonPath = widget.settings.pythonPath;
     final outputPath = widget.settings.outputPath;
     if (pythonPath.isEmpty) {
+      _log(
+        'TRAIN',
+        'Training start blocked: Python path is empty',
+        level: _LogLevel.warning,
+      );
       _showWarning(t('train.pythonNotConfigured'));
       return;
     }
@@ -502,6 +564,10 @@ class _TrainPageState extends State<_TrainPage> {
         : initialMetricPoints.last.metrics;
     _trainingTimer?.cancel();
     final logPath = _logFileForDate(DateTime.now()).path;
+    _log(
+      'TRAIN',
+      'Starting training: model=${_fileName(_modelPath!)}, data=$_datasetPath, epochs=$totalEpochs, imgsz=${_parameters['imgsz']?.round() ?? 640}, batch=$_batchArgument, device=$_deviceArgument, workers=${_parameters['workers']?.round() ?? 4}, resume=$_useResumeTraining, amp=$_ampEnabled',
+    );
 
     setState(() {
       _trainingRunning = true;
@@ -522,7 +588,9 @@ class _TrainPageState extends State<_TrainPage> {
         pythonPath: pythonPath,
         modelPath: _modelPath!,
         dataYamlPath: _datasetPath!,
-        projectDir: outputPath.isNotEmpty ? outputPath : '${Directory.current.path}\\runs',
+        projectDir: outputPath.isNotEmpty
+            ? outputPath
+            : '${Directory.current.path}\\runs',
         experimentName: _trainingExperimentName(),
         epochs: totalEpochs,
         imgsz: _parameters['imgsz']?.round() ?? 640,
@@ -551,6 +619,7 @@ class _TrainPageState extends State<_TrainPage> {
         });
       }
     } on Object catch (e) {
+      _log('TRAIN', 'Training start failed: $e', level: _LogLevel.error);
       final logText = await _readTrainingLogTail(_activeTrainingLogPath);
       _trainingTimer?.cancel();
       if (mounted) {
@@ -573,6 +642,11 @@ class _TrainPageState extends State<_TrainPage> {
 
   void _stopTraining() {
     if (!_trainingRunning || _trainingStopping) return;
+    _log(
+      'TRAIN',
+      'Stopping training at epoch $_currentEpoch',
+      level: _LogLevel.warning,
+    );
     _RustVideoBackend.stopYoloTraining();
     setState(() {
       _trainingStopping = true;
@@ -615,9 +689,7 @@ class _TrainPageState extends State<_TrainPage> {
             metrics: metrics,
           );
           if (existingIndex < 0) {
-            nextPoints.add(
-              nextPoint,
-            );
+            nextPoints.add(nextPoint);
           } else {
             nextPoints[existingIndex] = nextPoint;
           }
@@ -636,11 +708,26 @@ class _TrainPageState extends State<_TrainPage> {
           _trainingInterrupted = progress.status == 'stopped';
           if (progress.status.startsWith('error')) {
             _showTrainingTerminal = true;
+            _log(
+              'TRAIN',
+              'Training failed: ${progress.status}',
+              level: _LogLevel.error,
+            );
+          } else {
+            _log(
+              'TRAIN',
+              'Training finished: ${progress.status} at epoch ${progress.currentEpoch}',
+            );
           }
           _trainingTimer?.cancel();
         }
       });
-    } on Object {
+    } on Object catch (error) {
+      _log(
+        'TRAIN',
+        'Training progress poll failed: $error',
+        level: _LogLevel.warning,
+      );
       final logText = await _readTrainingLogTail(_activeTrainingLogPath);
       if (mounted && _trainingRunning) {
         setState(() => _trainingLogText = logText);
@@ -765,7 +852,10 @@ class _TrainPageState extends State<_TrainPage> {
         _fileName(weightsDir.path).toLowerCase() != 'weights') {
       return null;
     }
-    return _readTrainingDataPath(File('${runDir.path}\\args.yaml'), runDir.path);
+    return _readTrainingDataPath(
+      File('${runDir.path}\\args.yaml'),
+      runDir.path,
+    );
   }
 
   _ResumeTrainingInfo? _detectResumeInfo(String modelPath) {
@@ -795,7 +885,8 @@ class _TrainPageState extends State<_TrainPage> {
     }
     final selectedData = _datasetPath;
     final recordedData = _readTrainingDataPath(argsYaml, runDir.path);
-    final dataMatches = selectedData == null ||
+    final dataMatches =
+        selectedData == null ||
         recordedData == null ||
         _pathKey(selectedData) == _pathKey(recordedData);
     if (!dataMatches) {
@@ -1056,7 +1147,9 @@ class _TrainPageState extends State<_TrainPage> {
                                       )
                                     : _trainingMetricPoints.isNotEmpty
                                     ? _TrainingProgressPanel(
-                                        metrics: _trainingMetrics ?? _trainingMetricPoints.last.metrics,
+                                        metrics:
+                                            _trainingMetrics ??
+                                            _trainingMetricPoints.last.metrics,
                                         colors: _chartColors,
                                         onColorChanged: _setChartColor,
                                         points: _trainingMetricPoints,
@@ -1201,7 +1294,7 @@ List<File> _logFilesByDate() {
     return const [];
   }
   final files = directory
-      .listSync()
+      .listSync(recursive: true)
       .whereType<File>()
       .where((file) => file.path.toLowerCase().endsWith('.log'))
       .toList();
@@ -1216,9 +1309,9 @@ List<File> _logFilesByDate() {
 void _openLogsFolder(Directory directory) {
   directory.createSync(recursive: true);
   if (Platform.isWindows) {
-    Process.start('explorer.exe', [directory.path])
-        .then((_) {})
-        .catchError((_) {});
+    Process.start('explorer.exe', [
+      directory.path,
+    ]).then((_) {}).catchError((_) {});
   }
 }
 
@@ -2009,7 +2102,11 @@ List<_TrainingMetricPoint> _readTrainingMetricPoints(File resultsCsv) {
     }
     final values = _splitTrainingCsvLine(line);
     final map = <String, double>{};
-    for (var index = 0; index < math.min(columns.length, values.length); index += 1) {
+    for (
+      var index = 0;
+      index < math.min(columns.length, values.length);
+      index += 1
+    ) {
       final parsed = double.tryParse(values[index]);
       if (parsed != null) {
         map[columns[index]] = parsed;
@@ -2047,22 +2144,22 @@ _TrainingMetrics _trainingMetricsFromResultsMap(Map<String, double> map) {
   return _TrainingMetrics(
     trainLoss: _trainingCsvValue(map, const ['train/box_loss', 'train/loss']),
     valLoss: _trainingCsvValue(map, const ['val/box_loss', 'val/loss']),
-    map50: _trainingCsvValue(
-      map,
-      const ['metrics/mAP50(B)', 'metrics/mAP_0.5'],
-    ),
-    map5095: _trainingCsvValue(
-      map,
-      const ['metrics/mAP50-95(B)', 'metrics/mAP_0.5:0.95'],
-    ),
-    precision: _trainingCsvValue(
-      map,
-      const ['metrics/precision(B)', 'metrics/precision'],
-    ),
-    recall: _trainingCsvValue(
-      map,
-      const ['metrics/recall(B)', 'metrics/recall'],
-    ),
+    map50: _trainingCsvValue(map, const [
+      'metrics/mAP50(B)',
+      'metrics/mAP_0.5',
+    ]),
+    map5095: _trainingCsvValue(map, const [
+      'metrics/mAP50-95(B)',
+      'metrics/mAP_0.5:0.95',
+    ]),
+    precision: _trainingCsvValue(map, const [
+      'metrics/precision(B)',
+      'metrics/precision',
+    ]),
+    recall: _trainingCsvValue(map, const [
+      'metrics/recall(B)',
+      'metrics/recall',
+    ]),
     lr: _trainingCsvValue(map, const ['lr/pg0', 'lr/0']),
   );
 }
@@ -2234,24 +2331,52 @@ class _TrainingProgressPanel extends StatelessWidget {
 
     List<Widget> chartPanels = [];
     if (lossGroup.isNotEmpty) {
-      chartPanels.add(_metricChart(
-        context, t('train.chartLoss'), lossGroup, minX, maxX, epochInterval,
-      ));
+      chartPanels.add(
+        _metricChart(
+          context,
+          t('train.chartLoss'),
+          lossGroup,
+          minX,
+          maxX,
+          epochInterval,
+        ),
+      );
     }
     if (mapGroup.isNotEmpty) {
-      chartPanels.add(_metricChart(
-        context, t('train.chartMap'), mapGroup, minX, maxX, epochInterval,
-      ));
+      chartPanels.add(
+        _metricChart(
+          context,
+          t('train.chartMap'),
+          mapGroup,
+          minX,
+          maxX,
+          epochInterval,
+        ),
+      );
     }
     if (prGroup.isNotEmpty) {
-      chartPanels.add(_metricChart(
-        context, t('train.chartPr'), prGroup, minX, maxX, epochInterval,
-      ));
+      chartPanels.add(
+        _metricChart(
+          context,
+          t('train.chartPr'),
+          prGroup,
+          minX,
+          maxX,
+          epochInterval,
+        ),
+      );
     }
     if (lrGroup.isNotEmpty) {
-      chartPanels.add(_metricChart(
-        context, t('train.chartLr'), lrGroup, minX, maxX, epochInterval,
-      ));
+      chartPanels.add(
+        _metricChart(
+          context,
+          t('train.chartLr'),
+          lrGroup,
+          minX,
+          maxX,
+          epochInterval,
+        ),
+      );
     }
 
     Color legendColor(String key, int fallback) {
@@ -2266,17 +2391,9 @@ class _TrainingProgressPanel extends StatelessWidget {
           legendColor('Train Loss', 0xFF2563EB),
         ),
       if (lossGroup.any((s) => s.label == 'Val Loss'))
-        (
-          'Val Loss',
-          metrics.valLoss,
-          legendColor('Val Loss', 0xFFDC2626),
-        ),
+        ('Val Loss', metrics.valLoss, legendColor('Val Loss', 0xFFDC2626)),
       if (mapGroup.any((s) => s.label == 'mAP@0.5'))
-        (
-          'mAP@0.5',
-          metrics.map50,
-          legendColor('mAP@0.5', 0xFF16A34A),
-        ),
+        ('mAP@0.5', metrics.map50, legendColor('mAP@0.5', 0xFF16A34A)),
       if (mapGroup.any((s) => s.label == 'mAP@0.5:0.95'))
         (
           'mAP@0.5:0.95',
@@ -2284,23 +2401,10 @@ class _TrainingProgressPanel extends StatelessWidget {
           legendColor('mAP@0.5:0.95', 0xFF9333EA),
         ),
       if (prGroup.any((s) => s.label == 'Precision'))
-        (
-          'Precision',
-          metrics.precision,
-          legendColor('Precision', 0xFFEA580C),
-        ),
+        ('Precision', metrics.precision, legendColor('Precision', 0xFFEA580C)),
       if (prGroup.any((s) => s.label == 'Recall'))
-        (
-          'Recall',
-          metrics.recall,
-          legendColor('Recall', 0xFF0891B2),
-        ),
-      if (lrGroup.isNotEmpty)
-        (
-          'LR',
-          metrics.lr,
-          legendColor('LR', 0xFF64748B),
-        ),
+        ('Recall', metrics.recall, legendColor('Recall', 0xFF0891B2)),
+      if (lrGroup.isNotEmpty) ('LR', metrics.lr, legendColor('LR', 0xFF64748B)),
     ].where((e) => e.$2 != null).toList();
 
     return Padding(
@@ -2308,11 +2412,7 @@ class _TrainingProgressPanel extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(
-            child: ListView(
-              children: chartPanels,
-            ),
-          ),
+          Expanded(child: ListView(children: chartPanels)),
           if (legendItems.isNotEmpty) ...[
             const SizedBox(width: 12),
             SizedBox(
@@ -2335,9 +2435,9 @@ class _TrainingProgressPanel extends StatelessWidget {
                                   color: color,
                                   borderRadius: BorderRadius.circular(2),
                                   border: Border.all(
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onSurfaceVariant,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurfaceVariant,
                                     width: 1,
                                   ),
                                 ),
@@ -2352,9 +2452,7 @@ class _TrainingProgressPanel extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                 fontSize: 12,
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onSurface,
+                                color: Theme.of(context).colorScheme.onSurface,
                               ),
                             ),
                           ),
@@ -2363,9 +2461,9 @@ class _TrainingProgressPanel extends StatelessWidget {
                             style: TextStyle(
                               fontFamily: 'monospace',
                               fontSize: 11,
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurfaceVariant,
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurfaceVariant,
                             ),
                           ),
                         ],
@@ -2397,8 +2495,8 @@ Widget _metricChart(
         Text(
           title,
           style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurface,
-              ),
+            color: Theme.of(context).colorScheme.onSurface,
+          ),
         ),
         const SizedBox(height: 6),
         SizedBox(
@@ -2412,14 +2510,10 @@ Widget _metricChart(
               gridData: FlGridData(
                 show: true,
                 drawVerticalLine: true,
-                getDrawingHorizontalLine: (_) => FlLine(
-                  color: _borderColor(context),
-                  strokeWidth: 1,
-                ),
-                getDrawingVerticalLine: (_) => FlLine(
-                  color: _borderColor(context),
-                  strokeWidth: 1,
-                ),
+                getDrawingHorizontalLine: (_) =>
+                    FlLine(color: _borderColor(context), strokeWidth: 1),
+                getDrawingVerticalLine: (_) =>
+                    FlLine(color: _borderColor(context), strokeWidth: 1),
               ),
               borderData: FlBorderData(
                 show: true,

@@ -8,6 +8,9 @@ use std::slice;
 #[path = "training.rs"]
 pub mod training_mod;
 
+#[path = "IniPython.rs"]
+pub mod ini_python;
+
 #[path = "detecting.rs"]
 pub mod detecting_mod;
 
@@ -200,6 +203,106 @@ pub unsafe extern "C" fn rust_label_detect_model_task_json(
         .and_then(|request| detect_model_task_from_json_request(&request))
         .map(detect_model_task_result_json)
         .unwrap_or_else(error_json);
+    vec_into_ffi_buffer(result.into_bytes())
+}
+
+/// C ABI: inspect a YOLO model and return class names for AI-assisted labeling.
+#[frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn rust_label_ai_model_classes_json(
+    request_ptr: *const u8,
+    request_len: usize,
+) -> RustLabelByteBuffer {
+    let result = string_from_ffi(request_ptr, request_len)
+        .and_then(|request| ai_model_classes_from_json_request(&request))
+        .unwrap_or_else(error_json);
+    vec_into_ffi_buffer(result.into_bytes())
+}
+
+/// C ABI: run YOLO on one image and return raw HBB predictions.
+#[frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn rust_label_ai_annotate_image_json(
+    request_ptr: *const u8,
+    request_len: usize,
+) -> RustLabelByteBuffer {
+    let result = string_from_ffi(request_ptr, request_len)
+        .and_then(|request| ai_annotate_image_from_json_request(&request))
+        .unwrap_or_else(error_json);
+    vec_into_ffi_buffer(result.into_bytes())
+}
+
+/// C ABI: run YOLO on multiple images in one Python process for AI-assisted labeling.
+#[frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn rust_label_ai_annotate_images_json(
+    request_ptr: *const u8,
+    request_len: usize,
+) -> RustLabelByteBuffer {
+    let result = string_from_ffi(request_ptr, request_len)
+        .and_then(|request| ai_annotate_images_from_json_request(&request))
+        .unwrap_or_else(error_json);
+    vec_into_ffi_buffer(result.into_bytes())
+}
+
+/// C ABI: warm up the embedded Python runtime used by training.
+#[frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn rust_label_preload_yolo_python_json(
+    request_ptr: *const u8,
+    request_len: usize,
+) -> RustLabelByteBuffer {
+    let result = string_from_ffi(request_ptr, request_len)
+        .and_then(|request| {
+            let python_path = required_json_string(&request, "pythonPath")?;
+            training_mod::preload_yolo_python(&python_path)
+                .map(|message| format!("{{\"ok\":true,\"message\":\"{}\"}}", json_escape(&message)))
+        })
+        .unwrap_or_else(error_json);
+    vec_into_ffi_buffer(result.into_bytes())
+}
+
+/// C ABI: return the current training log tail for live terminal display.
+#[frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn rust_label_training_log_tail_json(
+    request_ptr: *const u8,
+    request_len: usize,
+) -> RustLabelByteBuffer {
+    let result = string_from_ffi(request_ptr, request_len)
+        .and_then(|request| {
+            let max_chars = json_u32_field(&request, "maxChars").unwrap_or(30 * 1024) as usize;
+            training_mod::training_log_tail(max_chars).map(|(path, text)| {
+                format!(
+                    "{{\"ok\":true,\"path\":\"{}\",\"text\":\"{}\"}}",
+                    json_escape(&path),
+                    json_escape(&text)
+                )
+            })
+        })
+        .unwrap_or_else(error_json);
+    vec_into_ffi_buffer(result.into_bytes())
+}
+
+/// C ABI: stop active Python-backed training/detection work before app exit.
+#[frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn rust_label_shutdown_python_json(
+    _request_ptr: *const u8,
+    _request_len: usize,
+) -> RustLabelByteBuffer {
+    let stop_message = training_mod::shutdown_training(5_000)
+        .unwrap_or_else(|error| format!("training stop failed: {error}"));
+    let killed_children = detecting_mod::shutdown_python_children();
+    let python_message = ini_python::shutdown_python_runtime()
+        .map(|_| "python runtime workers stopped".to_string())
+        .unwrap_or_else(|error| format!("python runtime worker stop failed: {error}"));
+    let result = format!(
+        "{{\"ok\":true,\"message\":\"{}\",\"pythonMessage\":\"{}\",\"killedChildren\":{}}}",
+        json_escape(&stop_message),
+        json_escape(&python_message),
+        killed_children
+    );
     vec_into_ffi_buffer(result.into_bytes())
 }
 
@@ -767,6 +870,40 @@ fn detect_model_task_from_json_request(
     Ok(detecting_mod::detect_model_task(&python_path, &model_path))
 }
 
+fn ai_model_classes_from_json_request(request: &str) -> Result<String, String> {
+    let python_path = required_json_string(request, "pythonPath")?;
+    let model_path = required_json_string(request, "modelPath")?;
+    detecting_mod::ai_model_classes_json(&python_path, &model_path)
+}
+
+fn ai_annotate_image_from_json_request(request: &str) -> Result<String, String> {
+    let req = detecting_mod::AiAnnotateImageRequest {
+        python_path: required_json_string(request, "pythonPath")?,
+        model_path: required_json_string(request, "modelPath")?,
+        input_path: required_json_string(request, "inputPath")?,
+        class_ids_csv: json_string_field(request, "classIdsCsv").unwrap_or_default(),
+        conf_threshold: json_f64_field(request, "confThreshold").unwrap_or(0.25),
+        iou_threshold: json_f64_field(request, "iouThreshold").unwrap_or(0.45),
+        imgsz: json_u32_field(request, "imgsz").unwrap_or(640),
+        device: json_string_field(request, "device").unwrap_or_else(|| "auto".to_string()),
+    };
+    detecting_mod::ai_annotate_image_json(&req)
+}
+
+fn ai_annotate_images_from_json_request(request: &str) -> Result<String, String> {
+    let req = detecting_mod::AiAnnotateBatchRequest {
+        python_path: required_json_string(request, "pythonPath")?,
+        model_path: required_json_string(request, "modelPath")?,
+        input_paths_text: required_json_string(request, "inputPathsText")?,
+        class_ids_csv: json_string_field(request, "classIdsCsv").unwrap_or_default(),
+        conf_threshold: json_f64_field(request, "confThreshold").unwrap_or(0.25),
+        iou_threshold: json_f64_field(request, "iouThreshold").unwrap_or(0.45),
+        imgsz: json_u32_field(request, "imgsz").unwrap_or(640),
+        device: json_string_field(request, "device").unwrap_or_else(|| "auto".to_string()),
+    };
+    detecting_mod::ai_annotate_images_json(&req)
+}
+
 fn detect_from_json_request(request: &str) -> Result<detecting_mod::DetectResult, String> {
     let mode = json_string_field(request, "mode").unwrap_or_else(|| "image".to_string());
     let python_path = required_json_string(request, "pythonPath")?;
@@ -988,9 +1125,9 @@ fn jpeg_quality_to_qscale(image_quality: u8) -> String {
     qscale.clamp(2, 31).to_string()
 }
 
-/// Start a YOLO training run via Python/Ultralytics.
+/// Start a YOLO training run through the embedded PyO3 Python runtime.
 ///
-/// Spawns a Python subprocess that runs `model.train(...)`.
+/// Runs Ultralytics `model.train(...)` on a background Rust thread.
 /// Returns the experiment run directory path on success.
 #[frb]
 pub fn start_yolo_training(

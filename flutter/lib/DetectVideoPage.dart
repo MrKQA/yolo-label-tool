@@ -180,6 +180,7 @@ class _DetectVideoSession extends ChangeNotifier {
     if (file == null) {
       return;
     }
+    _log('BROWSE', 'Media file selected: ${file.path}');
     await selectInput(file.path, newFolderItems: const []);
   }
 
@@ -189,6 +190,11 @@ class _DetectVideoSession extends ChangeNotifier {
       return;
     }
     final items = _mediaFilesInDirectory(folder);
+    _log(
+      'BROWSE',
+      'Media folder selected: $folder, items=${items.length}',
+      level: items.isEmpty ? _LogLevel.warning : _LogLevel.info,
+    );
     await selectInput(
       items.isEmpty ? folder : items.first,
       newFolderItems: items,
@@ -208,6 +214,11 @@ class _DetectVideoSession extends ChangeNotifier {
     if (showPreviewPanel) {
       previewPanelVisible = true;
     }
+    _log(
+      'BROWSE',
+      'Selected input changed: $path, folderItems=${folderItems.length}',
+      level: _LogLevel.debug,
+    );
     selectedInput = path;
     showPredictionResult = true;
     predictionOutputPath = _cachedPredictionOutput(path);
@@ -274,6 +285,7 @@ class _DetectVideoSession extends ChangeNotifier {
     }
 
     final requestSerial = ++_loadSerial;
+    _log('BROWSE', 'Video load started: $input', level: _LogLevel.debug);
     videoLoading = true;
     videoStatus = t('detect.loadingVideo');
     playbackSpeed = 1;
@@ -328,6 +340,10 @@ class _DetectVideoSession extends ChangeNotifier {
         metadata: videoInfo,
         metadataError: metadataError,
       );
+      _log(
+        'BROWSE',
+        'Video load completed: $input, size=${size.width.toStringAsFixed(0)}x${size.height.toStringAsFixed(0)}, duration=${durationSeconds.toStringAsFixed(2)}s',
+      );
       _emit();
     } on Object catch (error) {
       if (_disposed || requestSerial != _loadSerial) {
@@ -340,6 +356,11 @@ class _DetectVideoSession extends ChangeNotifier {
       _controllerPath = null;
       videoInfo = null;
       videoStatus = '${t('detect.decodeFailed')}: $error';
+      _log(
+        'BROWSE',
+        'Video load failed: $input, error=$error',
+        level: _LogLevel.error,
+      );
       _emit();
     }
   }
@@ -896,6 +917,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
     if (model == null) {
       return;
     }
+    _log('DETECT', 'Detect model selected: $model');
     _session.detectModelPath = model;
     _session.clearPredictionEffects();
     await _session._resetVideoController();
@@ -936,27 +958,54 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
     bool allImages = false,
   }) async {
     if (_session.predicting) {
+      _log(
+        'DETECT',
+        'Detection request ignored: prediction is already running',
+        level: _LogLevel.warning,
+      );
       return;
     }
     _applyConfText();
     final input = _session.selectedInput;
     if (input == null) {
+      _log(
+        'DETECT',
+        'Detection request blocked: no selected input',
+        level: _LogLevel.warning,
+      );
       return;
     }
     final pythonPath = widget.settings.pythonPath.trim();
     if (pythonPath.isEmpty) {
+      _log(
+        'DETECT',
+        'Detection request blocked: Python path is empty',
+        level: _LogLevel.warning,
+      );
       _showDetectMessage(t('detect.pythonNotConfigured'));
       return;
     }
     await _ensureDetectModel();
     final modelPath = _session.detectModelPath;
-    if (modelPath == null) return;
+    if (modelPath == null) {
+      _log(
+        'DETECT',
+        'Detection request blocked: no model selected',
+        level: _LogLevel.warning,
+      );
+      return;
+    }
     final targets = _detectionTargets(
       input,
       currentOnly: currentOnly,
       allImages: allImages,
     );
     if (targets.isEmpty) {
+      _log(
+        'DETECT',
+        'Detection request blocked: no image targets for input=$input',
+        level: _LogLevel.warning,
+      );
       _showDetectMessage(t('detect.noImageTargets'));
       return;
     }
@@ -976,6 +1025,10 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
         save: save,
         modelPath: modelPath,
         pythonPath: pythonPath,
+      );
+      _log(
+        'DETECT',
+        'Detection started: save=$save, currentOnly=$currentOnly, allImages=$allImages, targets=${targets.length}, model=${_fileName(modelPath)}, device=${_session.detectDevice}, imgsz=${_session.detectImageSize}, conf=${_session.detectConf.toStringAsFixed(2)}, outputDir=$outputDir, startFrame=$startFrame',
       );
       for (final target in targets) {
         if (!mounted) {
@@ -1026,11 +1079,21 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
         if (!result.ok) {
           final error = result.error ?? t('detect.detectFailed');
           _session.videoStatus = '${t('detect.detectFailed')}: $error';
+          _log(
+            'DETECT',
+            'Detection target failed: target=$target, error=$error',
+            level: _LogLevel.error,
+          );
           _showDetectMessage(_session.videoStatus!);
           return;
         }
         completed += 1;
         totalLabels += result.labelCount;
+        _log(
+          'DETECT',
+          'Detection target completed: target=$target, labels=${result.labelCount}, output=${result.outputPath}',
+          level: _LogLevel.debug,
+        );
         _session.cachePredictionOutputForInput(target, result.outputPath);
         if (_pathKey(target) == _pathKey(_session.selectedInput ?? '')) {
           _session.predictVideo = isVideo;
@@ -1042,6 +1105,14 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
           '${save ? t('detect.saveDone') : t('detect.detectDone')} '
           '${targets.length}/${targets.length} '
           '(${t('detect.detectCount')}: $totalLabels)';
+      _log(
+        'DETECT',
+        'Detection completed: save=$save, targets=${targets.length}, labels=$totalLabels',
+      );
+      _showDetectMessage(_session.videoStatus!);
+    } on Object catch (error) {
+      _log('DETECT', 'Detection failed: $error', level: _LogLevel.error);
+      _session.videoStatus = '${t('detect.detectFailed')}: $error';
       _showDetectMessage(_session.videoStatus!);
     } finally {
       if (mounted) {
@@ -1180,7 +1251,13 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
     }
     try {
       File(path).writeAsStringSync('cancel');
+      _log('DETECT', 'Prediction cancellation requested: $path');
     } on Object catch (error) {
+      _log(
+        'DETECT',
+        'Prediction cancellation failed: $path, error=$error',
+        level: _LogLevel.error,
+      );
       _showDetectMessage('${t('detect.detectFailed')}: $error');
     }
   }
@@ -1191,6 +1268,11 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
       return;
     }
     final targetFrame = math.max(0, frameNumber);
+    _log(
+      'DETECT',
+      'Prediction seek requested: frame=$targetFrame, predicting=${_session.predicting}',
+      level: _LogLevel.debug,
+    );
     if (_session.predicting) {
       _pendingPredictionStartFrame = targetFrame;
       _cancelActivePrediction();

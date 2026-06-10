@@ -1,3 +1,12 @@
+// =============================================================================
+// CropPage.dart - Video Frame Extraction / 视频取帧裁剪
+// =============================================================================
+// Batch video frame extraction via FFmpeg with hardware decoding,
+// progress tracking, and configurable output format/quality.
+//
+// 通过 FFmpeg 批量提取视频帧：硬件解码、进度跟踪、可配置输出格式与画质。
+// =============================================================================
+
 // ignore_for_file: file_names
 
 part of 'main.dart';

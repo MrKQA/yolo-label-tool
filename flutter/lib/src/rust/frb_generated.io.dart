@@ -86,19 +86,27 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   double sse_decode_box_autoadd_f_64(SseDeserializer deserializer);
 
   @protected
-  TrainingConfig sse_decode_box_autoadd_training_config(SseDeserializer deserializer);
+  TrainingConfig sse_decode_box_autoadd_training_config(
+    SseDeserializer deserializer,
+  );
 
   @protected
-  TrainingProgress sse_decode_box_autoadd_training_progress(SseDeserializer deserializer);
+  TrainingProgress sse_decode_box_autoadd_training_progress(
+    SseDeserializer deserializer,
+  );
 
   @protected
-  DecodedVideoFrame sse_decode_decoded_video_frame(SseDeserializer deserializer);
+  DecodedVideoFrame sse_decode_decoded_video_frame(
+    SseDeserializer deserializer,
+  );
 
   @protected
   double sse_decode_f_64(SseDeserializer deserializer);
 
   @protected
-  FrameExtractionResult sse_decode_frame_extraction_result(SseDeserializer deserializer);
+  FrameExtractionResult sse_decode_frame_extraction_result(
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
@@ -113,7 +121,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   double? sse_decode_opt_box_autoadd_f_64(SseDeserializer deserializer);
 
   @protected
-  TrainingProgress? sse_decode_opt_box_autoadd_training_progress(SseDeserializer deserializer);
+  TrainingProgress? sse_decode_opt_box_autoadd_training_progress(
+    SseDeserializer deserializer,
+  );
 
   @protected
   TrainingConfig sse_decode_training_config(SseDeserializer deserializer);
@@ -131,7 +141,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_decode_unit(SseDeserializer deserializer);
 
   @protected
-  VideoPlaybackInfo sse_decode_video_playback_info(SseDeserializer deserializer);
+  VideoPlaybackInfo sse_decode_video_playback_info(
+    SseDeserializer deserializer,
+  );
 
   @protected
   int sse_decode_i_32(SseDeserializer deserializer);
@@ -146,25 +158,40 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_box_autoadd_f_64(double self, SseSerializer serializer);
 
   @protected
-  void sse_encode_box_autoadd_training_config(TrainingConfig self, SseSerializer serializer);
+  void sse_encode_box_autoadd_training_config(
+    TrainingConfig self,
+    SseSerializer serializer,
+  );
 
   @protected
-  void sse_encode_box_autoadd_training_progress(TrainingProgress self, SseSerializer serializer);
+  void sse_encode_box_autoadd_training_progress(
+    TrainingProgress self,
+    SseSerializer serializer,
+  );
 
   @protected
-  void sse_encode_decoded_video_frame(DecodedVideoFrame self, SseSerializer serializer);
+  void sse_encode_decoded_video_frame(
+    DecodedVideoFrame self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_f_64(double self, SseSerializer serializer);
 
   @protected
-  void sse_encode_frame_extraction_result(FrameExtractionResult self, SseSerializer serializer);
+  void sse_encode_frame_extraction_result(
+    FrameExtractionResult self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
 
   @protected
-  void sse_encode_list_prim_u_8_strict(Uint8List self, SseSerializer serializer);
+  void sse_encode_list_prim_u_8_strict(
+    Uint8List self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
@@ -179,10 +206,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_training_config(TrainingConfig self, SseSerializer serializer);
+  void sse_encode_training_config(
+    TrainingConfig self,
+    SseSerializer serializer,
+  );
 
   @protected
-  void sse_encode_training_progress(TrainingProgress self, SseSerializer serializer);
+  void sse_encode_training_progress(
+    TrainingProgress self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_u_32(int self, SseSerializer serializer);
@@ -194,7 +227,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_unit(void self, SseSerializer serializer);
 
   @protected
-  void sse_encode_video_playback_info(VideoPlaybackInfo self, SseSerializer serializer);
+  void sse_encode_video_playback_info(
+    VideoPlaybackInfo self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_i_32(int self, SseSerializer serializer);
@@ -207,8 +243,10 @@ class RustLibWire implements BaseWire {
       RustLibWire(lib.ffiDynamicLibrary);
 
   /// Holds the symbol lookup function.
-  final ffi.Pointer<T> Function<T extends ffi.NativeType>(String symbolName) _lookup;
+  final ffi.Pointer<T> Function<T extends ffi.NativeType>(String symbolName)
+  _lookup;
 
   /// The symbols are looked up in [dynamicLibrary].
-  RustLibWire(ffi.DynamicLibrary dynamicLibrary) : _lookup = dynamicLibrary.lookup;
+  RustLibWire(ffi.DynamicLibrary dynamicLibrary)
+    : _lookup = dynamicLibrary.lookup;
 }

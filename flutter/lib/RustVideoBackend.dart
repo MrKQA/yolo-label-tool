@@ -67,6 +67,18 @@ class _RustVideoBackend {
   static Future<String> stopYoloTraining() =>
       RustLib.instance.api.crateApiStopYoloTraining();
 
+  static Future<String> trainingLogTail({int maxChars = 30 * 1024}) {
+    return Isolate.run(() => _trainingLogTailSync(maxChars: maxChars));
+  }
+
+  static Future<void> shutdownPython() {
+    return Isolate.run(_shutdownPythonSync);
+  }
+
+  static Future<void> preloadYoloPython({required String pythonPath}) {
+    return Isolate.run(() => _preloadYoloPythonSync(pythonPath: pythonPath));
+  }
+
   static Future<Uint8List> decodeFrame({
     required String videoPath,
     required double timestampSeconds,
@@ -121,6 +133,63 @@ class _RustVideoBackend {
   }) {
     return Isolate.run(
       () => _detectModelTaskSync(pythonPath: pythonPath, modelPath: modelPath),
+    );
+  }
+
+  static Future<_AiModelClassesResult> aiModelClasses({
+    required String pythonPath,
+    required String modelPath,
+  }) {
+    return Isolate.run(
+      () => _aiModelClassesSync(pythonPath: pythonPath, modelPath: modelPath),
+    );
+  }
+
+  static Future<_AiAnnotationResult> aiAnnotateImage({
+    required String pythonPath,
+    required String modelPath,
+    required String inputPath,
+    required List<int> classIds,
+    required double confThreshold,
+    required double iouThreshold,
+    required int imgsz,
+    required String device,
+  }) {
+    return Isolate.run(
+      () => _aiAnnotateImageSync(
+        pythonPath: pythonPath,
+        modelPath: modelPath,
+        inputPath: inputPath,
+        classIds: classIds,
+        confThreshold: confThreshold,
+        iouThreshold: iouThreshold,
+        imgsz: imgsz,
+        device: device,
+      ),
+    );
+  }
+
+  static Future<List<_AiAnnotationResult>> aiAnnotateImages({
+    required String pythonPath,
+    required String modelPath,
+    required List<String> inputPaths,
+    required List<int> classIds,
+    required double confThreshold,
+    required double iouThreshold,
+    required int imgsz,
+    required String device,
+  }) {
+    return Isolate.run(
+      () => _aiAnnotateImagesSync(
+        pythonPath: pythonPath,
+        modelPath: modelPath,
+        inputPaths: inputPaths,
+        classIds: classIds,
+        confThreshold: confThreshold,
+        iouThreshold: iouThreshold,
+        imgsz: imgsz,
+        device: device,
+      ),
     );
   }
 
@@ -256,6 +325,249 @@ class _RustVideoBackend {
       bindings.allocator.free(requestPtr);
     }
   }
+
+  static void _preloadYoloPythonSync({required String pythonPath}) {
+    if (pythonPath.trim().isEmpty) {
+      return;
+    }
+    final bindings = _RustVideoBindings.open();
+    final request = jsonEncode({'pythonPath': pythonPath});
+    final requestBytes = Uint8List.fromList(utf8.encode(request));
+    final requestPtr = bindings.allocator.allocate(requestBytes);
+    try {
+      final buffer = bindings.preloadYoloPythonJson(
+        requestPtr,
+        requestBytes.length,
+      );
+      final jsonText = bindings.takeUtf8(buffer);
+      final decoded = jsonDecode(jsonText);
+      if (decoded is Map && decoded['ok'] == true) {
+        return;
+      }
+      throw StateError('${decoded is Map ? decoded['error'] : jsonText}');
+    } finally {
+      bindings.allocator.free(requestPtr);
+    }
+  }
+
+  static String _trainingLogTailSync({required int maxChars}) {
+    final bindings = _RustVideoBindings.open();
+    final request = jsonEncode({'maxChars': maxChars});
+    final requestBytes = Uint8List.fromList(utf8.encode(request));
+    final requestPtr = bindings.allocator.allocate(requestBytes);
+    try {
+      final buffer = bindings.trainingLogTailJson(
+        requestPtr,
+        requestBytes.length,
+      );
+      final jsonText = bindings.takeUtf8(buffer);
+      final decoded = jsonDecode(jsonText);
+      if (decoded is Map && decoded['ok'] == true) {
+        return '${decoded['text'] ?? ''}';
+      }
+      throw StateError('${decoded is Map ? decoded['error'] : jsonText}');
+    } finally {
+      bindings.allocator.free(requestPtr);
+    }
+  }
+
+  static void _shutdownPythonSync() {
+    final bindings = _RustVideoBindings.open();
+    final requestBytes = Uint8List(0);
+    final requestPtr = bindings.allocator.allocate(requestBytes);
+    try {
+      final buffer = bindings.shutdownPythonJson(
+        requestPtr,
+        requestBytes.length,
+      );
+      final jsonText = bindings.takeUtf8(buffer);
+      final decoded = jsonDecode(jsonText);
+      if (decoded is Map && decoded['ok'] == true) {
+        return;
+      }
+      throw StateError('${decoded is Map ? decoded['error'] : jsonText}');
+    } finally {
+      bindings.allocator.free(requestPtr);
+    }
+  }
+
+  static _AiModelClassesResult _aiModelClassesSync({
+    required String pythonPath,
+    required String modelPath,
+  }) {
+    final bindings = _RustVideoBindings.open();
+    final request = jsonEncode({
+      'pythonPath': pythonPath,
+      'modelPath': modelPath,
+    });
+    final requestBytes = Uint8List.fromList(utf8.encode(request));
+    final requestPtr = bindings.allocator.allocate(requestBytes);
+    try {
+      final buffer = bindings.aiModelClassesJson(
+        requestPtr,
+        requestBytes.length,
+      );
+      final jsonText = bindings.takeUtf8(buffer);
+      final decoded = jsonDecode(jsonText);
+      if (decoded is! Map<String, dynamic>) {
+        throw StateError('Invalid AI model classes response');
+      }
+      if (decoded['ok'] != true) {
+        throw StateError('${decoded['error'] ?? 'Failed to read classes'}');
+      }
+      final classes = <_AiModelClass>[];
+      final rawClasses = decoded['classes'];
+      if (rawClasses is List) {
+        for (final item in rawClasses) {
+          if (item is Map) {
+            classes.add(
+              _AiModelClass(
+                id: (item['id'] as num?)?.toInt() ?? classes.length,
+                name: '${item['name'] ?? 'class_${classes.length}'}',
+              ),
+            );
+          }
+        }
+      }
+      return _AiModelClassesResult(
+        task: '${decoded['task'] ?? 'detect'}',
+        classes: classes,
+      );
+    } finally {
+      bindings.allocator.free(requestPtr);
+    }
+  }
+
+  static _AiAnnotationResult _aiAnnotateImageSync({
+    required String pythonPath,
+    required String modelPath,
+    required String inputPath,
+    required List<int> classIds,
+    required double confThreshold,
+    required double iouThreshold,
+    required int imgsz,
+    required String device,
+  }) {
+    final bindings = _RustVideoBindings.open();
+    final request = jsonEncode({
+      'pythonPath': pythonPath,
+      'modelPath': modelPath,
+      'inputPath': inputPath,
+      'classIdsCsv': classIds.join(','),
+      'confThreshold': confThreshold,
+      'iouThreshold': iouThreshold,
+      'imgsz': imgsz,
+      'device': device,
+    });
+    final requestBytes = Uint8List.fromList(utf8.encode(request));
+    final requestPtr = bindings.allocator.allocate(requestBytes);
+    try {
+      final buffer = bindings.aiAnnotateImageJson(
+        requestPtr,
+        requestBytes.length,
+      );
+      final jsonText = bindings.takeUtf8(buffer);
+      final decoded = jsonDecode(jsonText);
+      if (decoded is! Map<String, dynamic>) {
+        throw StateError('Invalid AI annotation response');
+      }
+      if (decoded['ok'] != true) {
+        throw StateError('${decoded['error'] ?? 'AI annotation failed'}');
+      }
+      return _AiAnnotationResult(
+        inputPath: inputPath,
+        width: (decoded['width'] as num?)?.toDouble() ?? 0,
+        height: (decoded['height'] as num?)?.toDouble() ?? 0,
+        boxes: _parseAiPredictionBoxes(decoded['boxes']),
+      );
+    } finally {
+      bindings.allocator.free(requestPtr);
+    }
+  }
+
+  static List<_AiAnnotationResult> _aiAnnotateImagesSync({
+    required String pythonPath,
+    required String modelPath,
+    required List<String> inputPaths,
+    required List<int> classIds,
+    required double confThreshold,
+    required double iouThreshold,
+    required int imgsz,
+    required String device,
+  }) {
+    final bindings = _RustVideoBindings.open();
+    final request = jsonEncode({
+      'pythonPath': pythonPath,
+      'modelPath': modelPath,
+      'inputPathsText': inputPaths.join('\n'),
+      'classIdsCsv': classIds.join(','),
+      'confThreshold': confThreshold,
+      'iouThreshold': iouThreshold,
+      'imgsz': imgsz,
+      'device': device,
+    });
+    final requestBytes = Uint8List.fromList(utf8.encode(request));
+    final requestPtr = bindings.allocator.allocate(requestBytes);
+    try {
+      final buffer = bindings.aiAnnotateImagesJson(
+        requestPtr,
+        requestBytes.length,
+      );
+      final jsonText = bindings.takeUtf8(buffer);
+      final decoded = jsonDecode(jsonText);
+      if (decoded is! Map<String, dynamic>) {
+        throw StateError('Invalid AI batch annotation response');
+      }
+      if (decoded['ok'] != true) {
+        throw StateError('${decoded['error'] ?? 'AI batch annotation failed'}');
+      }
+      final results = <_AiAnnotationResult>[];
+      final rawImages = decoded['images'];
+      if (rawImages is List) {
+        for (var index = 0; index < rawImages.length; index++) {
+          final item = rawImages[index];
+          if (item is Map) {
+            results.add(
+              _AiAnnotationResult(
+                inputPath:
+                    '${item['inputPath'] ?? (index < inputPaths.length ? inputPaths[index] : '')}',
+                width: (item['width'] as num?)?.toDouble() ?? 0,
+                height: (item['height'] as num?)?.toDouble() ?? 0,
+                boxes: _parseAiPredictionBoxes(item['boxes']),
+              ),
+            );
+          }
+        }
+      }
+      return results;
+    } finally {
+      bindings.allocator.free(requestPtr);
+    }
+  }
+
+  static List<_AiPredictionBox> _parseAiPredictionBoxes(Object? rawBoxes) {
+    final boxes = <_AiPredictionBox>[];
+    if (rawBoxes is List) {
+      for (final item in rawBoxes) {
+        if (item is Map) {
+          boxes.add(
+            _AiPredictionBox(
+              classId: (item['classId'] as num?)?.toInt() ?? 0,
+              className: '${item['className'] ?? 'class'}',
+              confidence: (item['confidence'] as num?)?.toDouble() ?? 0,
+              rect: Rect.fromLTRB(
+                (item['left'] as num?)?.toDouble() ?? 0,
+                (item['top'] as num?)?.toDouble() ?? 0,
+                (item['right'] as num?)?.toDouble() ?? 0,
+                (item['bottom'] as num?)?.toDouble() ?? 0,
+              ),
+            ),
+          );
+        }
+      }
+    }
+    return boxes;
+  }
 }
 
 class _DetectResult {
@@ -284,6 +596,48 @@ class _DetectModelTaskResult {
   final String task;
   final String folder;
   final String? error;
+}
+
+class _AiModelClass {
+  const _AiModelClass({required this.id, required this.name});
+
+  final int id;
+  final String name;
+}
+
+class _AiModelClassesResult {
+  const _AiModelClassesResult({required this.task, required this.classes});
+
+  final String task;
+  final List<_AiModelClass> classes;
+}
+
+class _AiPredictionBox {
+  const _AiPredictionBox({
+    required this.classId,
+    required this.className,
+    required this.confidence,
+    required this.rect,
+  });
+
+  final int classId;
+  final String className;
+  final double confidence;
+  final Rect rect;
+}
+
+class _AiAnnotationResult {
+  const _AiAnnotationResult({
+    required this.inputPath,
+    required this.width,
+    required this.height,
+    required this.boxes,
+  });
+
+  final String inputPath;
+  final double width;
+  final double height;
+  final List<_AiPredictionBox> boxes;
 }
 
 class _RustVideoInfo {
@@ -349,6 +703,30 @@ typedef _DetectModelTaskJsonNative =
     _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
 typedef _DetectModelTaskJsonDart =
     _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+typedef _AiModelClassesJsonNative =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef _AiModelClassesJsonDart =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+typedef _AiAnnotateImageJsonNative =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef _AiAnnotateImageJsonDart =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+typedef _AiAnnotateImagesJsonNative =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef _AiAnnotateImagesJsonDart =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+typedef _PreloadYoloPythonJsonNative =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef _PreloadYoloPythonJsonDart =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+typedef _TrainingLogTailJsonNative =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef _TrainingLogTailJsonDart =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+typedef _ShutdownPythonJsonNative =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef _ShutdownPythonJsonDart =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 
 typedef _FreeByteBufferNative = ffi.Void Function(_RustVideoByteBuffer);
 typedef _FreeByteBufferDart = void Function(_RustVideoByteBuffer);
@@ -371,6 +749,32 @@ class _RustVideoBindings {
           .lookupFunction<_DetectModelTaskJsonNative, _DetectModelTaskJsonDart>(
             'rust_label_detect_model_task_json',
           ),
+      aiModelClassesJson = library
+          .lookupFunction<_AiModelClassesJsonNative, _AiModelClassesJsonDart>(
+            'rust_label_ai_model_classes_json',
+          ),
+      aiAnnotateImageJson = library
+          .lookupFunction<_AiAnnotateImageJsonNative, _AiAnnotateImageJsonDart>(
+            'rust_label_ai_annotate_image_json',
+          ),
+      aiAnnotateImagesJson = library
+          .lookupFunction<
+            _AiAnnotateImagesJsonNative,
+            _AiAnnotateImagesJsonDart
+          >('rust_label_ai_annotate_images_json'),
+      preloadYoloPythonJson = library
+          .lookupFunction<
+            _PreloadYoloPythonJsonNative,
+            _PreloadYoloPythonJsonDart
+          >('rust_label_preload_yolo_python_json'),
+      trainingLogTailJson = library
+          .lookupFunction<_TrainingLogTailJsonNative, _TrainingLogTailJsonDart>(
+            'rust_label_training_log_tail_json',
+          ),
+      shutdownPythonJson = library
+          .lookupFunction<_ShutdownPythonJsonNative, _ShutdownPythonJsonDart>(
+            'rust_label_shutdown_python_json',
+          ),
       _freeByteBuffer = library
           .lookupFunction<_FreeByteBufferNative, _FreeByteBufferDart>(
             'rust_label_free_byte_buffer',
@@ -381,6 +785,12 @@ class _RustVideoBindings {
   final _DecodeVideoFrameDart decodeVideoFramePng;
   final _DetectJsonDart detectJson;
   final _DetectModelTaskJsonDart detectModelTaskJson;
+  final _AiModelClassesJsonDart aiModelClassesJson;
+  final _AiAnnotateImageJsonDart aiAnnotateImageJson;
+  final _AiAnnotateImagesJsonDart aiAnnotateImagesJson;
+  final _PreloadYoloPythonJsonDart preloadYoloPythonJson;
+  final _TrainingLogTailJsonDart trainingLogTailJson;
+  final _ShutdownPythonJsonDart shutdownPythonJson;
   final _FreeByteBufferDart _freeByteBuffer;
 
   static _RustVideoBindings open() {

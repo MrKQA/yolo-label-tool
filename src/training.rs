@@ -5,8 +5,9 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::thread::{self, JoinHandle};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use super::ini_python;
 use once_cell::sync::Lazy;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -19,11 +20,12 @@ static ACTIVE_ERROR: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None)
 static ACTIVE_TOTAL_EPOCHS: Lazy<Mutex<u32>> = Lazy::new(|| Mutex::new(0));
 static ACTIVE_STARTED_AT: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
 static ACTIVE_LOG_PATH: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
-static PYTHON_RUNTIME_HOME: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
+static ACTIVE_LAST_LOG_HEARTBEAT: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
 
 const TRAINING_CODE: &str = r#"
 import os
 import sys
+import time
 
 class _RustLabelTee:
     def __init__(self, original, sink):
@@ -82,6 +84,18 @@ print(f"[rustlabel] data_yaml_path={data_yaml_path}")
 print(f"[rustlabel] project_dir={project_dir}")
 print(f"[rustlabel] experiment_name={experiment_name}")
 print(f"[rustlabel] epochs={epochs}, imgsz={imgsz}, batch={batch}, device={device}, resume={resume}")
+print(
+    "[rustlabel] train params: "
+    f"workers={workers}, amp={amp}, cls_pw={cls_pw}, "
+    f"lr0={lr0}, momentum={momentum}"
+)
+print(
+    "[rustlabel] augment params: "
+    f"hsv_s={hsv_s}, hsv_v={hsv_v}, translate={translate}, "
+    f"scale={scale}, shear={shear}, flipud={flipud}, fliplr={fliplr}, degrees={degrees}"
+)
+print("[rustlabel] loss names: detect/obb => box, cls, dfl; seg => box, seg, cls, dfl; pose => box, pose, kobj, cls, dfl")
+print("[rustlabel] progress format: epoch=... gpu=... box=..., cls=..., dfl=... batch=... size=... progress step=... speed=... elapsed=... eta=...")
 
 site_candidates = [
     os.path.join(python_root, "Lib", "site-packages"),
@@ -137,6 +151,38 @@ print("[rustlabel] importing ultralytics.YOLO")
 from ultralytics import YOLO
 print("[rustlabel] ultralytics import complete")
 
+_rustlabel_last_progress_log = 0.0
+_rustlabel_batch_index = 0
+_rustlabel_epoch_started_at = 0.0
+_rustlabel_args_cache = None
+
+def _rustlabel_log(message):
+    print(f"[rustlabel] {message}", flush=True)
+
+def _rustlabel_run_dir():
+    if resume:
+        weights_dir = os.path.dirname(model_path)
+        if os.path.basename(weights_dir).lower() == "weights":
+            return os.path.dirname(weights_dir)
+    return os.path.join(project_dir, experiment_name)
+
+def _rustlabel_args_yaml_value(key):
+    global _rustlabel_args_cache
+    if _rustlabel_args_cache is None:
+        _rustlabel_args_cache = {}
+        args_path = os.path.join(_rustlabel_run_dir(), "args.yaml")
+        try:
+            with open(args_path, "r", encoding="utf-8") as file:
+                for raw_line in file:
+                    line = raw_line.split(chr(35), 1)[0].strip()
+                    if not line or ":" not in line:
+                        continue
+                    item_key, item_value = line.split(":", 1)
+                    _rustlabel_args_cache[item_key.strip()] = item_value.strip().strip("'\"")
+        except Exception:
+            pass
+    return _rustlabel_args_cache.get(key)
+
 def _parse_batch(value):
     text = str(value).strip()
     try:
@@ -150,14 +196,363 @@ def _rustlabel_stop_callback(trainer):
     if os.path.exists(stop_file):
         raise KeyboardInterrupt("Training stopped by RustLabel")
 
+def _rustlabel_model_task():
+    try:
+        return str(getattr(model, "task", "") or "").lower()
+    except Exception:
+        return ""
+
+def _rustlabel_loss_names(values):
+    task = _rustlabel_model_task()
+    if len(values) == 3:
+        return ["box", "cls", "dfl"]
+    if len(values) == 4:
+        if task in ("segment", "seg"):
+            return ["box", "seg", "cls", "dfl"]
+        return ["box", "cls", "dfl", "extra"]
+    if len(values) == 5 and task == "pose":
+        return ["box", "pose", "kobj", "cls", "dfl"]
+    return [f"loss{i + 1}" for i in range(len(values))]
+
+def _rustlabel_loss_text(trainer):
+    try:
+        loss = getattr(trainer, "tloss", None)
+        if loss is None:
+            return ""
+        if hasattr(loss, "detach"):
+            loss = loss.detach().cpu().tolist()
+        if isinstance(loss, (list, tuple)):
+            values = [float(item) for item in loss]
+            names = _rustlabel_loss_names(values)
+            pairs = ", ".join(
+                f"{name}={value:.4f}" for name, value in zip(names, values)
+            )
+            return f" loss({pairs})"
+        return f" loss(total={float(loss):.4f})"
+    except Exception:
+        return ""
+
+def _rustlabel_loss_named_text(trainer):
+    values = _rustlabel_loss_values(trainer)
+    if not values:
+        return "loss=unknown"
+    names = _rustlabel_loss_names(values)
+    return ", ".join(
+        f"{name}={value:.4f}" for name, value in zip(names, values)
+    )
+
+def _rustlabel_loss_values(trainer):
+    try:
+        loss = getattr(trainer, "tloss", None)
+        if loss is None:
+            return []
+        if hasattr(loss, "detach"):
+            loss = loss.detach().cpu().tolist()
+        if isinstance(loss, (list, tuple)):
+            return [float(item) for item in loss]
+        return [float(loss)]
+    except Exception:
+        return []
+
+def _rustlabel_epoch_text(trainer):
+    epoch = getattr(trainer, "epoch", None)
+    epochs = getattr(trainer, "epochs", None)
+    if isinstance(epoch, int) and isinstance(epochs, int):
+        return f"{epoch + 1}/{epochs}"
+    if isinstance(epoch, int):
+        return str(epoch + 1)
+    return "?"
+
+def _rustlabel_batch_text(trainer):
+    try:
+        batch_i = getattr(trainer, "batch_i", None)
+        loader = getattr(trainer, "train_loader", None)
+        total = len(loader) if loader is not None else None
+        index = batch_i if isinstance(batch_i, int) else _rustlabel_batch_index - 1
+        if isinstance(batch_i, int) and isinstance(total, int) and total > 0:
+            return f" batch={batch_i + 1}/{total}"
+        if isinstance(index, int) and index >= 0 and isinstance(total, int) and total > 0:
+            return f" batch={index + 1}/{total}"
+        if isinstance(index, int) and index >= 0:
+            return f" batch={index + 1}"
+    except Exception:
+        pass
+    return ""
+
+def _rustlabel_batch_position(trainer):
+    try:
+        batch_i = getattr(trainer, "batch_i", None)
+        loader = getattr(trainer, "train_loader", None)
+        total = len(loader) if loader is not None else None
+        index = batch_i if isinstance(batch_i, int) else _rustlabel_batch_index - 1
+        if not isinstance(index, int) or index < 0:
+            index = 0
+        return index + 1, total if isinstance(total, int) and total > 0 else None
+    except Exception:
+        return max(1, _rustlabel_batch_index), None
+
+def _rustlabel_lr_text(trainer):
+    try:
+        optimizer = getattr(trainer, "optimizer", None)
+        groups = getattr(optimizer, "param_groups", None)
+        if not groups:
+            return ""
+        values = []
+        for group in groups:
+            lr = group.get("lr", None) if isinstance(group, dict) else None
+            if isinstance(lr, (int, float)):
+                values.append(float(lr))
+        if not values:
+            return ""
+        if len(values) == 1:
+            return f" lr={values[0]:.6g}"
+        return " lr=[" + ", ".join(f"{value:.6g}" for value in values) + "]"
+    except Exception:
+        return ""
+
+def _rustlabel_gpu_mem_value():
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            return "0G"
+        reserved = torch.cuda.memory_reserved() / 1024 / 1024 / 1024
+        allocated = torch.cuda.memory_allocated() / 1024 / 1024 / 1024
+        value = max(reserved, allocated)
+        return f"{value:.2f}G"
+    except Exception:
+        return "0G"
+
+def _rustlabel_gpu_text():
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            return ""
+        allocated = torch.cuda.memory_allocated() / 1024 / 1024 / 1024
+        reserved = torch.cuda.memory_reserved() / 1024 / 1024 / 1024
+        return f" gpu_mem={allocated:.2f}G/{reserved:.2f}G"
+    except Exception:
+        return ""
+
+def _rustlabel_batch_size_text(trainer):
+    try:
+        value = getattr(trainer, "batch_size", None)
+        if value is not None:
+            return str(value)
+        args = getattr(trainer, "args", None)
+        value = getattr(args, "batch", None)
+        if value is not None:
+            return str(value)
+        value = _rustlabel_args_yaml_value("batch")
+        if value:
+            return str(value)
+        return str(batch)
+    except Exception:
+        value = _rustlabel_args_yaml_value("batch")
+        return str(value) if value else str(batch)
+
+def _rustlabel_progress_bar(done, total):
+    if not total or total <= 0:
+        return "----------"
+    ratio = max(0.0, min(1.0, done / total))
+    filled = int(round(ratio * 12))
+    return "━" * filled + "─" * (12 - filled)
+
+def _rustlabel_duration_text(seconds):
+    seconds = max(0.0, float(seconds))
+    if seconds >= 3600:
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        return f"{hours}h{minutes:02d}m"
+    if seconds >= 60:
+        minutes = int(seconds // 60)
+        rest = int(seconds % 60)
+        return f"{minutes}m{rest:02d}s"
+    return f"{seconds:.1f}s"
+
+def _rustlabel_speed_time_text(done, total):
+    if _rustlabel_epoch_started_at <= 0:
+        return "speed=0.0it/s elapsed=0.0s eta=unknown"
+    elapsed = max(0.001, time.time() - _rustlabel_epoch_started_at)
+    speed = done / elapsed
+    if total and total > done and speed > 0:
+        eta = (total - done) / speed
+        eta_text = _rustlabel_duration_text(eta)
+    else:
+        eta_text = "0.0s"
+    return (
+        f"speed={speed:.1f}it/s "
+        f"elapsed={_rustlabel_duration_text(elapsed)} "
+        f"eta={eta_text}"
+    )
+
+def _rustlabel_native_progress_text(trainer):
+    done, total = _rustlabel_batch_position(trainer)
+    if total:
+        percent = int(round(max(0.0, min(1.0, done / total)) * 100))
+        batch_text = f"{done}/{total}"
+    else:
+        percent = 0
+        batch_text = str(done)
+    return (
+        f"epoch={_rustlabel_epoch_text(trainer)} "
+        f"gpu={_rustlabel_gpu_mem_value()} "
+        f"{_rustlabel_loss_named_text(trainer)} "
+        f"batch={_rustlabel_batch_size_text(trainer)} "
+        f"size={imgsz}: "
+        f"{percent:3d}% {_rustlabel_progress_bar(done, total)} "
+        f"step={batch_text} {_rustlabel_speed_time_text(done, total)}"
+    )
+
+def _rustlabel_metric_float(value):
+    try:
+        if value is None:
+            return None
+        if hasattr(value, "detach"):
+            value = value.detach().cpu()
+        if hasattr(value, "item"):
+            value = value.item()
+        return float(value)
+    except Exception:
+        return None
+
+def _rustlabel_metric_from_dict(values, keys):
+    if not isinstance(values, dict):
+        return None
+    for key in keys:
+        if key in values:
+            number = _rustlabel_metric_float(values.get(key))
+            if number is not None:
+                return number
+    return None
+
+def _rustlabel_metric_from_object(values, attrs):
+    if values is None:
+        return None
+    for attr in attrs:
+        if hasattr(values, attr):
+            number = _rustlabel_metric_float(getattr(values, attr))
+            if number is not None:
+                return number
+    return None
+
+def _rustlabel_metric_value(metrics, dict_keys, object_attrs):
+    number = _rustlabel_metric_from_dict(metrics, dict_keys)
+    if number is not None:
+        return number
+    number = _rustlabel_metric_from_object(metrics, object_attrs)
+    if number is not None:
+        return number
+    for child_name in ("box", "seg", "obb", "pose"):
+        child = getattr(metrics, child_name, None)
+        number = _rustlabel_metric_from_object(child, object_attrs)
+        if number is not None:
+            return number
+    return None
+
+def _rustlabel_metrics_text(trainer):
+    try:
+        metrics = getattr(trainer, "metrics", None)
+        if not metrics:
+            validator = getattr(trainer, "validator", None)
+            metrics = getattr(validator, "metrics", None)
+        precision = _rustlabel_metric_value(
+            metrics,
+            ["metrics/precision(B)", "metrics/precision(M)", "metrics/precision(O)", "metrics/precision"],
+            ["precision", "mp"],
+        )
+        recall = _rustlabel_metric_value(
+            metrics,
+            ["metrics/recall(B)", "metrics/recall(M)", "metrics/recall(O)", "metrics/recall"],
+            ["recall", "mr"],
+        )
+        map50 = _rustlabel_metric_value(
+            metrics,
+            ["metrics/mAP50(B)", "metrics/mAP50(M)", "metrics/mAP50(O)", "metrics/mAP_0.5", "metrics/mAP50"],
+            ["map50"],
+        )
+        map5095 = _rustlabel_metric_value(
+            metrics,
+            ["metrics/mAP50-95(B)", "metrics/mAP50-95(M)", "metrics/mAP50-95(O)", "metrics/mAP_0.5:0.95", "metrics/mAP50-95"],
+            ["map", "map5095", "map50_95"],
+        )
+        pairs = []
+        if precision is not None:
+            pairs.append(f"precision={precision:.4f}")
+        if recall is not None:
+            pairs.append(f"recall={recall:.4f}")
+        if map50 is not None:
+            pairs.append(f"mAP50={map50:.4f}")
+        if map5095 is not None:
+            pairs.append(f"mAP50-95={map5095:.4f}")
+        return " metrics(" + ", ".join(pairs) + ")" if pairs else ""
+    except Exception:
+        return ""
+
+def _rustlabel_epoch_time_text():
+    if _rustlabel_epoch_started_at <= 0:
+        return ""
+    elapsed = max(0.0, time.time() - _rustlabel_epoch_started_at)
+    return f" epoch_time={elapsed:.1f}s"
+
+def _rustlabel_train_start_callback(trainer):
+    _rustlabel_log("train start callback reached")
+    _rustlabel_stop_callback(trainer)
+
+def _rustlabel_epoch_start_callback(trainer):
+    global _rustlabel_batch_index, _rustlabel_epoch_started_at
+    _rustlabel_batch_index = 0
+    _rustlabel_epoch_started_at = time.time()
+    _rustlabel_log(
+        f"epoch {_rustlabel_epoch_text(trainer)} start"
+        f"{_rustlabel_lr_text(trainer)}"
+    )
+    _rustlabel_stop_callback(trainer)
+
+def _rustlabel_progress_callback(trainer):
+    global _rustlabel_last_progress_log
+    _rustlabel_stop_callback(trainer)
+    now = time.time()
+    if now - _rustlabel_last_progress_log < 1.0:
+        return
+    _rustlabel_last_progress_log = now
+    _rustlabel_log(_rustlabel_native_progress_text(trainer))
+
+def _rustlabel_batch_end_callback(trainer):
+    global _rustlabel_batch_index
+    _rustlabel_batch_index += 1
+    _rustlabel_progress_callback(trainer)
+
+def _rustlabel_epoch_end_callback(trainer):
+    _rustlabel_log(
+        f"epoch {_rustlabel_epoch_text(trainer)} end"
+        f"{_rustlabel_loss_text(trainer)}"
+        f"{_rustlabel_metrics_text(trainer)}"
+        f"{_rustlabel_lr_text(trainer)}"
+        f"{_rustlabel_gpu_text()}"
+        f"{_rustlabel_epoch_time_text()}"
+    )
+    _rustlabel_stop_callback(trainer)
+
+def _rustlabel_fit_epoch_end_callback(trainer):
+    _rustlabel_log(
+        f"validation epoch={_rustlabel_epoch_text(trainer)}"
+        f"{_rustlabel_metrics_text(trainer)}"
+        f"{_rustlabel_lr_text(trainer)}"
+        f"{_rustlabel_gpu_text()}"
+    )
+    _rustlabel_stop_callback(trainer)
+
 print("[rustlabel] loading model")
 model = YOLO(model_path)
 print("[rustlabel] model loaded")
 try:
-    model.add_callback("on_train_batch_end", _rustlabel_stop_callback)
-    model.add_callback("on_train_epoch_end", _rustlabel_stop_callback)
-except Exception:
-    pass
+    model.add_callback("on_train_start", _rustlabel_train_start_callback)
+    model.add_callback("on_train_epoch_start", _rustlabel_epoch_start_callback)
+    model.add_callback("on_train_batch_end", _rustlabel_batch_end_callback)
+    model.add_callback("on_train_epoch_end", _rustlabel_epoch_end_callback)
+    model.add_callback("on_fit_epoch_end", _rustlabel_fit_epoch_end_callback)
+except Exception as error:
+    _rustlabel_log(f"register callbacks failed: {error}")
 
 if cls_pw > 0 and hasattr(model, "cls_pw"):
     model.cls_pw = cls_pw
@@ -241,7 +636,7 @@ pub fn start_training(mut config: TrainingConfig) -> Result<String, String> {
         return Err("Training is already running or stopping".to_string());
     }
 
-    config.python_path = verify_python_path(&config.python_path)?;
+    config.python_path = ini_python::verify_python_path(&config.python_path)?;
     let log_path = training_log_path()?;
     append_log_line(&log_path, "training start requested");
     append_log_line(&log_path, &format!("python_path={}", config.python_path));
@@ -256,12 +651,15 @@ pub fn start_training(mut config: TrainingConfig) -> Result<String, String> {
         &format!("experiment_name={}", config.experiment_name),
     );
 
-    if let Err(error) = configure_python_runtime(&config.python_path) {
+    if let Err(error) = ini_python::configure_python_runtime(&config.python_path) {
         append_log_line(
             &log_path,
             &format!("python runtime configure failed: {error}"),
         );
         return Err(error);
+    }
+    if let Err(error) = preload_training_modules(&log_path) {
+        append_log_line(&log_path, &format!("python preload warning: {error}"));
     }
     let project = PathBuf::from(config.project_dir.trim());
     if config.project_dir.trim().is_empty() {
@@ -283,6 +681,7 @@ pub fn start_training(mut config: TrainingConfig) -> Result<String, String> {
     *ACTIVE_TOTAL_EPOCHS.lock().unwrap() = config.epochs;
     *ACTIVE_STARTED_AT.lock().unwrap() = Some(Instant::now());
     *ACTIVE_LOG_PATH.lock().unwrap() = Some(log_path.to_string_lossy().into_owned());
+    *ACTIVE_LAST_LOG_HEARTBEAT.lock().unwrap() = None;
     append_log_line(
         &log_path,
         &format!("expected_run_dir={}", run_dir.display()),
@@ -312,6 +711,16 @@ pub fn start_training(mut config: TrainingConfig) -> Result<String, String> {
     *ACTIVE_HANDLE.lock().unwrap() = Some(handle);
 
     Ok(run_dir.to_string_lossy().into_owned())
+}
+
+pub fn preload_yolo_python(python_path: &str) -> Result<String, String> {
+    ini_python::initialize_python(python_path)?;
+    let log_path = training_log_path().ok();
+    if let Some(path) = &log_path {
+        append_log_line(path, "python preload requested");
+    }
+    preload_training_modules_opt(log_path.as_deref())?;
+    Ok("Python YOLO runtime preloaded".to_string())
 }
 
 pub fn poll_training_progress() -> Option<TrainingProgress> {
@@ -374,6 +783,7 @@ pub fn poll_training_progress() -> Option<TrainingProgress> {
     } else {
         status
     };
+    append_running_heartbeat(&status, current_epoch, total);
 
     Some(TrainingProgress {
         current_epoch,
@@ -408,6 +818,41 @@ pub fn stop_training() -> Result<String, String> {
     } else {
         Err("Stop file is not available".to_string())
     }
+}
+
+pub fn shutdown_training(timeout_ms: u64) -> Result<String, String> {
+    let message = stop_training()?;
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    loop {
+        cleanup_finished_training();
+        if ACTIVE_HANDLE.lock().unwrap().is_none() {
+            return Ok(format!("{message}; training stopped"));
+        }
+        if Instant::now() >= deadline {
+            return Ok(format!("{message}; training is still stopping"));
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
+pub fn training_log_tail(max_chars: usize) -> Result<(String, String), String> {
+    let path = ACTIVE_LOG_PATH
+        .lock()
+        .unwrap()
+        .clone()
+        .map(PathBuf::from)
+        .or_else(|| training_log_path().ok())
+        .ok_or_else(|| "Training log path is not available".to_string())?;
+    let text = fs::read_to_string(&path)
+        .map_err(|error| format!("read training log {}: {error}", path.display()))?;
+    let max_chars = max_chars.max(1024);
+    let tail = if text.chars().count() <= max_chars {
+        text
+    } else {
+        let total = text.chars().count();
+        text.chars().skip(total - max_chars).collect()
+    };
+    Ok((path.to_string_lossy().into_owned(), tail))
 }
 
 fn run_training_with_pyo3(
@@ -445,209 +890,24 @@ fn run_training_with_pyo3(
         py.run_bound(TRAINING_CODE, Some(&locals), Some(&locals))?;
         Ok(())
     })
-    .map_err(|error| {
-        let formatted = format_python_error(error);
-        append_log_line(log_path, &formatted);
-        formatted
-    })
+    .map_err(|error| ini_python::format_python_error(error))
 }
 
-fn configure_python_runtime(python_path: &str) -> Result<(), String> {
-    let paths = PythonRuntimePaths::from_executable(python_path)?;
-    let runtime_key = path_key(&paths.python_home);
-    {
-        let mut active_home = PYTHON_RUNTIME_HOME.lock().unwrap();
-        if let Some(existing) = active_home.as_ref() {
-            if existing != &runtime_key {
-                return Err(format!(
-                    "PyO3 Python runtime is already initialized with {}. Restart the app before switching to {}.",
-                    existing,
-                    paths.python_home.display()
-                ));
-            }
-        } else {
-            if python_is_initialized() {
-                return Err(
-                    "Python runtime was initialized before the configured Python path was applied. Restart the app and start training again."
-                        .to_string(),
-                );
-            }
-            apply_python_environment(&paths);
-            pyo3::prepare_freethreaded_python();
-            *active_home = Some(runtime_key);
-        }
+fn preload_training_modules(log_path: &Path) -> Result<(), String> {
+    let result = ini_python::preload_yolo_modules();
+    match &result {
+        Ok(()) => append_log_line(log_path, "python modules preloaded"),
+        Err(error) => append_log_line(log_path, &format!("python modules preload failed: {error}")),
     }
-    Ok(())
+    result
 }
 
-#[derive(Debug)]
-struct PythonRuntimePaths {
-    executable: PathBuf,
-    python_home: PathBuf,
-    extra_python_paths: Vec<PathBuf>,
-    path_prefixes: Vec<PathBuf>,
-}
-
-impl PythonRuntimePaths {
-    fn from_executable(python_path: &str) -> Result<Self, String> {
-        let executable = PathBuf::from(python_path);
-        let executable_dir = executable
-            .parent()
-            .ok_or_else(|| format!("Invalid Python path: {python_path}"))?
-            .to_path_buf();
-        let env_root = if file_name_eq(&executable_dir, "Scripts") {
-            executable_dir
-                .parent()
-                .ok_or_else(|| format!("Invalid Python environment: {python_path}"))?
-                .to_path_buf()
-        } else {
-            executable_dir.clone()
-        };
-
-        let python_home = resolve_python_home(&env_root)?;
-        let mut extra_python_paths = vec![
-            python_home.join("Lib"),
-            python_home.join("DLLs"),
-            python_home.join("Lib").join("site-packages"),
-            env_root.join("DLLs"),
-            env_root.join("Lib").join("site-packages"),
-        ];
-        extra_python_paths.retain(|path| path.exists());
-        extra_python_paths = dedupe_pathbufs(extra_python_paths);
-
-        let mut path_prefixes = vec![
-            executable_dir,
-            env_root.clone(),
-            env_root.join("Scripts"),
-            env_root.join("Library").join("bin"),
-            env_root.join("DLLs"),
-            python_home.clone(),
-            python_home.join("DLLs"),
-        ];
-        path_prefixes.retain(|path| path.exists());
-        path_prefixes = dedupe_pathbufs(path_prefixes);
-
-        Ok(Self {
-            executable,
-            python_home,
-            extra_python_paths,
-            path_prefixes,
-        })
+fn preload_training_modules_opt(log_path: Option<&Path>) -> Result<(), String> {
+    let result = ini_python::preload_yolo_modules();
+    if let (Ok(()), Some(path)) = (&result, log_path) {
+        append_log_line(path, "python modules preloaded");
     }
-}
-
-fn resolve_python_home(env_root: &Path) -> Result<PathBuf, String> {
-    if has_python_encodings(env_root) {
-        return Ok(normalize_path(env_root));
-    }
-
-    let pyvenv_cfg = env_root.join("pyvenv.cfg");
-    if pyvenv_cfg.exists() {
-        if let Ok(contents) = fs::read_to_string(&pyvenv_cfg) {
-            for line in contents.lines() {
-                let trimmed = line.trim();
-                let Some((key, value)) = trimmed.split_once('=') else {
-                    continue;
-                };
-                if key.trim().eq_ignore_ascii_case("home") {
-                    let home = PathBuf::from(value.trim());
-                    if has_python_encodings(&home) {
-                        return Ok(normalize_path(&home));
-                    }
-                }
-            }
-        }
-    }
-
-    Err(format!(
-        "Python standard library was not found under {}. Expected Lib\\encodings. Choose a full Python/Conda environment or python.exe.",
-        env_root.display()
-    ))
-}
-
-fn apply_python_environment(paths: &PythonRuntimePaths) {
-    env::set_var("PYTHONHOME", paths.python_home.as_os_str());
-    if let Ok(joined) = env::join_paths(&paths.extra_python_paths) {
-        env::set_var("PYTHONPATH", joined);
-    }
-
-    let mut path_values = paths.path_prefixes.clone();
-    if let Some(existing_path) = env::var_os("PATH") {
-        path_values.extend(env::split_paths(&existing_path));
-    }
-    if let Ok(joined) = env::join_paths(dedupe_pathbufs(path_values)) {
-        env::set_var("PATH", joined);
-    }
-    env::set_var("PYTHONNOUSERSITE", "1");
-    env::set_var("PYTHONUTF8", "1");
-    env::set_var("ULTRALYTICS_TQDM", "false");
-    env::set_var("RUSTLABEL_PYTHON_EXE", paths.executable.as_os_str());
-}
-
-fn has_python_encodings(path: &Path) -> bool {
-    path.join("Lib").join("encodings").is_dir()
-}
-
-fn python_is_initialized() -> bool {
-    unsafe { pyo3::ffi::Py_IsInitialized() != 0 }
-}
-
-fn format_python_error(error: PyErr) -> String {
-    Python::with_gil(|py| {
-        if let Ok(traceback) = py.import_bound("traceback") {
-            if let Ok(lines) = traceback
-                .call_method1(
-                    "format_exception",
-                    (
-                        error.get_type_bound(py),
-                        error.value_bound(py),
-                        error.traceback_bound(py),
-                    ),
-                )
-                .and_then(|value| value.extract::<Vec<String>>())
-            {
-                let joined = lines.join("");
-                if !joined.trim().is_empty() {
-                    return joined;
-                }
-            }
-        }
-        let value = error.value_bound(py);
-        value
-            .str()
-            .map(|text| text.to_string_lossy().into_owned())
-            .unwrap_or_else(|_| error.to_string())
-    })
-}
-
-fn verify_python_path(path: &str) -> Result<String, String> {
-    let trimmed = path.trim();
-    if trimmed.is_empty() {
-        return Err("Python path is not configured. Set it in Settings.".to_string());
-    }
-    let python = PathBuf::from(trimmed);
-    if !python.exists() {
-        return Err(format!("Python not found at: {trimmed}"));
-    }
-    if python.is_file() {
-        return Ok(python.to_string_lossy().into_owned());
-    }
-
-    let candidates = [
-        python.join("python.exe"),
-        python.join("Scripts").join("python.exe"),
-        python.join(".venv").join("Scripts").join("python.exe"),
-        python.join("venv").join("Scripts").join("python.exe"),
-    ];
-    for candidate in candidates {
-        if candidate.is_file() {
-            return Ok(candidate.to_string_lossy().into_owned());
-        }
-    }
-    Err(format!(
-        "Python executable was not found under: {}",
-        python.display()
-    ))
+    result
 }
 
 fn expected_run_dir(config: &TrainingConfig, project: &Path) -> PathBuf {
@@ -677,6 +937,33 @@ fn set_status(status: &str, error: Option<String>) {
     *ACTIVE_ERROR.lock().unwrap() = error;
 }
 
+fn append_running_heartbeat(status: &str, current_epoch: u32, total_epochs: u32) {
+    if status != "running" && status != "stopping" {
+        return;
+    }
+    let now = Instant::now();
+    {
+        let mut last = ACTIVE_LAST_LOG_HEARTBEAT.lock().unwrap();
+        if last
+            .map(|value| now.duration_since(value) < Duration::from_secs(10))
+            .unwrap_or(false)
+        {
+            return;
+        }
+        *last = Some(now);
+    }
+    if let Some(path) = ACTIVE_LOG_PATH.lock().unwrap().clone() {
+        append_log_line(
+            Path::new(&path),
+            &format!(
+                "training heartbeat: status={status}, epoch={}/{}; waiting for next trainer callback",
+                current_epoch.max(1),
+                total_epochs.max(current_epoch).max(1)
+            ),
+        );
+    }
+}
+
 fn cleanup_finished_training() {
     let finished = ACTIVE_HANDLE
         .lock()
@@ -692,6 +979,7 @@ fn cleanup_finished_training() {
     }
     *ACTIVE_STOP_FILE.lock().unwrap() = None;
     *ACTIVE_STARTED_AT.lock().unwrap() = None;
+    *ACTIVE_LAST_LOG_HEARTBEAT.lock().unwrap() = None;
 }
 
 fn training_log_path() -> Result<PathBuf, String> {
@@ -834,29 +1122,4 @@ fn file_name_eq(path: &Path, expected: &str) -> bool {
     path.file_name()
         .map(|value| value.to_string_lossy().eq_ignore_ascii_case(expected))
         .unwrap_or(false)
-}
-
-fn normalize_path(path: &Path) -> PathBuf {
-    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
-}
-
-fn path_key(path: &Path) -> String {
-    normalize_path(path)
-        .to_string_lossy()
-        .replace('/', "\\")
-        .to_lowercase()
-}
-
-fn dedupe_pathbufs(paths: Vec<PathBuf>) -> Vec<PathBuf> {
-    let mut seen = Vec::<String>::new();
-    let mut result = Vec::new();
-    for path in paths {
-        let key = path_key(&path);
-        if seen.iter().any(|value| value == &key) {
-            continue;
-        }
-        seen.push(key);
-        result.push(path);
-    }
-    result
 }

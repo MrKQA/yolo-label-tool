@@ -15,7 +15,8 @@ Future<String> startTraining({required TrainingConfig config}) =>
 Future<TrainingProgress?> pollTrainingProgress() =>
     RustLib.instance.api.crateApiTrainingModPollTrainingProgress();
 
-Future<String> stopTraining() => RustLib.instance.api.crateApiTrainingModStopTraining();
+Future<String> stopTraining() =>
+    RustLib.instance.api.crateApiTrainingModStopTraining();
 
 class TrainingConfig {
   final String pythonPath;

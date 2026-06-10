@@ -1,3 +1,12 @@
+// =============================================================================
+// LabelPage.dart - Annotation Canvas & Tools / 标注画布与工具栏
+// =============================================================================
+// Image annotation page with drawing canvas, annotation painter,
+// class management, export, and AI-assisted annotation controls.
+//
+// 图片标注页面：绘制画布、标注渲染器、类别管理、导出与 AI 辅助标注。
+// =============================================================================
+
 // ignore_for_file: file_names
 
 part of 'main.dart';
@@ -19,6 +28,7 @@ class _LabelPage extends StatelessWidget {
     required this.annotations,
     required this.selectedAnnotationId,
     required this.showClassLabels,
+    required this.aiPanelVisible,
     required this.onImageSelected,
     required this.onImageContextMenu,
     required this.onPointerSignal,
@@ -41,6 +51,7 @@ class _LabelPage extends StatelessWidget {
     required this.onClassReordered,
     required this.onToggleClassLabels,
     required this.onAnnotationClassChanged,
+    required this.onAiConfigPressed,
     this.onImageDisplaySizeChanged,
   });
 
@@ -57,6 +68,7 @@ class _LabelPage extends StatelessWidget {
   final List<_AnnotationRegion> annotations;
   final String? selectedAnnotationId;
   final bool showClassLabels;
+  final bool aiPanelVisible;
   final ValueChanged<int> onImageSelected;
   final Future<void> Function(TapDownDetails details, int? index)
   onImageContextMenu;
@@ -81,6 +93,7 @@ class _LabelPage extends StatelessWidget {
   final VoidCallback onToggleClassLabels;
   final void Function(String annotationId, int classId)
   onAnnotationClassChanged;
+  final VoidCallback onAiConfigPressed;
   final void Function(Size imageDisplaySize)? onImageDisplaySizeChanged;
 
   @override
@@ -129,6 +142,7 @@ class _LabelPage extends StatelessWidget {
             annotations: annotations,
             selectedAnnotationId: selectedAnnotationId,
             showClassLabels: showClassLabels,
+            aiPanelVisible: aiPanelVisible,
             onToolSelected: onToolSelected,
             onClassSelected: onClassSelected,
             onClassAdded: onClassAdded,
@@ -139,6 +153,7 @@ class _LabelPage extends StatelessWidget {
             onToggleClassLabels: onToggleClassLabels,
             onAnnotationSelected: onAnnotationSelected,
             onAnnotationClassChanged: onAnnotationClassChanged,
+            onAiConfigPressed: onAiConfigPressed,
           ),
         ],
       ),
@@ -583,6 +598,9 @@ class _StatusPill extends StatelessWidget {
 }
 
 /// 固定尺寸图片显示区，支持绘制、选择、拖动和删除基础标注。
+// ---------------------------------------------------------------------------
+// Pointer Event Handlers & Coordinate Transforms / 指针事件与坐标变换
+// ---------------------------------------------------------------------------
 /// Fixed-size image canvas with basic draw, select, drag, and delete support.
 class _ImageCanvas extends StatefulWidget {
   const _ImageCanvas({
@@ -1280,6 +1298,9 @@ class _ImageCanvasState extends State<_ImageCanvas> {
   }
 
   void _handlePointerHover(PointerHoverEvent event) {
+    // ---------------------------------------------------------------------------
+    // Annotation Painter / 标注渲染器
+    // ---------------------------------------------------------------------------
     _updateHoverPoint(event.localPosition);
 
     final handle = widget.image != null
@@ -1927,6 +1948,9 @@ class _AnnotationPainter extends CustomPainter {
       final background = Rect.fromLTWH(
         origin.dx - 4 / scale,
         origin.dy - 2 / scale,
+        // ---------------------------------------------------------------------------
+        // AI Toolbar & Annotation List / AI 工具栏与标注列表
+        // ---------------------------------------------------------------------------
         textPainter.width + 8 / scale,
         textPainter.height + 4 / scale,
       );
@@ -1952,6 +1976,7 @@ class _AiToolbar extends StatelessWidget {
     required this.annotations,
     required this.selectedAnnotationId,
     required this.showClassLabels,
+    required this.aiPanelVisible,
     required this.onToolSelected,
     required this.onClassSelected,
     required this.onClassAdded,
@@ -1962,6 +1987,7 @@ class _AiToolbar extends StatelessWidget {
     required this.onToggleClassLabels,
     required this.onAnnotationSelected,
     required this.onAnnotationClassChanged,
+    required this.onAiConfigPressed,
   });
 
   final String activeTool;
@@ -1970,6 +1996,7 @@ class _AiToolbar extends StatelessWidget {
   final List<_AnnotationRegion> annotations;
   final String? selectedAnnotationId;
   final bool showClassLabels;
+  final bool aiPanelVisible;
   final ValueChanged<String> onToolSelected;
   final ValueChanged<int> onClassSelected;
   final VoidCallback onClassAdded;
@@ -1981,9 +2008,11 @@ class _AiToolbar extends StatelessWidget {
   final ValueChanged<String?> onAnnotationSelected;
   final void Function(String annotationId, int classId)
   onAnnotationClassChanged;
+  final VoidCallback onAiConfigPressed;
 
   static const _tools = [
     _ToolSpec('select', Icons.near_me_outlined, 'tool.select'),
+    _ToolSpec('ai_config', Icons.auto_awesome, 'label.aiConfig'),
     _ToolSpec('copy', Icons.copy_outlined, 'tool.copy'),
     _ToolSpec('paste', Icons.content_paste_outlined, 'tool.paste'),
     _ToolSpec('undo', Icons.undo, 'tool.undo'),
@@ -2055,8 +2084,16 @@ class _AiToolbar extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(10, 0, 10, 6),
                 child: _ToolButton(
                   tool: tool,
-                  selected: tool.id == activeTool,
-                  onPressed: () => onToolSelected(tool.id),
+                  selected: tool.id == 'ai_config'
+                      ? aiPanelVisible
+                      : tool.id == activeTool,
+                  onPressed: () {
+                    if (tool.id == 'ai_config') {
+                      onAiConfigPressed();
+                    } else {
+                      onToolSelected(tool.id);
+                    }
+                  },
                 ),
               ),
             const Divider(height: 16),

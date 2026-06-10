@@ -122,7 +122,8 @@ Future<TrainingProgress?> pollYoloTrainingProgress() =>
     RustLib.instance.api.crateApiPollYoloTrainingProgress();
 
 /// Stop the active YOLO training process.
-Future<String> stopYoloTraining() => RustLib.instance.api.crateApiStopYoloTraining();
+Future<String> stopYoloTraining() =>
+    RustLib.instance.api.crateApiStopYoloTraining();
 
 /// One decoded video frame returned as PNG bytes.
 class DecodedVideoFrame {
@@ -137,7 +138,8 @@ class DecodedVideoFrame {
   });
 
   @override
-  int get hashCode => timestampSeconds.hashCode ^ pngBytes.hashCode ^ decoderLabel.hashCode;
+  int get hashCode =>
+      timestampSeconds.hashCode ^ pngBytes.hashCode ^ decoderLabel.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -162,7 +164,8 @@ class FrameExtractionResult {
   });
 
   @override
-  int get hashCode => ffmpegPath.hashCode ^ outputDir.hashCode ^ frameCount.hashCode;
+  int get hashCode =>
+      ffmpegPath.hashCode ^ outputDir.hashCode ^ frameCount.hashCode;
 
   @override
   bool operator ==(Object other) =>

@@ -1,3 +1,13 @@
+// =============================================================================
+// AnnotationModels.dart - Annotation Data Models / 标注数据模型
+// =============================================================================
+// HBB/OBB/SEG annotation region model with hit-testing, coordinate
+// transforms, YOLO-format export, and image item representation.
+//
+// HBB/OBB/SEG 标注区域数据模型：命中检测、坐标变换、YOLO 格式导出、
+// 图像文件条目。
+// =============================================================================
+
 // ignore_for_file: file_names
 
 part of 'main.dart';
@@ -126,9 +136,7 @@ class _AnnotationRegion {
 
   _AnnotationRegion clampObbToImage(Size imageSize) {
     if (mode != _AnnotationMode.obb) {
-      return clampedTo(
-        Rect.fromLTWH(0, 0, imageSize.width, imageSize.height),
-      );
+      return clampedTo(Rect.fromLTWH(0, 0, imageSize.width, imageSize.height));
     }
     var result = clampedTo(
       Rect.fromLTWH(0, 0, imageSize.width, imageSize.height),
