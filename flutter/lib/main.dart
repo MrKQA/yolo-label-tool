@@ -247,6 +247,17 @@ class _LanguageStrings {
     'menu.resetZoom': '重置缩放',
     'menu.shortcutHelp': '快捷键说明',
     'menu.about': '关于',
+    'about.title': '关于 YOLO Label Tool',
+    'about.version': '版本 0.1.0',
+    'about.licenseTitle': 'LICENSE 说明',
+    'about.licenseBody':
+        '本项目使用 GNU General Public License v3.0（GPLv3）开源协议，具体权利与义务以仓库根目录 LICENSE 文件为准。复制、修改、分发或二次发布本软件时，请遵守 GPLv3 的源代码开放、版权声明和协议继承要求。',
+    'about.opensourceTitle': '开源初衷',
+    'about.opensourceBody':
+        '本工具用于学习、研究和改进 YOLO 数据标注、训练、预测与辅助标注流程，降低本地视觉数据处理门槛，也方便开发者审查实现、复现实验并共同改进。',
+    'about.warningTitle': '侵权与合规警告',
+    'about.warningBody':
+        '请仅处理你拥有合法权利或已获授权的数据、模型、图片、视频和标注结果。禁止将本工具用于侵犯版权、肖像权、隐私权、商业秘密、数据集许可或模型许可的行为；由用户导入、训练、导出、发布或商用产生的法律责任由用户自行承担。',
     'settings.language': '语言',
     'settings.preferences': '首选项',
     'settings.clearCache': '清空缓存',
@@ -2579,6 +2590,62 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     }
   }
 
+  Future<void> _showAboutDialog() async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        Widget section(String titleKey, String bodyKey) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  t(titleKey),
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                const SizedBox(height: 6),
+                Text(t(bodyKey), style: Theme.of(context).textTheme.bodyMedium),
+              ],
+            ),
+          );
+        }
+
+        return AlertDialog(
+          title: Text(t('about.title')),
+          content: SizedBox(
+            width: 620,
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    t('about.version'),
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 16),
+                  section('about.licenseTitle', 'about.licenseBody'),
+                  section('about.opensourceTitle', 'about.opensourceBody'),
+                  section('about.warningTitle', 'about.warningBody'),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text(t('action.close')),
+            ),
+          ],
+        );
+      },
+    );
+    if (mounted) {
+      _keyboardFocusNode.requestFocus();
+    }
+  }
+
   Future<void> _showLogViewerDialog() async {
     final directory = _ConfigStore.logsDirectory;
     if (!directory.existsSync()) {
@@ -2739,6 +2806,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                   onShowSettings: _showSettings,
                   onShowLogs: _showLogViewerDialog,
                   onShowHelp: _showKeySettings,
+                  onShowAbout: _showAboutDialog,
                   onLanguageSelected: _changeLanguage,
                   onPointerEnter: _showTopMenu,
                   onPointerExit: _scheduleTopMenuHide,
@@ -3499,6 +3567,7 @@ class _TopMenuBar extends StatelessWidget {
     required this.onShowSettings,
     required this.onShowLogs,
     required this.onShowHelp,
+    required this.onShowAbout,
     required this.onLanguageSelected,
     required this.onPointerEnter,
     required this.onPointerExit,
@@ -3525,6 +3594,7 @@ class _TopMenuBar extends StatelessWidget {
   final VoidCallback onShowSettings;
   final VoidCallback onShowLogs;
   final VoidCallback onShowHelp;
+  final VoidCallback onShowAbout;
   final Future<void> Function(String code) onLanguageSelected;
   final VoidCallback onPointerEnter;
   final VoidCallback onPointerExit;
@@ -3673,13 +3743,7 @@ class _TopMenuBar extends StatelessWidget {
                             child: Text(t('menu.shortcutHelp')),
                           ),
                           MenuItemButton(
-                            onPressed: () {
-                              showAboutDialog(
-                                context: context,
-                                applicationName: t('app.title'),
-                                applicationVersion: '0.1.0',
-                              );
-                            },
+                            onPressed: onShowAbout,
                             child: Text(t('menu.about')),
                           ),
                         ],
