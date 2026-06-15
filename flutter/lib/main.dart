@@ -65,11 +65,6 @@ const _recentMenuVisibleCount = 5;
 const _fontFamily = 'Microsoft YaHei';
 const _languageCode = 'zh_cn';
 const _languageAssetDirectory = 'lib/language';
-const _historyFileName = 'history.json';
-const _keybindingsFileName = 'keybindings.json';
-const _settingsFileName = 'settings.json';
-const _trainingHistoryFileName = 'training_history.json';
-const _trainingPreferencesFileName = 'training_preferences.json';
 
 const _labelColorPalette = [
   Color(0xFF2563EB),
@@ -131,14 +126,7 @@ void _appendLogLine(String tag, String message, {required _LogLevel level}) {
 void _flushLogs() {
   if (_pendingLogs.isEmpty) return;
   try {
-    final dir = _ConfigStore.appLogsDirectory;
-    if (!dir.existsSync()) dir.createSync(recursive: true);
-    final date = DateTime.now().toIso8601String().substring(0, 10);
-    final file = File('${dir.path}\\$date.log');
-    file.writeAsStringSync(
-      '${_pendingLogs.join('\n')}\n',
-      mode: FileMode.append,
-    );
+    _ConfigStore.appendLogLines(_pendingLogs.join('\n'));
     _pendingLogs.clear();
   } on Object {
     // silently ignore write failures / 写入失败静默忽略
@@ -148,7 +136,7 @@ void _flushLogs() {
 void _setLogLevel(_LogLevel level, {bool writeLog = false}) {
   _logLevel = level;
   if (writeLog) {
-    _appendLogLine(
+    _log(
       'LOG',
       'Log level set to ${level.name}',
       level: _LogLevel.info,
@@ -168,6 +156,7 @@ Future<void> main() async {
   _appText = await _LanguageStrings.load(_languageCode);
   _languageStringsNotifier.value = _appText;
   await RustLib.init(externalLibrary: _openRustLibrary());
+  _ConfigStore.ensureDefaultConfig();
   runApp(const YoloLabelApp());
 }
 
@@ -262,7 +251,7 @@ class _LanguageStrings {
     'settings.preferences': '首选项',
     'settings.clearCache': '清空缓存',
     'settings.title': '设置',
-    'settings.configPath': '配置目录',
+    'settings.configPath': '配置数据库',
     'settings.pythonPath': 'Python 环境路径',
     'settings.outputPath': '训练结果保存位置',
     'settings.choosePython': '选择 Python',
@@ -283,6 +272,8 @@ class _LanguageStrings {
     'recent.moreFiles': '更多文件',
     'recent.moreOptions': '更多选项',
     'recent.clear': '清除最近打开的...',
+    'recent.missingFolder': '文件夹不存在，已从历史记录移除',
+    'recent.missingFile': '文件不存在，已从历史记录移除',
     'context.addImage': '添加图片',
     'context.deleteImage': '删除图片',
     'context.rotateLeft': '逆时针旋转',
@@ -428,6 +419,9 @@ class _LanguageStrings {
     'logs.date': '日期',
     'logs.noLogs': '暂无日志',
     'logs.readFailed': '日志读取失败',
+    'logs.deleteRange': '删除日志',
+    'logs.deleted': '已删除日志',
+    'logs.selectDeleteRange': '选择要删除的日期范围',
     'detect.title': '浏览 / 视频检测',
     'detect.chooseImage': '选择图片',
     'detect.chooseFile': '选择文件',
@@ -709,6 +703,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   final FocusNode _keyboardFocusNode = FocusNode(debugLabel: 'workspace');
   final _DetectVideoSession _detectVideoSession = _DetectVideoSession();
   Timer? _topMenuHideTimer;
+  Timer? _databaseSaveTimer;
 
   final List<_ImageItem> _images = [];
   final List<_RecentEntry> _recentFolders = [];
@@ -726,6 +721,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   bool _darkMode = false;
   bool _shortcutDialogOpen = false;
   bool _importingDataset = false;
+  bool _databaseApplying = false;
   bool _topMenuVisible = true;
   bool _videoFullscreenVisible = false;
   bool _zoomLocked = false;
@@ -789,6 +785,323 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     return _imageDisplaySizes[key] ?? _imageDisplaySizes[path];
   }
 
+  String _databasePayload({
+    bool includeClasses = true,
+    bool includeAnnotations = true,
+  }) {
+    final lines = <String>['PROJECT\t${_databaseField(_databaseProjectKey())}'];
+    if (includeClasses) {
+      for (final labelClass in _labelClasses) {
+        lines.add(
+          [
+            'CLASS',
+            labelClass.id,
+            labelClass.name,
+            labelClass.colorValue,
+          ].map(_databaseField).join('\t'),
+        );
+      }
+    }
+
+    for (var index = 0; index < _images.length; index++) {
+      final image = _images[index];
+      final imageKey = _pathKey(image.path);
+      final size = _displaySizeForImagePath(image.path) ?? Size.zero;
+      lines.add(
+        [
+          'IMAGE',
+          image.path,
+          image.name,
+          _imageSplits[imageKey] ?? 'train',
+          _databaseNumber(size.width),
+          _databaseNumber(size.height),
+          index,
+        ].map(_databaseField).join('\t'),
+      );
+    }
+
+    if (includeAnnotations) {
+      for (final image in _images) {
+        final imageKey = _pathKey(image.path);
+        final annotations = _annotationsByImage[imageKey] ?? const [];
+        for (final annotation in annotations) {
+          final rect = annotation.rect;
+          lines.add(
+            [
+              'ANNOTATION',
+              image.path,
+              annotation.id,
+              annotation.mode.name,
+              annotation.classId,
+              _databaseNumber(rect.left),
+              _databaseNumber(rect.top),
+              _databaseNumber(rect.right),
+              _databaseNumber(rect.bottom),
+              _databaseNumber(annotation.rotationDegrees),
+              _annotationPointsForDatabase(annotation),
+              'manual',
+              '0',
+            ].map(_databaseField).join('\t'),
+          );
+        }
+      }
+    }
+    return lines.join('\n');
+  }
+
+  String _databaseField(Object? value) {
+    return '${value ?? ''}'
+        .replaceAll('\t', ' ')
+        .replaceAll('\r', ' ')
+        .replaceAll('\n', ' ');
+  }
+
+  String _databaseProjectKey() {
+    final imported = _importedDataset;
+    if (imported != null) {
+      return 'dataset:${_pathKey(imported.dataYamlPath)}';
+    }
+    if (_images.isEmpty) {
+      return 'default';
+    }
+    final directories = {
+      for (final image in _images) _pathKey(_directoryName(image.path)),
+    }.toList()
+      ..sort();
+    if (directories.length == 1) {
+      return 'folder:${directories.first}';
+    }
+    return 'workspace:${directories.join('|')}';
+  }
+
+  String _databaseNumber(num value) {
+    if (!value.isFinite) {
+      return '0';
+    }
+    return value.toStringAsFixed(6);
+  }
+
+  String _annotationPointsForDatabase(_AnnotationRegion annotation) {
+    final points = annotation.mode == _AnnotationMode.seg
+        ? annotation.points
+        : const <Offset>[];
+    return points
+        .map(
+          (point) =>
+              '${_databaseNumber(point.dx)},${_databaseNumber(point.dy)}',
+        )
+        .join(';');
+  }
+
+  List<Offset> _annotationPointsFromDatabase(String raw) {
+    final points = <Offset>[];
+    for (final token in raw.split(';')) {
+      final parts = token.split(',');
+      if (parts.length != 2) {
+        continue;
+      }
+      final x = double.tryParse(parts[0]);
+      final y = double.tryParse(parts[1]);
+      if (x != null && y != null) {
+        points.add(Offset(x, y));
+      }
+    }
+    return points;
+  }
+
+  _AnnotationMode _annotationModeFromDatabase(String raw) {
+    return switch (raw.toLowerCase()) {
+      'obb' => _AnnotationMode.obb,
+      'seg' => _AnnotationMode.seg,
+      _ => _AnnotationMode.hbb,
+    };
+  }
+
+  void _scheduleAnnotationDatabaseSave() {
+    if (_databaseApplying || _images.isEmpty) {
+      return;
+    }
+    _databaseSaveTimer?.cancel();
+    _databaseSaveTimer = Timer(const Duration(milliseconds: 700), () {
+      unawaited(_saveAnnotationDatabaseNow());
+    });
+  }
+
+  Future<void> _saveAnnotationDatabaseNow() async {
+    if (_databaseApplying || _images.isEmpty) {
+      return;
+    }
+    try {
+      final result = await _RustVideoBackend.saveLabelDatabase(
+        payload: _databasePayload(),
+      );
+      _log(
+        'DB',
+        'Label database saved: images=${result['images'] ?? '-'}, classes=${result['classes'] ?? '-'}, annotations=${result['annotations'] ?? '-'}',
+        level: _LogLevel.debug,
+      );
+    } on Object catch (error) {
+      _log('DB', 'Label database save failed: $error', level: _LogLevel.error);
+    }
+  }
+
+  Future<void> _loadAnnotationDatabaseForCurrentImages() async {
+    if (_images.isEmpty) {
+      return;
+    }
+    _databaseSaveTimer?.cancel();
+    _databaseApplying = true;
+    try {
+      final result = await _RustVideoBackend.loadLabelDatabase(
+        payload: _databasePayload(
+          includeClasses: false,
+          includeAnnotations: false,
+        ),
+      );
+      final loadedClasses = _labelClassesFromDatabase(result['classes']);
+      final loadedAnnotations = _annotationsFromDatabase(
+        result['annotations'],
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _labelClasses
+          ..clear()
+          ..addAll(loadedClasses);
+        if (loadedClasses.isNotEmpty) {
+          var maxClassId = -1;
+          for (final labelClass in loadedClasses) {
+            if (labelClass.id > maxClassId) {
+              maxClassId = labelClass.id;
+            }
+          }
+          _classSerial = maxClassId + 1;
+          if (_activeClassId == null ||
+              !_labelClasses.any((item) => item.id == _activeClassId)) {
+            _activeClassId = _labelClasses.first.id;
+          }
+        } else {
+          _classSerial = 1;
+          _activeClassId = null;
+        }
+
+        for (final image in _images) {
+          final imageKey = _pathKey(image.path);
+          final annotations = loadedAnnotations[imageKey];
+          if (annotations == null || annotations.isEmpty) {
+            _annotationsByImage.remove(imageKey);
+          } else {
+            _annotationsByImage[imageKey] = annotations;
+          }
+        }
+        _annotationSerial = _nextAnnotationSerial();
+        _selectedAnnotationId = null;
+        _undoStack.clear();
+        _redoStack.clear();
+      });
+      final count = loadedAnnotations.values.fold<int>(
+        0,
+        (sum, annotations) => sum + annotations.length,
+      );
+      _log(
+        'DB',
+        'Label database loaded: classes=${loadedClasses.length}, annotations=$count',
+        level: _LogLevel.debug,
+      );
+    } on Object catch (error) {
+      _log('DB', 'Label database load failed: $error', level: _LogLevel.error);
+    } finally {
+      _databaseApplying = false;
+    }
+  }
+
+  List<_LabelClass> _labelClassesFromDatabase(Object? raw) {
+    if (raw is! List) {
+      return const [];
+    }
+    final classes = <_LabelClass>[];
+    for (final item in raw) {
+      if (item is! Map) {
+        continue;
+      }
+      final id = (item['id'] as num?)?.toInt();
+      final name = '${item['name'] ?? ''}'.trim();
+      final color = (item['color'] as num?)?.toInt();
+      if (id == null || name.isEmpty || color == null) {
+        continue;
+      }
+      classes.add(_LabelClass(id: id, name: name, colorValue: color));
+    }
+    classes.sort((a, b) => a.id.compareTo(b.id));
+    return classes;
+  }
+
+  Map<String, List<_AnnotationRegion>> _annotationsFromDatabase(Object? raw) {
+    final result = <String, List<_AnnotationRegion>>{};
+    if (raw is! List) {
+      return result;
+    }
+    final openImageKeys = {
+      for (final image in _images) _pathKey(image.path),
+    };
+    for (final item in raw) {
+      if (item is! Map) {
+        continue;
+      }
+      final imagePath = '${item['imagePath'] ?? ''}';
+      final imageKey = _pathKey(imagePath);
+      if (!openImageKeys.contains(imageKey)) {
+        continue;
+      }
+      final id = '${item['id'] ?? ''}';
+      final classId = (item['classId'] as num?)?.toInt();
+      if (id.isEmpty || classId == null) {
+        continue;
+      }
+      final mode = _annotationModeFromDatabase('${item['kind'] ?? ''}');
+      final rect = Rect.fromLTRB(
+        ((item['left'] as num?) ?? 0).toDouble(),
+        ((item['top'] as num?) ?? 0).toDouble(),
+        ((item['right'] as num?) ?? 0).toDouble(),
+        ((item['bottom'] as num?) ?? 0).toDouble(),
+      );
+      final points = mode == _AnnotationMode.seg
+          ? _annotationPointsFromDatabase('${item['points'] ?? ''}')
+          : const <Offset>[];
+      result.putIfAbsent(imageKey, () => []).add(
+        _AnnotationRegion(
+          id: id,
+          mode: mode,
+          rect: _normalizeRect(rect),
+          classId: classId,
+          rotationDegrees: ((item['rotation'] as num?) ?? 0).toDouble(),
+          points: points,
+        ),
+      );
+    }
+    return result;
+  }
+
+  int _nextAnnotationSerial() {
+    var next = 1;
+    final pattern = RegExp(r'^ann_(\d+)$');
+    for (final annotations in _annotationsByImage.values) {
+      for (final annotation in annotations) {
+        final match = pattern.firstMatch(annotation.id);
+        if (match == null) {
+          next += 1;
+          continue;
+        }
+        final value = int.tryParse(match.group(1) ?? '');
+        if (value != null && value >= next) {
+          next = value + 1;
+        }
+      }
+    }
+    return next;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -802,6 +1115,8 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   void dispose() {
     _log('APP', 'Shutdown requested');
     _topMenuHideTimer?.cancel();
+    _databaseSaveTimer?.cancel();
+    unawaited(_saveAnnotationDatabaseNow());
     _logFlushTimer?.cancel();
     _flushLogs();
     _detectVideoSession.removeListener(_handleDetectVideoSessionChanged);
@@ -948,6 +1263,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     }
     _importedDataset = null;
     _insertImages([file.path], insertAfterIndex: insertAfterIndex);
+    await _loadAnnotationDatabaseForCurrentImages();
   }
 
   Future<void> _openImageFolder([String? path]) async {
@@ -970,17 +1286,57 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
         ..clear()
         ..addAll(files.map(_ImageItem.fromPath));
       _imageSplits.clear();
+      _labelClasses.clear();
+      _annotationsByImage.clear();
       _importedDataset = null;
       _selectedImageIndex = 0;
       _selectedAnnotationId = null;
+      _activeClassId = null;
+      _classSerial = 1;
+      _annotationSerial = 1;
       _undoStack.clear();
       _redoStack.clear();
       _activeSection = 'label';
     });
+    await _loadAnnotationDatabaseForCurrentImages();
+  }
+
+  Future<void> _openRecentFolder(String path) async {
+    if (!Directory(path).existsSync()) {
+      setState(() {
+        _recentFolders.removeWhere(
+          (entry) => _pathKey(entry.path) == _pathKey(path),
+        );
+      });
+      _saveHistory();
+      _log(
+        'HISTORY',
+        'Removed missing recent folder: $path',
+        level: _LogLevel.warning,
+      );
+      _showFloatingMessage(t('recent.missingFolder'));
+      return;
+    }
+    await _openImageFolder(path);
   }
 
   void _openRecentFile(String path) {
     _log('LABEL', 'Open recent file: $path');
+    if (!File(path).existsSync()) {
+      setState(() {
+        _recentFiles.removeWhere(
+          (entry) => _pathKey(entry.path) == _pathKey(path),
+        );
+      });
+      _saveHistory();
+      _log(
+        'HISTORY',
+        'Removed missing recent file: $path',
+        level: _LogLevel.warning,
+      );
+      _showFloatingMessage(t('recent.missingFile'));
+      return;
+    }
     if (_touchRecent(_recentFiles, path)) {
       _saveHistory();
     }
@@ -991,6 +1347,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     }
     _importedDataset = null;
     _insertImages([path]);
+    unawaited(_loadAnnotationDatabaseForCurrentImages());
   }
 
   void _insertImages(List<String> paths, {int? insertAfterIndex}) {
@@ -1043,6 +1400,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       _redoStack.clear();
     });
     _log('LABEL', 'Image removed: $removedPath, total=${_images.length}');
+    _scheduleAnnotationDatabaseSave();
   }
 
   void _setSelectedImageSplit(String split) {
@@ -1051,6 +1409,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       return;
     }
     setState(() => _imageSplits[imageKey] = split);
+    _scheduleAnnotationDatabaseSave();
   }
 
   Future<void> _showImageContextMenu(TapDownDetails details, int? index) async {
@@ -1249,6 +1608,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
         'IMPORT',
         'Dataset import completed: images=${uniqueEntries.length}, classes=${importedClasses.length}, annotations=$annotationCount, yaml=${file.path}',
       );
+      unawaited(_saveAnnotationDatabaseNow());
       _showFloatingMessage('${t('import.done')} (${uniqueEntries.length})');
     } on Object catch (error) {
       _log(
@@ -1339,6 +1699,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     final snapshot = _undoStack.removeLast();
     _redoStack.add(List<_AnnotationRegion>.of(_currentAnnotations));
     setState(() => _restoreCurrentImageAnnotations(snapshot));
+    _scheduleAnnotationDatabaseSave();
   }
 
   void _redoAnnotationChange() {
@@ -1348,6 +1709,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     final snapshot = _redoStack.removeLast();
     _undoStack.add(List<_AnnotationRegion>.of(_currentAnnotations));
     setState(() => _restoreCurrentImageAnnotations(snapshot));
+    _scheduleAnnotationDatabaseSave();
   }
 
   void _activateAnnotationMode(_AnnotationMode mode) {
@@ -1428,6 +1790,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       _labelClasses.add(labelClass);
       _activeClassId = id;
     });
+    _scheduleAnnotationDatabaseSave();
     return id;
   }
 
@@ -1447,6 +1810,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
         _labelClasses[index] = labelClass.copyWith(name: name.trim());
       }
     });
+    _scheduleAnnotationDatabaseSave();
   }
 
   Future<String?> _requestClassName({
@@ -1504,6 +1868,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
         );
       }
     });
+    _scheduleAnnotationDatabaseSave();
   }
 
   void _deleteLabelClass(_LabelClass labelClass) {
@@ -1520,6 +1885,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       }
       _selectedAnnotationId = null;
     });
+    _scheduleAnnotationDatabaseSave();
   }
 
   void _reorderLabelClass(int oldIndex, int newIndex) {
@@ -1527,6 +1893,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       final item = _labelClasses.removeAt(oldIndex);
       _labelClasses.insert(newIndex, item);
     });
+    _scheduleAnnotationDatabaseSave();
   }
 
   void _selectLabelClass(int id) {
@@ -1555,6 +1922,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       'Created ${annotation.mode.name}: image=${_selectedImage?.name ?? '-'}, classId=$classId',
       level: _LogLevel.debug,
     );
+    _scheduleAnnotationDatabaseSave();
   }
 
   void _createSegAnnotation(List<Offset> points, int classId) {
@@ -1584,6 +1952,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       'Created seg: image=${_selectedImage?.name ?? '-'}, classId=$classId, points=${points.length}',
       level: _LogLevel.debug,
     );
+    _scheduleAnnotationDatabaseSave();
   }
 
   void _selectAnnotation(String? id) {
@@ -1615,6 +1984,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
         annotations[index] = annotation;
       }
     });
+    _scheduleAnnotationDatabaseSave();
   }
 
   void _changeAnnotationClass(String annotationId, int classId) {
@@ -1642,6 +2012,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
         'Class changed: annotation=$annotationId, classId=$classId',
         level: _LogLevel.debug,
       );
+      _scheduleAnnotationDatabaseSave();
     }
   }
 
@@ -1660,6 +2031,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       }
     });
     _log('ANNOTATION', 'Deleted annotation: $id', level: _LogLevel.debug);
+    _scheduleAnnotationDatabaseSave();
   }
 
   void _deleteSelectedAnnotation() {
@@ -1871,6 +2243,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     setState(() => _aiAnnotating = true);
     await WidgetsBinding.instance.endOfFrame;
     var added = 0;
+    final classCountBefore = _labelClasses.length;
     try {
       if (targetIndices.length == 1 &&
           targetIndices.first == _selectedImageIndex) {
@@ -1928,6 +2301,9 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
         'AI',
         'AI annotation completed: targets=${targetIndices.length}, added=$added',
       );
+      if (added > 0 || _labelClasses.length != classCountBefore) {
+        _scheduleAnnotationDatabaseSave();
+      }
       _showFloatingMessage('${t('ai.done')} ($added)');
     } on Object catch (error) {
       _log('AI', 'AI annotation failed: $error', level: _LogLevel.error);
@@ -2364,6 +2740,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       'Pasted annotation: source=${copied.id}, pasted=${pasted.id}',
       level: _LogLevel.debug,
     );
+    _scheduleAnnotationDatabaseSave();
   }
 
   void _rotateSelectedAnnotation(double deltaDegrees) {
@@ -2647,15 +3024,14 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   }
 
   Future<void> _showLogViewerDialog() async {
-    final directory = _ConfigStore.logsDirectory;
-    if (!directory.existsSync()) {
-      directory.createSync(recursive: true);
-    }
-    final files = _logFilesByDate();
-    String? selectedPath = files.isEmpty ? null : files.first.path;
-    String logText = selectedPath == null
+    String dateKey(DateTime value) => value.toIso8601String().substring(0, 10);
+
+    _flushLogs();
+    var dates = _ConfigStore.logDates();
+    String? selectedDate = dates.isEmpty ? null : dates.first;
+    String logText = selectedDate == null
         ? t('logs.noLogs')
-        : await _readTrainingLogTail(selectedPath);
+        : _ConfigStore.readLogsForDate(selectedDate);
 
     if (!mounted) return;
     await showDialog<void>(
@@ -2663,6 +3039,50 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
+            Future<void> deleteLogRange() async {
+              final now = DateTime.now();
+              final parsedDates = dates
+                  .map(DateTime.tryParse)
+                  .whereType<DateTime>()
+                  .toList();
+              final firstDate = parsedDates.isEmpty
+                  ? now.subtract(const Duration(days: 365))
+                  : parsedDates.reduce((a, b) => a.isBefore(b) ? a : b);
+              final lastDate = parsedDates.isEmpty
+                  ? now
+                  : parsedDates.reduce((a, b) => a.isAfter(b) ? a : b);
+              final range = await showDateRangePicker(
+                context: context,
+                firstDate: firstDate,
+                lastDate: lastDate.isBefore(now) ? now : lastDate,
+                initialDateRange: DateTimeRange(
+                  start: selectedDate == null
+                      ? lastDate
+                      : DateTime.tryParse(selectedDate!) ?? lastDate,
+                  end: selectedDate == null
+                      ? lastDate
+                      : DateTime.tryParse(selectedDate!) ?? lastDate,
+                ),
+                helpText: t('logs.selectDeleteRange'),
+              );
+              if (range == null) {
+                return;
+              }
+              final deleted = _ConfigStore.deleteLogsByDateRange(
+                dateKey(range.start),
+                dateKey(range.end),
+              );
+              dates = _ConfigStore.logDates();
+              selectedDate = dates.contains(selectedDate)
+                  ? selectedDate
+                  : (dates.isEmpty ? null : dates.first);
+              logText = selectedDate == null
+                  ? t('logs.noLogs')
+                  : _ConfigStore.readLogsForDate(selectedDate!);
+              setDialogState(() {});
+              _showFloatingMessage('${t('logs.deleted')}: $deleted');
+            }
+
             return AlertDialog(
               title: Text(t('logs.title')),
               content: SizedBox(
@@ -2675,37 +3095,36 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                       children: [
                         Expanded(
                           child: DropdownButtonFormField<String>(
-                            initialValue: selectedPath,
+                            initialValue: selectedDate,
                             decoration: InputDecoration(
                               labelText: t('logs.date'),
                               isDense: true,
                             ),
                             items: [
-                              for (final file in files)
+                              for (final date in dates)
                                 DropdownMenuItem(
-                                  value: file.path,
-                                  child: Text(_fileName(file.path)),
+                                  value: date,
+                                  child: Text(date),
                                 ),
                             ],
-                            onChanged: files.isEmpty
+                            onChanged: dates.isEmpty
                                 ? null
-                                : (value) async {
+                                : (value) {
                                     if (value == null) return;
-                                    final nextText = await _readTrainingLogTail(
-                                      value,
-                                    );
                                     setDialogState(() {
-                                      selectedPath = value;
-                                      logText = nextText;
+                                      selectedDate = value;
+                                      logText = _ConfigStore.readLogsForDate(
+                                        value,
+                                      );
                                     });
                                   },
                           ),
                         ),
                         const SizedBox(width: 12),
                         OutlinedButton.icon(
-                          onPressed: () => _openLogsFolder(directory),
-                          icon: const Icon(Icons.folder_open),
-                          label: Text(t('logs.openFolder')),
+                          onPressed: dates.isEmpty ? null : deleteLogRange,
+                          icon: const Icon(Icons.delete_outline),
+                          label: Text(t('logs.deleteRange')),
                         ),
                       ],
                     ),
@@ -2765,6 +3184,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       _selectedAnnotationId = null;
     });
     _saveHistory();
+    unawaited(_saveAnnotationDatabaseNow());
     return _ConfigStore.cacheSizeInBytes();
   }
 
@@ -2792,7 +3212,8 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                   activeLanguageCode: _activeLanguageCode,
                   onOpenFile: () => _openImageFile(),
                   onOpenFolder: () => _openImageFolder(),
-                  onOpenRecentFolder: _openImageFolder,
+                  onOpenRecentFolder: (path) =>
+                      unawaited(_openRecentFolder(path)),
                   onOpenRecentFile: _openRecentFile,
                   onClearRecent: _clearRecentItems,
                   onExit: () => SystemNavigator.pop(),
@@ -2888,6 +3309,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                                 final key = _selectedImageKey;
                                 if (key != null && size != Size.zero) {
                                   _imageDisplaySizes[key] = size;
+                                  _scheduleAnnotationDatabaseSave();
                                 }
                               },
                             ),

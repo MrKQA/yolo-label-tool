@@ -1,12 +1,12 @@
 // =============================================================================
 // ConfigStore.dart - Configuration Persistence / 配置持久化
 // =============================================================================
-// JSON-based local config for history, settings, keybindings,
-// training preferences, and training history. Files stored under
-// %USERPROFILE%\.rustlabel\.
+// SQLite-based local config for history, settings, keybindings,
+// training preferences, training history, and application logs. The database
+// file is stored in the program root as AnnotationConfig.db.
 //
-// 基于 JSON 的本地配置读写：历史记录、设置、快捷键、训练偏好、
-// 训练历史。文件保存在 %USERPROFILE%\.rustlabel\ 目录下。
+// 本地配置持久化：历史记录、设置、快捷键、训练偏好、训练历史和应用日志。
+// 所有内容统一存入程序根目录的 AnnotationConfig.db，不再读取 JSON 或旧数据库。
 // =============================================================================
 
 // ignore_for_file: file_names
@@ -254,8 +254,12 @@ class _TrainingPreferences {
   final Map<String, int> chartColors;
 
   Map<String, Object> toJson() => {
-    if (modelPath case final p?) 'modelPath': p,
-    if (datasetPath case final p?) 'datasetPath': p,
+    ...modelPath == null
+        ? const <String, Object>{}
+        : {'modelPath': modelPath!},
+    ...datasetPath == null
+        ? const <String, Object>{}
+        : {'datasetPath': datasetPath!},
     'parameters': parameters.map((k, v) => MapEntry(k, v)),
     'batchModeIndex': batchModeIndex,
     'batchSize': batchSize,
@@ -348,6 +352,13 @@ List<_RecentEntry> _recentEntriesFromJson(Object? value) {
 }
 
 class _ConfigStore {
+  static const databaseFileName = 'AnnotationConfig.db';
+  static const _historyKey = 'history';
+  static const _keybindingsKey = 'keybindings';
+  static const _settingsKey = 'settings';
+  static const _trainingHistoryKey = 'training_history';
+  static const _trainingPreferencesKey = 'training_preferences';
+
   static Directory get projectDirectory {
     final current = Directory.current;
     if (_fileName(current.path).toLowerCase() == 'flutter') {
@@ -362,107 +373,150 @@ class _ConfigStore {
   static Directory get defaultDatasetsDirectory =>
       Directory('${projectDirectory.path}\\datasets');
 
-  static Directory get logsDirectory =>
-      Directory('${projectDirectory.path}\\logs');
+  static File get databaseFile =>
+      File('${projectDirectory.path}\\$databaseFileName');
 
-  static Directory get appLogsDirectory =>
-      Directory('${logsDirectory.path}\\app');
-
-  static Directory get configDirectory {
-    final homeDirectory =
-        Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'];
-    final root = homeDirectory == null || homeDirectory.isEmpty
-        ? Directory.current.path
-        : homeDirectory;
-    return Directory('$root\\.rustlabel');
+  static void ensureDefaultConfig() {
+    _ensureDbConfig(
+      _historyKey,
+      const _HistoryConfig(folders: [], files: []).toJson(),
+    );
+    _ensureDbConfig(_keybindingsKey, _ShortcutConfig.defaults().toJson());
+    _ensureDbConfig(
+      _settingsKey,
+      _AppSettings(
+        pythonPath: '',
+        outputPath: defaultRunsDirectory.path,
+        exportPath: defaultDatasetsDirectory.path,
+        logLevelIndex: 2,
+      ).toJson(),
+    );
+    _ensureDbConfig(
+      _trainingHistoryKey,
+      const _TrainingHistoryConfig(entries: []).toJson(),
+    );
+    _ensureDbConfig(
+      _trainingPreferencesKey,
+      _TrainingPreferences.fromJson(null).toJson(),
+    );
   }
 
-  static File get _historyFile =>
-      File('${configDirectory.path}\\$_historyFileName');
-
-  static File get _keybindingsFile =>
-      File('${configDirectory.path}\\$_keybindingsFileName');
-
-  static File get _settingsFile =>
-      File('${configDirectory.path}\\$_settingsFileName');
-
-  static File get _trainingHistoryFile =>
-      File('${configDirectory.path}\\$_trainingHistoryFileName');
-
-  static File get _trainingPreferencesFile =>
-      File('${configDirectory.path}\\$_trainingPreferencesFileName');
-
   static _HistoryConfig loadHistory() {
-    return _HistoryConfig.fromJson(_readJson(_historyFile));
+    return _HistoryConfig.fromJson(_readDbJson(_historyKey));
   }
 
   static _ShortcutConfig loadKeybindings() {
-    return _ShortcutConfig.fromJson(_readJson(_keybindingsFile));
+    return _ShortcutConfig.fromJson(_readDbJson(_keybindingsKey));
   }
 
   static _AppSettings loadSettings() {
-    return _AppSettings.fromJson(_readJson(_settingsFile));
+    return _AppSettings.fromJson(_readDbJson(_settingsKey));
   }
 
   static _TrainingHistoryConfig loadTrainingHistory() {
-    return _TrainingHistoryConfig.fromJson(_readJson(_trainingHistoryFile));
+    return _TrainingHistoryConfig.fromJson(_readDbJson(_trainingHistoryKey));
   }
 
   static void saveHistory(_HistoryConfig value) {
-    _writeJson(_historyFile, value.toJson());
+    _writeDbJson(_historyKey, value.toJson());
   }
 
   static void saveKeybindings(_ShortcutConfig value) {
-    _writeJson(_keybindingsFile, value.toJson());
+    _writeDbJson(_keybindingsKey, value.toJson());
   }
 
   static void saveSettings(_AppSettings value) {
-    _writeJson(_settingsFile, value.toJson());
+    _writeDbJson(_settingsKey, value.toJson());
   }
 
   static void saveTrainingHistory(_TrainingHistoryConfig value) {
-    _writeJson(_trainingHistoryFile, value.toJson());
+    _writeDbJson(_trainingHistoryKey, value.toJson());
   }
 
   static _TrainingPreferences loadTrainingPreferences() {
-    return _TrainingPreferences.fromJson(_readJson(_trainingPreferencesFile));
+    return _TrainingPreferences.fromJson(_readDbJson(_trainingPreferencesKey));
   }
 
   static void saveTrainingPreferences(_TrainingPreferences value) {
-    _writeJson(_trainingPreferencesFile, value.toJson());
+    _writeDbJson(_trainingPreferencesKey, value.toJson());
   }
 
   static int cacheSizeInBytes() {
+    return _databaseSizeInBytes();
+  }
+
+  static List<String> logDates() {
     try {
-      if (!configDirectory.existsSync()) {
-        return 0;
-      }
-      var total = 0;
-      for (final entity in configDirectory.listSync(recursive: true)) {
-        if (entity is File) {
-          total += entity.lengthSync();
-        }
-      }
-      return total;
+      return _RustVideoBackend.logDates();
+    } on Object {
+      return const [];
+    }
+  }
+
+  static String readLogsForDate(String date) {
+    try {
+      return _RustVideoBackend.readLogsForDate(date);
+    } on Object {
+      return '';
+    }
+  }
+
+  static int deleteLogsByDateRange(String startDate, String endDate) {
+    try {
+      return _RustVideoBackend.deleteLogsByDateRange(
+        startDate: startDate,
+        endDate: endDate,
+      );
     } on Object {
       return 0;
     }
   }
 
-  static Object? _readJson(File file) {
+  static void appendLogLines(String lines) {
     try {
-      if (!file.existsSync()) {
-        return null;
-      }
-      return jsonDecode(file.readAsStringSync());
+      _RustVideoBackend.appendLogLines(lines: lines);
     } on Object {
-      return null;
+      // DB-only logging: ignore write failures to avoid blocking the UI.
     }
   }
 
-  static void _writeJson(File file, Object value) {
-    configDirectory.createSync(recursive: true);
+  static Object? _readDbJson(String key) {
+    try {
+      final value = _RustVideoBackend.loadConfigValue(key: key);
+      if (value.trim().isNotEmpty) {
+        return jsonDecode(value);
+      }
+    } on Object {
+      return null;
+    }
+    return null;
+  }
+
+  static void _writeDbJson(String key, Object value) {
     const encoder = JsonEncoder.withIndent('  ');
-    file.writeAsStringSync(encoder.convert(value));
+    try {
+      _RustVideoBackend.saveConfigValue(key: key, value: encoder.convert(value));
+    } on Object {
+      // DB-only config: ignore write failures and keep current in-memory state.
+    }
+  }
+
+  static int _databaseSizeInBytes() {
+    try {
+      return databaseFile.existsSync() ? databaseFile.lengthSync() : 0;
+    } on Object {
+      return 0;
+    }
+  }
+
+  static void _ensureDbConfig(String key, Object defaultValue) {
+    try {
+      final value = _RustVideoBackend.loadConfigValue(key: key);
+      if (value.trim().isEmpty) {
+        _writeDbJson(key, defaultValue);
+      }
+    } on Object {
+      _writeDbJson(key, defaultValue);
+    }
   }
 }

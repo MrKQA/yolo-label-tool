@@ -79,6 +79,61 @@ class _RustVideoBackend {
     return Isolate.run(() => _preloadYoloPythonSync(pythonPath: pythonPath));
   }
 
+  static Future<Map<String, dynamic>> saveLabelDatabase({
+    required String payload,
+  }) {
+    return Isolate.run(() => _labelDatabaseSync(payload: payload, save: true));
+  }
+
+  static Future<Map<String, dynamic>> loadLabelDatabase({
+    required String payload,
+  }) {
+    return Isolate.run(() => _labelDatabaseSync(payload: payload, save: false));
+  }
+
+  static void saveConfigValue({required String key, required String value}) {
+    _configDatabaseSync(key: key, value: value, mode: 'save');
+  }
+
+  static String loadConfigValue({required String key}) {
+    final result = _configDatabaseSync(key: key, mode: 'load');
+    return '${result['value'] ?? ''}';
+  }
+
+  static void deleteConfigValue({required String key}) {
+    _configDatabaseSync(key: key, mode: 'delete');
+  }
+
+  static void appendLogLines({required String lines}) {
+    _logDatabaseSync(lines: lines, mode: 'append');
+  }
+
+  static List<String> logDates() {
+    final result = _logDatabaseSync(mode: 'dates');
+    final dates = result['dates'];
+    if (dates is! List) {
+      return const [];
+    }
+    return dates.map((item) => '$item').toList(growable: false);
+  }
+
+  static String readLogsForDate(String date) {
+    final result = _logDatabaseSync(date: date, mode: 'read');
+    return '${result['text'] ?? ''}';
+  }
+
+  static int deleteLogsByDateRange({
+    required String startDate,
+    required String endDate,
+  }) {
+    final result = _logDatabaseSync(
+      startDate: startDate,
+      endDate: endDate,
+      mode: 'delete',
+    );
+    return (result['deleted'] as num?)?.toInt() ?? 0;
+  }
+
   static Future<Uint8List> decodeFrame({
     required String videoPath,
     required double timestampSeconds,
@@ -389,6 +444,101 @@ class _RustVideoBackend {
     } finally {
       bindings.allocator.free(requestPtr);
     }
+  }
+
+  static Map<String, dynamic> _labelDatabaseSync({
+    required String payload,
+    required bool save,
+  }) {
+    final bindings = _RustVideoBindings.open();
+    final request = jsonEncode({'payload': payload});
+    final requestBytes = Uint8List.fromList(utf8.encode(request));
+    final requestPtr = bindings.allocator.allocate(requestBytes);
+    try {
+      final buffer = save
+          ? bindings.dbSaveSnapshotJson(requestPtr, requestBytes.length)
+          : bindings.dbLoadSnapshotJson(requestPtr, requestBytes.length);
+      final jsonText = bindings.takeUtf8(buffer);
+      final decoded = jsonDecode(jsonText);
+      if (decoded is! Map<String, dynamic>) {
+        throw StateError('Invalid label database response');
+      }
+      if (decoded['ok'] != true) {
+        throw StateError('${decoded['error'] ?? 'Label database failed'}');
+      }
+      return decoded;
+    } finally {
+      bindings.allocator.free(requestPtr);
+    }
+  }
+
+  static Map<String, dynamic> _configDatabaseSync({
+    required String key,
+    String value = '',
+    required String mode,
+  }) {
+    final bindings = _RustVideoBindings.open();
+    final request = jsonEncode({'key': key, 'value': value});
+    final requestBytes = Uint8List.fromList(utf8.encode(request));
+    final requestPtr = bindings.allocator.allocate(requestBytes);
+    try {
+      final buffer = switch (mode) {
+        'save' => bindings.dbSaveConfigJson(requestPtr, requestBytes.length),
+        'delete' => bindings.dbDeleteConfigJson(
+          requestPtr,
+          requestBytes.length,
+        ),
+        _ => bindings.dbLoadConfigJson(requestPtr, requestBytes.length),
+      };
+      return _decodeDbResponse(bindings, buffer, 'config database failed');
+    } finally {
+      bindings.allocator.free(requestPtr);
+    }
+  }
+
+  static Map<String, dynamic> _logDatabaseSync({
+    String lines = '',
+    String date = '',
+    String startDate = '',
+    String endDate = '',
+    required String mode,
+  }) {
+    final bindings = _RustVideoBindings.open();
+    final request = jsonEncode({
+      'lines': lines,
+      'date': date,
+      'startDate': startDate,
+      'endDate': endDate,
+    });
+    final requestBytes = Uint8List.fromList(utf8.encode(request));
+    final requestPtr = bindings.allocator.allocate(requestBytes);
+    try {
+      final buffer = switch (mode) {
+        'append' => bindings.dbAppendLogsJson(requestPtr, requestBytes.length),
+        'read' => bindings.dbReadLogsJson(requestPtr, requestBytes.length),
+        'delete' => bindings.dbDeleteLogsJson(requestPtr, requestBytes.length),
+        _ => bindings.dbLogDatesJson(requestPtr, requestBytes.length),
+      };
+      return _decodeDbResponse(bindings, buffer, 'log database failed');
+    } finally {
+      bindings.allocator.free(requestPtr);
+    }
+  }
+
+  static Map<String, dynamic> _decodeDbResponse(
+    _RustVideoBindings bindings,
+    _RustVideoByteBuffer buffer,
+    String fallbackError,
+  ) {
+    final jsonText = bindings.takeUtf8(buffer);
+    final decoded = jsonDecode(jsonText);
+    if (decoded is! Map<String, dynamic>) {
+      throw StateError('Invalid database response');
+    }
+    if (decoded['ok'] != true) {
+      throw StateError('${decoded['error'] ?? fallbackError}');
+    }
+    return decoded;
   }
 
   static _AiModelClassesResult _aiModelClassesSync({
@@ -727,6 +877,42 @@ typedef _ShutdownPythonJsonNative =
     _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
 typedef _ShutdownPythonJsonDart =
     _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+typedef _DbSaveSnapshotJsonNative =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef _DbSaveSnapshotJsonDart =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+typedef _DbLoadSnapshotJsonNative =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef _DbLoadSnapshotJsonDart =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+typedef _DbSaveConfigJsonNative =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef _DbSaveConfigJsonDart =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+typedef _DbLoadConfigJsonNative =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef _DbLoadConfigJsonDart =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+typedef _DbDeleteConfigJsonNative =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef _DbDeleteConfigJsonDart =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+typedef _DbAppendLogsJsonNative =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef _DbAppendLogsJsonDart =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+typedef _DbLogDatesJsonNative =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef _DbLogDatesJsonDart =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+typedef _DbReadLogsJsonNative =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef _DbReadLogsJsonDart =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+typedef _DbDeleteLogsJsonNative =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef _DbDeleteLogsJsonDart =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 
 typedef _FreeByteBufferNative = ffi.Void Function(_RustVideoByteBuffer);
 typedef _FreeByteBufferDart = void Function(_RustVideoByteBuffer);
@@ -775,6 +961,42 @@ class _RustVideoBindings {
           .lookupFunction<_ShutdownPythonJsonNative, _ShutdownPythonJsonDart>(
             'rust_label_shutdown_python_json',
           ),
+      dbSaveSnapshotJson = library
+          .lookupFunction<_DbSaveSnapshotJsonNative, _DbSaveSnapshotJsonDart>(
+            'rust_label_db_save_snapshot_json',
+          ),
+      dbLoadSnapshotJson = library
+          .lookupFunction<_DbLoadSnapshotJsonNative, _DbLoadSnapshotJsonDart>(
+            'rust_label_db_load_snapshot_json',
+          ),
+      dbSaveConfigJson = library
+          .lookupFunction<_DbSaveConfigJsonNative, _DbSaveConfigJsonDart>(
+            'rust_label_db_save_config_json',
+          ),
+      dbLoadConfigJson = library
+          .lookupFunction<_DbLoadConfigJsonNative, _DbLoadConfigJsonDart>(
+            'rust_label_db_load_config_json',
+          ),
+      dbDeleteConfigJson = library
+          .lookupFunction<_DbDeleteConfigJsonNative, _DbDeleteConfigJsonDart>(
+            'rust_label_db_delete_config_json',
+          ),
+      dbAppendLogsJson = library
+          .lookupFunction<_DbAppendLogsJsonNative, _DbAppendLogsJsonDart>(
+            'rust_label_db_append_logs_json',
+          ),
+      dbLogDatesJson = library
+          .lookupFunction<_DbLogDatesJsonNative, _DbLogDatesJsonDart>(
+            'rust_label_db_log_dates_json',
+          ),
+      dbReadLogsJson = library
+          .lookupFunction<_DbReadLogsJsonNative, _DbReadLogsJsonDart>(
+            'rust_label_db_read_logs_json',
+          ),
+      dbDeleteLogsJson = library
+          .lookupFunction<_DbDeleteLogsJsonNative, _DbDeleteLogsJsonDart>(
+            'rust_label_db_delete_logs_json',
+          ),
       _freeByteBuffer = library
           .lookupFunction<_FreeByteBufferNative, _FreeByteBufferDart>(
             'rust_label_free_byte_buffer',
@@ -791,6 +1013,15 @@ class _RustVideoBindings {
   final _PreloadYoloPythonJsonDart preloadYoloPythonJson;
   final _TrainingLogTailJsonDart trainingLogTailJson;
   final _ShutdownPythonJsonDart shutdownPythonJson;
+  final _DbSaveSnapshotJsonDart dbSaveSnapshotJson;
+  final _DbLoadSnapshotJsonDart dbLoadSnapshotJson;
+  final _DbSaveConfigJsonDart dbSaveConfigJson;
+  final _DbLoadConfigJsonDart dbLoadConfigJson;
+  final _DbDeleteConfigJsonDart dbDeleteConfigJson;
+  final _DbAppendLogsJsonDart dbAppendLogsJson;
+  final _DbLogDatesJsonDart dbLogDatesJson;
+  final _DbReadLogsJsonDart dbReadLogsJson;
+  final _DbDeleteLogsJsonDart dbDeleteLogsJson;
   final _FreeByteBufferDart _freeByteBuffer;
 
   static _RustVideoBindings open() {

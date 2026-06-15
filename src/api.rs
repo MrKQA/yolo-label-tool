@@ -14,6 +14,9 @@ pub mod ini_python;
 #[path = "detecting.rs"]
 pub mod detecting_mod;
 
+#[path = "database.rs"]
+pub mod database_mod;
+
 use training_mod::{TrainingConfig, TrainingProgress};
 
 /// Smoke-test function exposed to Flutter through flutter_rust_bridge.
@@ -303,6 +306,147 @@ pub unsafe extern "C" fn rust_label_shutdown_python_json(
         json_escape(&python_message),
         killed_children
     );
+    vec_into_ffi_buffer(result.into_bytes())
+}
+
+/// C ABI: save the current label workspace into AnnotationConfig.db.
+#[frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn rust_label_db_save_snapshot_json(
+    request_ptr: *const u8,
+    request_len: usize,
+) -> RustLabelByteBuffer {
+    let result = string_from_ffi(request_ptr, request_len)
+        .and_then(|request| {
+            let payload = required_json_string(&request, "payload")?;
+            database_mod::save_snapshot(&payload)
+        })
+        .unwrap_or_else(error_json);
+    vec_into_ffi_buffer(result.into_bytes())
+}
+
+/// C ABI: reconcile the current image list and load annotations from AnnotationConfig.db.
+#[frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn rust_label_db_load_snapshot_json(
+    request_ptr: *const u8,
+    request_len: usize,
+) -> RustLabelByteBuffer {
+    let result = string_from_ffi(request_ptr, request_len)
+        .and_then(|request| {
+            let payload = required_json_string(&request, "payload")?;
+            database_mod::load_snapshot(&payload)
+        })
+        .unwrap_or_else(error_json);
+    vec_into_ffi_buffer(result.into_bytes())
+}
+
+/// C ABI: save one application config JSON value into AnnotationConfig.db.
+#[frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn rust_label_db_save_config_json(
+    request_ptr: *const u8,
+    request_len: usize,
+) -> RustLabelByteBuffer {
+    let result = string_from_ffi(request_ptr, request_len)
+        .and_then(|request| {
+            let key = required_json_string(&request, "key")?;
+            let value = required_json_string(&request, "value")?;
+            database_mod::save_config_value(&key, &value)
+        })
+        .unwrap_or_else(error_json);
+    vec_into_ffi_buffer(result.into_bytes())
+}
+
+/// C ABI: load one application config JSON value from AnnotationConfig.db.
+#[frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn rust_label_db_load_config_json(
+    request_ptr: *const u8,
+    request_len: usize,
+) -> RustLabelByteBuffer {
+    let result = string_from_ffi(request_ptr, request_len)
+        .and_then(|request| {
+            let key = required_json_string(&request, "key")?;
+            database_mod::load_config_value(&key)
+        })
+        .unwrap_or_else(error_json);
+    vec_into_ffi_buffer(result.into_bytes())
+}
+
+/// C ABI: delete one application config value from AnnotationConfig.db.
+#[frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn rust_label_db_delete_config_json(
+    request_ptr: *const u8,
+    request_len: usize,
+) -> RustLabelByteBuffer {
+    let result = string_from_ffi(request_ptr, request_len)
+        .and_then(|request| {
+            let key = required_json_string(&request, "key")?;
+            database_mod::delete_config_value(&key)
+        })
+        .unwrap_or_else(error_json);
+    vec_into_ffi_buffer(result.into_bytes())
+}
+
+/// C ABI: append application log lines into AnnotationConfig.db.
+#[frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn rust_label_db_append_logs_json(
+    request_ptr: *const u8,
+    request_len: usize,
+) -> RustLabelByteBuffer {
+    let result = string_from_ffi(request_ptr, request_len)
+        .and_then(|request| {
+            let lines = required_json_string(&request, "lines")?;
+            database_mod::append_log_lines(&lines)
+        })
+        .unwrap_or_else(error_json);
+    vec_into_ffi_buffer(result.into_bytes())
+}
+
+/// C ABI: list application log dates stored in AnnotationConfig.db.
+#[frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn rust_label_db_log_dates_json(
+    _request_ptr: *const u8,
+    _request_len: usize,
+) -> RustLabelByteBuffer {
+    let result = database_mod::log_dates().unwrap_or_else(error_json);
+    vec_into_ffi_buffer(result.into_bytes())
+}
+
+/// C ABI: read application logs for one date from AnnotationConfig.db.
+#[frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn rust_label_db_read_logs_json(
+    request_ptr: *const u8,
+    request_len: usize,
+) -> RustLabelByteBuffer {
+    let result = string_from_ffi(request_ptr, request_len)
+        .and_then(|request| {
+            let date = required_json_string(&request, "date")?;
+            database_mod::read_logs_for_date(&date)
+        })
+        .unwrap_or_else(error_json);
+    vec_into_ffi_buffer(result.into_bytes())
+}
+
+/// C ABI: delete application logs in a closed date range from AnnotationConfig.db.
+#[frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn rust_label_db_delete_logs_json(
+    request_ptr: *const u8,
+    request_len: usize,
+) -> RustLabelByteBuffer {
+    let result = string_from_ffi(request_ptr, request_len)
+        .and_then(|request| {
+            let start_date = required_json_string(&request, "startDate")?;
+            let end_date = required_json_string(&request, "endDate")?;
+            database_mod::delete_logs_by_date_range(&start_date, &end_date)
+        })
+        .unwrap_or_else(error_json);
     vec_into_ffi_buffer(result.into_bytes())
 }
 

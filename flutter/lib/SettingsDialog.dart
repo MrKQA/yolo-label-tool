@@ -218,7 +218,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             children: [
               _SettingsReadOnlyRow(
                 label: t('settings.configPath'),
-                value: _ConfigStore.configDirectory.path,
+                value: _ConfigStore.databaseFile.path,
               ),
               const SizedBox(height: 12),
               _PathSettingRow(

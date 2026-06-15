@@ -145,17 +145,13 @@ ffmpeg/
 - Hardware decoder auto-detect: NVIDIA CUDA → Intel QSV → D3D11VA → CPU.
 - If extraction fails, verify `ffmpeg/bin/ffmpeg.exe` exists or set `FFMPEG_PATH`.
 
-## Config Files
+## Config Database
 
-Stored at `%USERPROFILE%\.rustlabel\`:
-
-| File | Content |
-|------|---------|
-| `settings.json` | Python path, training output path, export path |
-| `history.json` | Recently opened files and folders |
-| `keybindings.json` | Custom keyboard shortcuts |
-| `training_preferences.json` | Training parameter preferences |
-| `training_history.json` | Recent training history records |
+Runtime configuration is stored in `AnnotationConfig.db` in the program root.
+The database contains settings, recent files/folders, keybindings, training
+preferences, training history, application logs, image records, classes, and
+annotations. Legacy JSON config files and the old database name are no longer
+read by the application.
 
 ## FAQ
 
@@ -318,17 +314,11 @@ ffmpeg/
 - 硬件解码器自动检测（优先 NVIDIA CUDA → Intel QSV → D3D11VA → CPU）。
 - 取帧失败时检查 `ffmpeg/bin/ffmpeg.exe` 是否存在，或设置 `FFMPEG_PATH`。
 
-## 配置文件
+## 配置数据库
 
-保存在 `%USERPROFILE%\.rustlabel\`：
-
-| 文件 | 内容 |
-|------|------|
-| `settings.json` | Python 路径、训练输出路径、导出路径 |
-| `history.json` | 最近打开的文件和文件夹 |
-| `keybindings.json` | 自定义快捷键 |
-| `training_preferences.json` | 训练参数偏好 |
-| `training_history.json` | 最近训练操作记录 |
+程序根目录会自动创建 `AnnotationConfig.db`，用于保存设置、最近文件/文件夹、
+自定义按键、训练参数偏好、训练历史、应用日志、图片记录、类别和标注信息。
+程序不再读取旧 JSON 配置文件，也不再兼容旧数据库文件名。
 
 ## 常见问题
 

@@ -26,6 +26,7 @@ class _TrainingDeviceOption {
 }
 
 class _TrainPageState extends State<_TrainPage> {
+  final TextEditingController _datasetPathController = TextEditingController();
   final Map<String, double> _parameters = {
     'epochs': 300,
     'imgsz': 640,
@@ -64,7 +65,6 @@ class _TrainPageState extends State<_TrainPage> {
   List<_TrainingMetricPoint> _trainingMetricPoints = const [];
   bool _showTrainingTerminal = false;
   String _trainingLogText = '';
-  String? _activeTrainingLogPath;
   String? _modelPath;
   String? _datasetPath;
   _DatasetSummary? _datasetSummary;
@@ -130,6 +130,7 @@ class _TrainPageState extends State<_TrainPage> {
   void dispose() {
     _hideTimer?.cancel();
     _trainingTimer?.cancel();
+    _datasetPathController.dispose();
     super.dispose();
   }
 
@@ -212,38 +213,37 @@ class _TrainPageState extends State<_TrainPage> {
     if (prefs.chartColors.isNotEmpty) {
       _chartColors.addAll(prefs.chartColors);
     }
-    if (prefs.parameters.isNotEmpty) {
-      setState(() {
+    setState(() {
+      if (prefs.parameters.isNotEmpty) {
         _parameters.addAll(prefs.parameters);
-        _batchMode =
-            _BatchMode.values[prefs.batchModeIndex.clamp(
-              0,
-              _BatchMode.values.length - 1,
-            )];
-        _batchSize = prefs.batchSize;
-        _batchRatio = prefs.batchRatio;
-        _ampEnabled = prefs.ampEnabled;
-        _manualDeviceSelection = prefs.manualDeviceSelection;
-        if (_manualDeviceSelection && prefs.selectedDeviceIds.isNotEmpty) {
-          _selectedDeviceIds = _normalizeTrainingDeviceSelection(
-            prefs.selectedDeviceIds.toSet(),
-          );
-        }
-        if (prefs.modelPath != null && File(prefs.modelPath!).existsSync()) {
-          _modelOptions = _dedupeModelOptions(
-            _modelOptions,
-            preferredPath: prefs.modelPath,
-          );
-          _modelPath =
-              _matchingModelOption(prefs.modelPath!) ?? prefs.modelPath;
-        }
-        if (prefs.datasetPath != null &&
-            File(prefs.datasetPath!).existsSync()) {
-          _datasetPath = prefs.datasetPath;
-          _datasetSummary = _DatasetSummary.fromYamlFile(prefs.datasetPath!);
-        }
-      });
-    }
+      }
+      _batchMode =
+          _BatchMode.values[prefs.batchModeIndex.clamp(
+            0,
+            _BatchMode.values.length - 1,
+          )];
+      _batchSize = prefs.batchSize;
+      _batchRatio = prefs.batchRatio;
+      _ampEnabled = prefs.ampEnabled;
+      _manualDeviceSelection = prefs.manualDeviceSelection;
+      if (_manualDeviceSelection && prefs.selectedDeviceIds.isNotEmpty) {
+        _selectedDeviceIds = _normalizeTrainingDeviceSelection(
+          prefs.selectedDeviceIds.toSet(),
+        );
+      }
+      if (prefs.modelPath != null && File(prefs.modelPath!).existsSync()) {
+        _modelOptions = _dedupeModelOptions(
+          _modelOptions,
+          preferredPath: prefs.modelPath,
+        );
+        _modelPath = _matchingModelOption(prefs.modelPath!) ?? prefs.modelPath;
+      }
+      if (prefs.datasetPath != null && File(prefs.datasetPath!).existsSync()) {
+        _datasetPath = prefs.datasetPath;
+        _datasetPathController.text = prefs.datasetPath!;
+        _datasetSummary = _DatasetSummary.fromYamlFile(prefs.datasetPath!);
+      }
+    });
   }
 
   void _savePreferences() {
@@ -270,6 +270,7 @@ class _TrainPageState extends State<_TrainPage> {
           'epochs': 300,
           'imgsz': 640,
           'cls_pw': 0,
+          'workers': 4,
           'lr0': 0.01,
           'momentum': 0.937,
           'hsv_s': 0.25,
@@ -470,9 +471,28 @@ class _TrainPageState extends State<_TrainPage> {
     if (file == null) {
       return;
     }
+    await _loadDatasetPath(file.path);
+  }
+
+  Future<void> _loadDatasetPath(String rawPath) async {
+    if (_datasetLoading) {
+      return;
+    }
+    final path = rawPath.trim();
+    if (path.isEmpty) {
+      return;
+    }
+    if (!File(path).existsSync()) {
+      _log(
+        'TRAIN',
+        'Dataset path does not exist: $path',
+        level: _LogLevel.warning,
+      );
+      _showWarning('${t('train.datasetLoadFailed')}: $path');
+      return;
+    }
     setState(() => _datasetLoading = true);
     try {
-      final path = file.path;
       _log('TRAIN', 'Dataset summary loading: $path');
       final summary = await _loadDatasetSummaryInBackground(path);
       if (!mounted) {
@@ -480,6 +500,7 @@ class _TrainPageState extends State<_TrainPage> {
       }
       setState(() {
         _datasetPath = path;
+        _datasetPathController.text = path;
         _datasetSummary = summary;
         _parameters['cls_pw'] = summary.recommendedClsPw;
       });
@@ -492,7 +513,7 @@ class _TrainPageState extends State<_TrainPage> {
     } on Object catch (error) {
       _log(
         'TRAIN',
-        'Dataset summary failed: ${file.path}, error=$error',
+        'Dataset summary failed: $path, error=$error',
         level: _LogLevel.error,
       );
       if (mounted) {
@@ -563,7 +584,6 @@ class _TrainPageState extends State<_TrainPage> {
         ? null
         : initialMetricPoints.last.metrics;
     _trainingTimer?.cancel();
-    final logPath = _logFileForDate(DateTime.now()).path;
     _log(
       'TRAIN',
       'Starting training: model=${_fileName(_modelPath!)}, data=$_datasetPath, epochs=$totalEpochs, imgsz=${_parameters['imgsz']?.round() ?? 640}, batch=$_batchArgument, device=$_deviceArgument, workers=${_parameters['workers']?.round() ?? 4}, resume=$_useResumeTraining, amp=$_ampEnabled',
@@ -576,7 +596,6 @@ class _TrainPageState extends State<_TrainPage> {
       _currentEpoch = nextEpoch;
       _trainingMetrics = initialMetrics;
       _trainingMetricPoints = initialMetricPoints;
-      _activeTrainingLogPath = logPath;
       _trainingLogText = '';
     });
     _appendTrainingRecord(
@@ -611,7 +630,7 @@ class _TrainPageState extends State<_TrainPage> {
         resume: _useResumeTraining,
         clsPw: _parameters['cls_pw'] ?? 0,
       );
-      final logText = await _readTrainingLogTail(_activeTrainingLogPath);
+      final logText = await _readTrainingLogTail();
       if (mounted) {
         setState(() {
           _activeRunDir = runDir;
@@ -620,7 +639,7 @@ class _TrainPageState extends State<_TrainPage> {
       }
     } on Object catch (e) {
       _log('TRAIN', 'Training start failed: $e', level: _LogLevel.error);
-      final logText = await _readTrainingLogTail(_activeTrainingLogPath);
+      final logText = await _readTrainingLogTail();
       _trainingTimer?.cancel();
       if (mounted) {
         setState(() {
@@ -659,7 +678,7 @@ class _TrainPageState extends State<_TrainPage> {
     if (!mounted || !_trainingRunning) return;
     try {
       final progress = await _RustVideoBackend.pollYoloTrainingProgress();
-      final logText = await _readTrainingLogTail(_activeTrainingLogPath);
+      final logText = await _readTrainingLogTail();
       if (!mounted || !_trainingRunning) return;
       if (progress == null) {
         setState(() => _trainingLogText = logText);
@@ -728,7 +747,7 @@ class _TrainPageState extends State<_TrainPage> {
         'Training progress poll failed: $error',
         level: _LogLevel.warning,
       );
-      final logText = await _readTrainingLogTail(_activeTrainingLogPath);
+      final logText = await _readTrainingLogTail();
       if (mounted && _trainingRunning) {
         setState(() => _trainingLogText = logText);
       }
@@ -833,9 +852,11 @@ class _TrainPageState extends State<_TrainPage> {
     final summary = _DatasetSummary.fromYamlFile(dataYamlPath);
     setState(() {
       _datasetPath = dataYamlPath;
+      _datasetPathController.text = dataYamlPath;
       _datasetSummary = summary;
       _parameters['cls_pw'] = summary.recommendedClsPw;
     });
+    _savePreferences();
   }
 
   String? _checkpointDataYamlPath(String? modelPath) {
@@ -1051,12 +1072,32 @@ class _TrainPageState extends State<_TrainPage> {
                             color: Theme.of(context).colorScheme.error,
                           ),
                         ),
-                      if (_datasetPath != null)
-                        Text(
-                          '${t('train.datasetPath')}: $_datasetPath',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 860),
+                        child: TextField(
+                          controller: _datasetPathController,
+                          enabled: !_datasetLoading,
+                          minLines: 1,
+                          maxLines: 2,
+                          decoration: InputDecoration(
+                            labelText: t('train.datasetPath'),
+                            isDense: true,
+                            suffixIcon: IconButton(
+                              tooltip: t('train.chooseDataset'),
+                              onPressed: _datasetLoading
+                                  ? null
+                                  : () => unawaited(
+                                      _loadDatasetPath(
+                                        _datasetPathController.text,
+                                      ),
+                                    ),
+                              icon: const Icon(Icons.check),
+                            ),
+                          ),
+                          onSubmitted: (value) =>
+                              unawaited(_loadDatasetPath(value)),
                         ),
+                      ),
                       if (_activeRunDir != null)
                         Text(
                           _activeRunDir!,
@@ -1126,17 +1167,6 @@ class _TrainPageState extends State<_TrainPage> {
                                       },
                                     ),
                                     const Spacer(),
-                                    if (_activeTrainingLogPath != null)
-                                      Flexible(
-                                        child: Text(
-                                          _activeTrainingLogPath!,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: Theme.of(
-                                            context,
-                                          ).textTheme.bodySmall,
-                                        ),
-                                      ),
                                   ],
                                 ),
                               ),
@@ -1252,66 +1282,11 @@ class _TrainingMetrics {
   final double? lr;
 }
 
-File _logFileForDate(DateTime date) {
-  final y = date.year.toString().padLeft(4, '0');
-  final m = date.month.toString().padLeft(2, '0');
-  final d = date.day.toString().padLeft(2, '0');
-  return File('${_ConfigStore.logsDirectory.path}\\$y-$m-$d.log');
-}
-
-Future<String> _readTrainingLogTail(String? activePath) async {
-  final file = activePath == null ? _latestLogFile() : File(activePath);
-  if (file == null || !await file.exists()) {
-    return '';
-  }
+Future<String> _readTrainingLogTail() async {
   try {
-    final text = await file.readAsString();
-    const maxChars = 30 * 1024;
-    if (text.length <= maxChars) {
-      return text;
-    }
-    return text.substring(text.length - maxChars);
+    return await _RustVideoBackend.trainingLogTail(maxChars: 30 * 1024);
   } on Object catch (error) {
     return '${t('logs.readFailed')}: $error';
-  }
-}
-
-File? _latestLogFile() {
-  final directory = _ConfigStore.logsDirectory;
-  if (!directory.existsSync()) {
-    return null;
-  }
-  final files = _logFilesByDate();
-  if (files.isEmpty) {
-    return null;
-  }
-  return files.first;
-}
-
-List<File> _logFilesByDate() {
-  final directory = _ConfigStore.logsDirectory;
-  if (!directory.existsSync()) {
-    return const [];
-  }
-  final files = directory
-      .listSync(recursive: true)
-      .whereType<File>()
-      .where((file) => file.path.toLowerCase().endsWith('.log'))
-      .toList();
-  files.sort((a, b) {
-    final aTime = a.lastModifiedSync();
-    final bTime = b.lastModifiedSync();
-    return bTime.compareTo(aTime);
-  });
-  return files;
-}
-
-void _openLogsFolder(Directory directory) {
-  directory.createSync(recursive: true);
-  if (Platform.isWindows) {
-    Process.start('explorer.exe', [
-      directory.path,
-    ]).then((_) {}).catchError((_) {});
   }
 }
 

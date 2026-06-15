@@ -12,6 +12,9 @@ ffmpeg/
 #FEATURES
 FEATURES.md
 
+#database
+*.db
+
 # IDE
 .idea/
 .vscode/
