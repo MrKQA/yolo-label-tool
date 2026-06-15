@@ -112,7 +112,7 @@ Label page → right toolbar → Export button → configure options → exports
 
 ## FFmpeg Setup
 
-Video frame extraction requires FFmpeg. Use [gyan.dev](https://www.gyan.dev/ffmpeg/builds/packages/) Windows builds.
+Video frame extraction requires FFmpeg. Use [gyan.dev](https://www.gyan.dev/ffmpeg/) Windows builds.
 
 ### Download
 
@@ -281,7 +281,7 @@ flutter_rust_bridge_codegen generate
 
 ## FFmpeg 配置
 
-视频取帧功能依赖 FFmpeg。推荐使用 [gyan.dev](https://www.gyan.dev/ffmpeg/builds/packages/) 的 Windows 构建版本。
+视频取帧功能依赖 FFmpeg。推荐使用 [gyan.dev](https://www.gyan.dev/ffmpeg/) 的 Windows 构建版本。
 
 ### 下载
 
