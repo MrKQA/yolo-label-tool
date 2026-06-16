@@ -134,6 +134,64 @@ class _RustVideoBackend {
     return (result['deleted'] as num?)?.toInt() ?? 0;
   }
 
+  static Future<Map<String, dynamic>> databaseOverview() {
+    return Isolate.run(_databaseOverviewSync);
+  }
+
+  static Future<Map<String, dynamic>> databaseTable({
+    required String table,
+    String projectId = '',
+    String imageId = '',
+    int limit = 50,
+    int offset = 0,
+  }) {
+    return Isolate.run(
+      () => _databaseTableSync(
+        table: table,
+        projectId: projectId,
+        imageId: imageId,
+        limit: limit,
+        offset: offset,
+      ),
+    );
+  }
+
+  static Future<Map<String, dynamic>> databaseSqlQuery({required String sql}) {
+    return Isolate.run(() => _databaseSqlQuerySync(sql: sql));
+  }
+
+  static Future<List<String>> trainingLogDates() {
+    return Isolate.run(() {
+      final result = _trainingLogDatabaseSync(mode: 'dates');
+      final dates = result['dates'];
+      if (dates is! List) {
+        return const <String>[];
+      }
+      return dates.map((item) => '$item').toList(growable: false);
+    });
+  }
+
+  static Future<String> readTrainingLogForDate(String date) {
+    return Isolate.run(() {
+      final result = _trainingLogDatabaseSync(mode: 'read', date: date);
+      return '${result['text'] ?? ''}';
+    });
+  }
+
+  static Future<int> deleteTrainingLogsByDateRange({
+    required String startDate,
+    required String endDate,
+  }) {
+    return Isolate.run(() {
+      final result = _trainingLogDatabaseSync(
+        mode: 'delete',
+        startDate: startDate,
+        endDate: endDate,
+      );
+      return (result['deleted'] as num?)?.toInt() ?? 0;
+    });
+  }
+
   static Future<Uint8List> decodeFrame({
     required String videoPath,
     required double timestampSeconds,
@@ -520,6 +578,88 @@ class _RustVideoBackend {
         _ => bindings.dbLogDatesJson(requestPtr, requestBytes.length),
       };
       return _decodeDbResponse(bindings, buffer, 'log database failed');
+    } finally {
+      bindings.allocator.free(requestPtr);
+    }
+  }
+
+  static Map<String, dynamic> _databaseOverviewSync() {
+    final bindings = _RustVideoBindings.open();
+    final requestBytes = Uint8List.fromList(utf8.encode('{}'));
+    final requestPtr = bindings.allocator.allocate(requestBytes);
+    try {
+      final buffer = bindings.dbOverviewJson(requestPtr, requestBytes.length);
+      return _decodeDbResponse(bindings, buffer, 'database overview failed');
+    } finally {
+      bindings.allocator.free(requestPtr);
+    }
+  }
+
+  static Map<String, dynamic> _databaseTableSync({
+    required String table,
+    required String projectId,
+    required String imageId,
+    required int limit,
+    required int offset,
+  }) {
+    final bindings = _RustVideoBindings.open();
+    final request = jsonEncode({
+      'table': table,
+      'projectId': projectId,
+      'imageId': imageId,
+      'limit': limit.toString(),
+      'offset': offset.toString(),
+    });
+    final requestBytes = Uint8List.fromList(utf8.encode(request));
+    final requestPtr = bindings.allocator.allocate(requestBytes);
+    try {
+      final buffer = bindings.dbTableJson(requestPtr, requestBytes.length);
+      return _decodeDbResponse(bindings, buffer, 'database table failed');
+    } finally {
+      bindings.allocator.free(requestPtr);
+    }
+  }
+
+  static Map<String, dynamic> _databaseSqlQuerySync({required String sql}) {
+    final bindings = _RustVideoBindings.open();
+    final request = jsonEncode({'sql': sql});
+    final requestBytes = Uint8List.fromList(utf8.encode(request));
+    final requestPtr = bindings.allocator.allocate(requestBytes);
+    try {
+      final buffer = bindings.dbSqlQueryJson(requestPtr, requestBytes.length);
+      return _decodeDbResponse(bindings, buffer, 'database SQL query failed');
+    } finally {
+      bindings.allocator.free(requestPtr);
+    }
+  }
+
+  static Map<String, dynamic> _trainingLogDatabaseSync({
+    String date = '',
+    String startDate = '',
+    String endDate = '',
+    required String mode,
+  }) {
+    final bindings = _RustVideoBindings.open();
+    final request = jsonEncode({
+      'date': date,
+      'startDate': startDate,
+      'endDate': endDate,
+    });
+    final requestBytes = Uint8List.fromList(utf8.encode(request));
+    final requestPtr = bindings.allocator.allocate(requestBytes);
+    try {
+      final buffer = switch (mode) {
+        'read' => bindings.readTrainingLogJson(
+          requestPtr,
+          requestBytes.length,
+        ),
+        'delete' => bindings.deleteTrainingLogsJson(
+          requestPtr,
+          requestBytes.length,
+        ),
+        _ => bindings.trainingLogDatesJson(requestPtr, requestBytes.length),
+      };
+      return _decodeDbResponse(bindings, buffer, 'training log database failed');
     } finally {
       bindings.allocator.free(requestPtr);
     }
@@ -913,6 +1053,30 @@ typedef _DbDeleteLogsJsonNative =
     _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
 typedef _DbDeleteLogsJsonDart =
     _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+typedef _DbOverviewJsonNative =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef _DbOverviewJsonDart =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+typedef _DbTableJsonNative =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef _DbTableJsonDart =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+typedef _DbSqlQueryJsonNative =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef _DbSqlQueryJsonDart =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+typedef _TrainingLogDatesJsonNative =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef _TrainingLogDatesJsonDart =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+typedef _ReadTrainingLogJsonNative =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef _ReadTrainingLogJsonDart =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+typedef _DeleteTrainingLogsJsonNative =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef _DeleteTrainingLogsJsonDart =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 
 typedef _FreeByteBufferNative = ffi.Void Function(_RustVideoByteBuffer);
 typedef _FreeByteBufferDart = void Function(_RustVideoByteBuffer);
@@ -997,6 +1161,31 @@ class _RustVideoBindings {
           .lookupFunction<_DbDeleteLogsJsonNative, _DbDeleteLogsJsonDart>(
             'rust_label_db_delete_logs_json',
           ),
+      dbOverviewJson = library
+          .lookupFunction<_DbOverviewJsonNative, _DbOverviewJsonDart>(
+            'rust_label_db_overview_json',
+          ),
+      dbTableJson = library.lookupFunction<_DbTableJsonNative, _DbTableJsonDart>(
+        'rust_label_db_table_json',
+      ),
+      dbSqlQueryJson = library
+          .lookupFunction<_DbSqlQueryJsonNative, _DbSqlQueryJsonDart>(
+            'rust_label_db_sql_query_json',
+          ),
+      trainingLogDatesJson = library
+          .lookupFunction<
+            _TrainingLogDatesJsonNative,
+            _TrainingLogDatesJsonDart
+          >('rust_label_training_log_dates_json'),
+      readTrainingLogJson = library
+          .lookupFunction<_ReadTrainingLogJsonNative, _ReadTrainingLogJsonDart>(
+            'rust_label_read_training_log_json',
+          ),
+      deleteTrainingLogsJson = library
+          .lookupFunction<
+            _DeleteTrainingLogsJsonNative,
+            _DeleteTrainingLogsJsonDart
+          >('rust_label_delete_training_logs_json'),
       _freeByteBuffer = library
           .lookupFunction<_FreeByteBufferNative, _FreeByteBufferDart>(
             'rust_label_free_byte_buffer',
@@ -1022,6 +1211,12 @@ class _RustVideoBindings {
   final _DbLogDatesJsonDart dbLogDatesJson;
   final _DbReadLogsJsonDart dbReadLogsJson;
   final _DbDeleteLogsJsonDart dbDeleteLogsJson;
+  final _DbOverviewJsonDart dbOverviewJson;
+  final _DbTableJsonDart dbTableJson;
+  final _DbSqlQueryJsonDart dbSqlQueryJson;
+  final _TrainingLogDatesJsonDart trainingLogDatesJson;
+  final _ReadTrainingLogJsonDart readTrainingLogJson;
+  final _DeleteTrainingLogsJsonDart deleteTrainingLogsJson;
   final _FreeByteBufferDart _freeByteBuffer;
 
   static _RustVideoBindings open() {

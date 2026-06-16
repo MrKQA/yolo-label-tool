@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{params, types::ValueRef, Connection, OptionalExtension, Params};
 use std::collections::HashSet;
 use std::env;
 use std::path::{Path, PathBuf};
@@ -245,6 +245,305 @@ pub fn delete_logs_by_date_range(start_date: &str, end_date: &str) -> Result<Str
     ))
 }
 
+pub fn database_overview() -> Result<String, String> {
+    let db_path = database_path()?;
+    let connection = open_database(&db_path)?;
+    init_schema(&connection)?;
+    let (deleted_images, deleted_projects) = cleanup_missing_label_data(&connection)?;
+    let file_size = std::fs::metadata(&db_path)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
+    let table_names = [
+        "projects",
+        "images",
+        "classes",
+        "annotations",
+        "app_config",
+        "app_logs",
+    ];
+    let mut output = format!(
+        "{{\"ok\":true,\"dbPath\":\"{}\",\"fileSizeBytes\":{},\"cleanupDeletedImages\":{},\"cleanupDeletedProjects\":{},\"tables\":[",
+        json_escape(&db_path.to_string_lossy()),
+        file_size,
+        deleted_images,
+        deleted_projects
+    );
+    for (index, table_name) in table_names.iter().enumerate() {
+        if index > 0 {
+            output.push(',');
+        }
+        output.push_str(&format!(
+            "{{\"name\":\"{}\",\"rows\":{}}}",
+            json_escape(table_name),
+            count_rows(&connection, table_name)?
+        ));
+    }
+    output.push_str("],\"configKeys\":[");
+    let mut stmt = connection
+        .prepare("SELECT key, updated_at FROM app_config ORDER BY key")
+        .map_err(|error| error.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|error| error.to_string())?;
+    for (index, row) in rows.enumerate() {
+        let (key, updated_at) = row.map_err(|error| error.to_string())?;
+        if index > 0 {
+            output.push(',');
+        }
+        output.push_str(&format!(
+            "{{\"key\":\"{}\",\"updatedAt\":\"{}\"}}",
+            json_escape(&key),
+            json_escape(&updated_at)
+        ));
+    }
+    output.push_str("]}");
+    Ok(output)
+}
+
+pub fn database_table(
+    table: &str,
+    project_id: &str,
+    image_id: &str,
+    limit: &str,
+    offset: &str,
+) -> Result<String, String> {
+    let db_path = database_path()?;
+    let connection = open_database(&db_path)?;
+    init_schema(&connection)?;
+    cleanup_missing_label_data(&connection)?;
+    let project_id = parse_optional_i64(project_id);
+    let image_id = parse_optional_i64(image_id);
+    let limit = parse_page_limit(limit);
+    let offset = parse_nonnegative_i64(offset);
+    match table {
+        "projects" => query_table_json(
+            &connection,
+            &db_path,
+            "projects",
+            &[
+                "id",
+                "name",
+                "root_path",
+                "data_yaml_path",
+                "image_count",
+                "class_count",
+                "annotation_count",
+                "updated_at",
+            ],
+            r#"
+            SELECT p.id, p.name, p.root_path, p.data_yaml_path,
+                   COUNT(DISTINCT i.id) AS image_count,
+                   COUNT(DISTINCT c.id) AS class_count,
+                   COUNT(DISTINCT a.id) AS annotation_count,
+                   p.updated_at
+            FROM projects p
+            LEFT JOIN images i ON i.project_id = p.id
+            LEFT JOIN classes c ON c.project_id = p.id
+            LEFT JOIN annotations a ON a.image_id = i.id
+            GROUP BY p.id
+            ORDER BY p.updated_at DESC, p.id DESC
+            LIMIT ? OFFSET ?
+            "#,
+            params![limit, offset],
+        ),
+        "images" => {
+            if let Some(project_id) = project_id {
+                query_table_json(
+                    &connection,
+                    &db_path,
+                    "images",
+                    &[
+                        "id",
+                        "project_id",
+                        "file_name",
+                        "path",
+                        "split",
+                        "width",
+                        "height",
+                        "sort_index",
+                        "annotation_count",
+                        "file_exists",
+                        "updated_at",
+                    ],
+                    r#"
+                    SELECT i.id, i.project_id, i.file_name, i.path, i.split,
+                           i.width, i.height, i.sort_index,
+                           COUNT(a.id) AS annotation_count,
+                           CASE WHEN i.path <> '' THEN 'yes' ELSE 'no' END AS file_exists,
+                           i.updated_at
+                    FROM images i
+                    LEFT JOIN annotations a ON a.image_id = i.id
+                    WHERE i.project_id = ?
+                    GROUP BY i.id
+                    ORDER BY i.sort_index, i.file_name
+                    LIMIT ? OFFSET ?
+                    "#,
+                    params![project_id, limit, offset],
+                )
+            } else {
+                query_table_json(
+                    &connection,
+                    &db_path,
+                    "images",
+                    &[
+                        "id",
+                        "project_id",
+                        "file_name",
+                        "path",
+                        "split",
+                        "width",
+                        "height",
+                        "sort_index",
+                        "annotation_count",
+                        "file_exists",
+                        "updated_at",
+                    ],
+                    r#"
+                    SELECT i.id, i.project_id, i.file_name, i.path, i.split,
+                           i.width, i.height, i.sort_index,
+                           COUNT(a.id) AS annotation_count,
+                           CASE WHEN i.path <> '' THEN 'yes' ELSE 'no' END AS file_exists,
+                           i.updated_at
+                    FROM images i
+                    LEFT JOIN annotations a ON a.image_id = i.id
+                    GROUP BY i.id
+                    ORDER BY i.project_id, i.sort_index, i.file_name
+                    LIMIT ? OFFSET ?
+                    "#,
+                    params![limit, offset],
+                )
+            }
+        }
+        "classes" => {
+            if let Some(project_id) = project_id {
+                query_table_json(
+                    &connection,
+                    &db_path,
+                    "classes",
+                    &[
+                        "id",
+                        "project_id",
+                        "class_id",
+                        "name",
+                        "color",
+                        "color_hex",
+                        "annotation_count",
+                        "updated_at",
+                    ],
+                    r#"
+                    SELECT c.id, c.project_id, c.class_id, c.name, c.color,
+                           printf('#%06X', c.color & 16777215) AS color_hex,
+                           COUNT(a.id) AS annotation_count,
+                           c.updated_at
+                    FROM classes c
+                    LEFT JOIN annotations a
+                        ON a.class_id = c.class_id
+                       AND a.image_id IN (SELECT id FROM images WHERE project_id = c.project_id)
+                    WHERE c.project_id = ?
+                    GROUP BY c.id
+                    ORDER BY c.class_id
+                    LIMIT ? OFFSET ?
+                    "#,
+                    params![project_id, limit, offset],
+                )
+            } else {
+                query_table_json(
+                    &connection,
+                    &db_path,
+                    "classes",
+                    &[
+                        "id",
+                        "project_id",
+                        "class_id",
+                        "name",
+                        "color",
+                        "color_hex",
+                        "annotation_count",
+                        "updated_at",
+                    ],
+                    r#"
+                    SELECT c.id, c.project_id, c.class_id, c.name, c.color,
+                           printf('#%06X', c.color & 16777215) AS color_hex,
+                           COUNT(a.id) AS annotation_count,
+                           c.updated_at
+                    FROM classes c
+                    LEFT JOIN annotations a
+                        ON a.class_id = c.class_id
+                       AND a.image_id IN (SELECT id FROM images WHERE project_id = c.project_id)
+                    GROUP BY c.id
+                    ORDER BY c.project_id, c.class_id
+                    LIMIT ? OFFSET ?
+                    "#,
+                    params![limit, offset],
+                )
+            }
+        }
+        "annotations" => {
+            if let Some(image_id) = image_id {
+                query_table_json(
+                    &connection,
+                    &db_path,
+                    "annotations",
+                    annotation_columns(),
+                    annotation_sql("a.image_id = ?"),
+                    params![image_id, limit, offset],
+                )
+            } else if let Some(project_id) = project_id {
+                query_table_json(
+                    &connection,
+                    &db_path,
+                    "annotations",
+                    annotation_columns(),
+                    annotation_sql("i.project_id = ?"),
+                    params![project_id, limit, offset],
+                )
+            } else {
+                query_table_json(
+                    &connection,
+                    &db_path,
+                    "annotations",
+                    annotation_columns(),
+                    annotation_sql("1 = 1"),
+                    params![limit, offset],
+                )
+            }
+        }
+        "app_config" => query_table_json(
+            &connection,
+            &db_path,
+            "app_config",
+            &["key", "value", "created_at", "updated_at"],
+            "SELECT key, value, created_at, updated_at FROM app_config ORDER BY key LIMIT ? OFFSET ?",
+            params![limit, offset],
+        ),
+        "app_logs" => query_table_json(
+            &connection,
+            &db_path,
+            "app_logs",
+            &["id", "created_at", "log_date", "level", "tag", "line"],
+            r#"
+            SELECT id, created_at, log_date, level, tag, line
+            FROM app_logs
+            ORDER BY id DESC
+            LIMIT ? OFFSET ?
+            "#,
+            params![limit, offset],
+        ),
+        _ => Err(format!("Unsupported database table: {table}")),
+    }
+}
+
+pub fn database_sql_query(sql: &str) -> Result<String, String> {
+    let db_path = database_path()?;
+    let connection = open_database(&db_path)?;
+    init_schema(&connection)?;
+    cleanup_missing_label_data(&connection)?;
+    let sql = readonly_sql(sql)?;
+    query_sql_json(&connection, &db_path, &sql, 5_000)
+}
+
 fn database_path() -> Result<PathBuf, String> {
     let root = application_root()?;
     Ok(root.join(DATABASE_FILE_NAME))
@@ -276,6 +575,334 @@ fn is_project_root(path: &Path) -> bool {
 
 fn open_database(path: &Path) -> Result<Connection, String> {
     Connection::open(path).map_err(|error| format!("open database {}: {error}", path.display()))
+}
+
+fn count_rows(connection: &Connection, table_name: &str) -> Result<i64, String> {
+    let sql = format!("SELECT COUNT(*) FROM {table_name}");
+    connection
+        .query_row(&sql, [], |row| row.get::<_, i64>(0))
+        .map_err(|error| error.to_string())
+}
+
+fn cleanup_missing_label_data(connection: &Connection) -> Result<(usize, usize), String> {
+    let mut stmt = connection
+        .prepare("SELECT id, path FROM images")
+        .map_err(|error| error.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|error| error.to_string())?;
+    let mut missing_image_ids = Vec::new();
+    for row in rows {
+        let (image_id, path) = row.map_err(|error| error.to_string())?;
+        if !Path::new(&path).exists() {
+            missing_image_ids.push(image_id);
+        }
+    }
+    drop(stmt);
+
+    for image_id in &missing_image_ids {
+        connection
+            .execute("DELETE FROM annotations WHERE image_id=?", params![image_id])
+            .map_err(|error| error.to_string())?;
+        connection
+            .execute("DELETE FROM images WHERE id=?", params![image_id])
+            .map_err(|error| error.to_string())?;
+    }
+
+    let mut project_stmt = connection
+        .prepare(
+            r#"
+            SELECT p.id
+            FROM projects p
+            LEFT JOIN images i ON i.project_id = p.id
+            WHERE p.id <> 1
+            GROUP BY p.id
+            HAVING COUNT(i.id) = 0
+            "#,
+        )
+        .map_err(|error| error.to_string())?;
+    let project_rows = project_stmt
+        .query_map([], |row| row.get::<_, i64>(0))
+        .map_err(|error| error.to_string())?;
+    let mut remove_project_ids = Vec::new();
+    for row in project_rows {
+        remove_project_ids.push(row.map_err(|error| error.to_string())?);
+    }
+    drop(project_stmt);
+
+    for project_id in &remove_project_ids {
+        connection
+            .execute("DELETE FROM classes WHERE project_id=?", params![project_id])
+            .map_err(|error| error.to_string())?;
+        connection
+            .execute("DELETE FROM projects WHERE id=?", params![project_id])
+            .map_err(|error| error.to_string())?;
+    }
+
+    Ok((missing_image_ids.len(), remove_project_ids.len()))
+}
+
+fn query_table_json<P: Params, S: AsRef<str>>(
+    connection: &Connection,
+    db_path: &Path,
+    table: &str,
+    columns: &[&str],
+    sql: S,
+    params: P,
+) -> Result<String, String> {
+    let mut stmt = connection
+        .prepare(sql.as_ref())
+        .map_err(|error| error.to_string())?;
+    let column_count = stmt.column_count();
+    let rows = stmt
+        .query_map(params, |row| {
+            let mut values = Vec::with_capacity(column_count);
+            for index in 0..column_count {
+                let value = row.get_ref(index)?;
+                values.push(sql_value_to_string(value));
+            }
+            Ok(values)
+        })
+        .map_err(|error| error.to_string())?;
+    let mut output = format!(
+        "{{\"ok\":true,\"dbPath\":\"{}\",\"table\":\"{}\",\"columns\":[",
+        json_escape(&db_path.to_string_lossy()),
+        json_escape(table)
+    );
+    for (index, column) in columns.iter().enumerate() {
+        if index > 0 {
+            output.push(',');
+        }
+        output.push('"');
+        output.push_str(&json_escape(column));
+        output.push('"');
+    }
+    output.push_str("],\"rows\":[");
+    for (row_index, row) in rows.enumerate() {
+        let values = row.map_err(|error| error.to_string())?;
+        if row_index > 0 {
+            output.push(',');
+        }
+        output.push('{');
+        for (index, column) in columns.iter().enumerate() {
+            if index > 0 {
+                output.push(',');
+            }
+            let value = values.get(index).map(String::as_str).unwrap_or_default();
+            output.push_str(&format!(
+                "\"{}\":\"{}\"",
+                json_escape(column),
+                json_escape(value)
+            ));
+        }
+        output.push('}');
+    }
+    output.push_str("]}");
+    Ok(output)
+}
+
+fn query_sql_json(
+    connection: &Connection,
+    db_path: &Path,
+    sql: &str,
+    max_rows: usize,
+) -> Result<String, String> {
+    let mut stmt = connection.prepare(sql).map_err(|error| error.to_string())?;
+    let columns = stmt
+        .column_names()
+        .iter()
+        .map(|name| name.to_string())
+        .collect::<Vec<_>>();
+    let column_count = stmt.column_count();
+    let mut rows = stmt.query([]).map_err(|error| error.to_string())?;
+    let mut output = format!(
+        "{{\"ok\":true,\"dbPath\":\"{}\",\"sql\":\"{}\",\"columns\":[",
+        json_escape(&db_path.to_string_lossy()),
+        json_escape(sql)
+    );
+    for (index, column) in columns.iter().enumerate() {
+        if index > 0 {
+            output.push(',');
+        }
+        output.push('"');
+        output.push_str(&json_escape(column));
+        output.push('"');
+    }
+    output.push_str("],\"rows\":[");
+    let mut row_count = 0usize;
+    let mut truncated = false;
+    while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+        if row_count >= max_rows {
+            truncated = true;
+            break;
+        }
+        if row_count > 0 {
+            output.push(',');
+        }
+        output.push('{');
+        for (index, column) in columns.iter().enumerate().take(column_count) {
+            if index > 0 {
+                output.push(',');
+            }
+            let value = row
+                .get_ref(index)
+                .map(sql_value_to_string)
+                .map_err(|error| error.to_string())?;
+            output.push_str(&format!(
+                "\"{}\":\"{}\"",
+                json_escape(column),
+                json_escape(&value)
+            ));
+        }
+        output.push('}');
+        row_count += 1;
+    }
+    output.push_str(&format!(
+        "],\"rowCount\":{},\"truncated\":{}}}",
+        row_count, truncated
+    ));
+    Ok(output)
+}
+
+fn readonly_sql(sql: &str) -> Result<String, String> {
+    let trimmed = sql.trim().trim_end_matches(';').trim();
+    if trimmed.is_empty() {
+        return Err("SQL is empty".to_string());
+    }
+    if trimmed.contains(';') {
+        return Err("Only one read-only SQL statement is allowed".to_string());
+    }
+    let without_comments = strip_leading_sql_comments(trimmed);
+    let normalized = without_comments
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase();
+    let padded = format!(" {normalized} ");
+    for forbidden in [
+        " insert ",
+        " update ",
+        " delete ",
+        " drop ",
+        " alter ",
+        " create ",
+        " replace ",
+        " attach ",
+        " detach ",
+        " vacuum ",
+        " reindex ",
+    ] {
+        if padded.contains(forbidden) {
+            return Err("Write and schema-changing SQL statements are not allowed".to_string());
+        }
+    }
+    let allowed = normalized.starts_with("select ")
+        || normalized == "select"
+        || normalized.starts_with("with ")
+        || normalized.starts_with("pragma table_info(")
+        || normalized.starts_with("pragma index_list(")
+        || normalized.starts_with("pragma index_info(")
+        || normalized.starts_with("pragma foreign_key_list(");
+    if !allowed {
+        return Err(
+            "Only read-only SELECT/WITH queries and table structure PRAGMA queries are allowed"
+                .to_string(),
+        );
+    }
+    Ok(without_comments.trim().to_string())
+}
+
+fn strip_leading_sql_comments(mut sql: &str) -> &str {
+    loop {
+        let trimmed = sql.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("--") {
+            if let Some(newline) = rest.find('\n') {
+                sql = &rest[newline + 1..];
+                continue;
+            }
+            return "";
+        }
+        if let Some(rest) = trimmed.strip_prefix("/*") {
+            if let Some(end) = rest.find("*/") {
+                sql = &rest[end + 2..];
+                continue;
+            }
+            return "";
+        }
+        return trimmed;
+    }
+}
+
+fn sql_value_to_string(value: ValueRef<'_>) -> String {
+    match value {
+        ValueRef::Null => String::new(),
+        ValueRef::Integer(value) => value.to_string(),
+        ValueRef::Real(value) => finite_json_number(value),
+        ValueRef::Text(value) => String::from_utf8_lossy(value).into_owned(),
+        ValueRef::Blob(value) => format!("<blob {} bytes>", value.len()),
+    }
+}
+
+fn annotation_columns() -> &'static [&'static str] {
+    &[
+        "id",
+        "image_id",
+        "project_id",
+        "file_name",
+        "image_path",
+        "kind",
+        "class_id",
+        "class_name",
+        "left",
+        "top",
+        "right",
+        "bottom",
+        "rotation",
+        "points",
+        "source",
+        "confidence",
+        "updated_at",
+    ]
+}
+
+fn annotation_sql(where_clause: &str) -> String {
+    format!(
+        r#"
+        SELECT a.id, a.image_id, i.project_id, i.file_name, i.path,
+               a.kind, a.class_id, COALESCE(c.name, '') AS class_name,
+               a.left, a.top, a.right, a.bottom, a.rotation,
+               a.points, a.source, a.confidence, a.updated_at
+        FROM annotations a
+        INNER JOIN images i ON i.id = a.image_id
+        LEFT JOIN classes c ON c.project_id = i.project_id AND c.class_id = a.class_id
+        WHERE {where_clause}
+        ORDER BY i.sort_index, a.created_at, a.id
+        LIMIT ? OFFSET ?
+        "#
+    )
+}
+
+fn parse_optional_i64(value: &str) -> Option<i64> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        trimmed.parse::<i64>().ok()
+    }
+}
+
+fn parse_page_limit(value: &str) -> i64 {
+    value
+        .trim()
+        .parse::<i64>()
+        .unwrap_or(50)
+        .clamp(1, 200)
+}
+
+fn parse_nonnegative_i64(value: &str) -> i64 {
+    value.trim().parse::<i64>().unwrap_or(0).max(0)
 }
 
 fn parse_payload(payload: &str) -> SnapshotPayload {
@@ -383,6 +1010,8 @@ fn init_schema(connection: &Connection) -> Result<(), String> {
             );
             CREATE INDEX IF NOT EXISTS idx_images_project_file_name
                 ON images(project_id, file_name);
+            CREATE INDEX IF NOT EXISTS idx_images_project_path
+                ON images(project_id, path);
             CREATE TABLE IF NOT EXISTS classes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id INTEGER NOT NULL,
@@ -394,6 +1023,8 @@ fn init_schema(connection: &Connection) -> Result<(), String> {
                 UNIQUE(project_id, class_id),
                 FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
             );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_classes_project_class
+                ON classes(project_id, class_id);
             CREATE TABLE IF NOT EXISTS annotations (
                 id TEXT NOT NULL,
                 image_id INTEGER NOT NULL,
@@ -412,6 +1043,12 @@ fn init_schema(connection: &Connection) -> Result<(), String> {
                 PRIMARY KEY(image_id, id),
                 FOREIGN KEY(image_id) REFERENCES images(id) ON DELETE CASCADE
             );
+            CREATE INDEX IF NOT EXISTS idx_annotations_class_id
+                ON annotations(class_id);
+            CREATE INDEX IF NOT EXISTS idx_annotations_kind
+                ON annotations(kind);
+            CREATE INDEX IF NOT EXISTS idx_annotations_class_kind
+                ON annotations(class_id, kind);
             CREATE TABLE IF NOT EXISTS app_config (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
@@ -712,6 +1349,17 @@ fn image_id_by_path(
     project_id: i64,
     path: &str,
 ) -> Result<Option<i64>, String> {
+    let exact = connection
+        .query_row(
+            "SELECT id FROM images WHERE project_id=? AND path=?",
+            params![project_id, path],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    if exact.is_some() {
+        return Ok(exact);
+    }
     image_id_by_path_key(connection, project_id, &path_key(path))
 }
 

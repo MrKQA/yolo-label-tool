@@ -3,7 +3,6 @@
 part of 'main.dart';
 
 const _videoExtensions = {'mp4', 'avi', 'mov', 'mkv', 'webm', 'wmv', 'flv'};
-const _detectImageSizeOptions = [320, 416, 640, 800, 960, 1280];
 const _detectDeviceOptions = ['auto', 'nv', 'cpu'];
 const _mediaTypeGroup = XTypeGroup(
   label: 'Image or video',
@@ -1021,6 +1020,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
     try {
       var completed = 0;
       var totalLabels = 0;
+      final deviceArgument = _detectDeviceArgument(_session.detectDevice);
       final outputDir = await _detectOutputDirectory(
         save: save,
         modelPath: modelPath,
@@ -1028,7 +1028,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
       );
       _log(
         'DETECT',
-        'Detection started: save=$save, currentOnly=$currentOnly, allImages=$allImages, targets=${targets.length}, model=${_fileName(modelPath)}, device=${_session.detectDevice}, imgsz=${_session.detectImageSize}, conf=${_session.detectConf.toStringAsFixed(2)}, outputDir=$outputDir, startFrame=$startFrame',
+        'Detection started: save=$save, currentOnly=$currentOnly, allImages=$allImages, targets=${targets.length}, model=${_fileName(modelPath)}, device=$deviceArgument, deviceSelection=${_session.detectDevice}, imgsz=${_session.detectImageSize}, conf=${_session.detectConf.toStringAsFixed(2)}, outputDir=$outputDir, startFrame=$startFrame',
       );
       for (final target in targets) {
         if (!mounted) {
@@ -1064,7 +1064,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
           confThreshold: _session.detectConf,
           iouThreshold: 0.45,
           imgsz: _session.detectImageSize,
-          device: _session.detectDevice,
+          device: deviceArgument,
           previewFrames: previewVideo,
           cancelPath: cancelPath,
           startFrame: previewVideo ? startFrame : 0,
@@ -1308,13 +1308,38 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
       _confController.text = _session.detectConf.toStringAsFixed(2);
       return;
     }
-    final clamped = parsed.clamp(0.01, 1.0).toDouble();
+    _setDetectConf(parsed);
+  }
+
+  void _setDetectConf(double value) {
+    final clamped = value.clamp(0.01, 1.0).toDouble();
     _session.detectConf = clamped;
     final normalized = clamped.toStringAsFixed(2);
     if (_confController.text != normalized) {
       _confController.text = normalized;
     }
     _session._emit();
+  }
+
+  String get _selectedDetectDeviceValue {
+    final value = _detectDeviceOptions.contains(_session.detectDevice)
+        ? _session.detectDevice
+        : 'auto';
+    if (value == 'nv' && _nvidiaDeviceOptions.isEmpty) {
+      return 'auto';
+    }
+    return value;
+  }
+
+  String _detectDeviceArgument(String value) {
+    final normalized = _detectDeviceOptions.contains(value) ? value : 'auto';
+    if (normalized == 'cpu') {
+      return 'cpu';
+    }
+    if (normalized == 'nv') {
+      return _nvidiaDeviceOptions.firstOrNullValue?.id ?? 'cpu';
+    }
+    return 'auto';
   }
 
   void _showDetectMessage(String message) {
@@ -1420,9 +1445,9 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
 
   @override
   Widget build(BuildContext context) {
-    final deviceValue = _detectDeviceOptions.contains(_session.detectDevice)
-        ? _session.detectDevice
-        : 'auto';
+    final deviceValue = _selectedDetectDeviceValue;
+    final deviceArgument = _detectDeviceArgument(deviceValue);
+    final hasNvidiaDevice = _nvidiaDeviceOptions.isNotEmpty;
     final nvidiaDeviceLabel =
         _nvidiaDeviceOptions.firstOrNullValue?.label ??
         t('detect.deviceNvUnavailable');
@@ -1558,10 +1583,11 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
                 child: _parameterPanelVisible
                     ? _DetectParameterPanel(
                         session: _session,
-                        confController: _confController,
                         deviceValue: deviceValue,
+                        deviceArgument: deviceArgument,
                         autoDeviceLabel: autoDeviceLabel,
                         nvidiaDeviceLabel: nvidiaDeviceLabel,
+                        hasNvidiaDevice: hasNvidiaDevice,
                         onChooseModel: () => unawaited(_chooseDetectModel()),
                         onResetEffect: () =>
                             unawaited(_resetPredictionEffect()),
@@ -1570,12 +1596,15 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
                         onSaveAll: () => unawaited(_handleSaveAll()),
                         onToggleResult: () =>
                             unawaited(_handleTogglePredictionResult()),
-                        onApplyConf: _applyConfText,
+                        onConfChanged: _setDetectConf,
                         onImageSizeChanged: (value) {
                           _session.detectImageSize = value;
                           _session._emit();
                         },
                         onDeviceChanged: (value) {
+                          if (value == 'nv' && !hasNvidiaDevice) {
+                            return;
+                          }
                           _session.detectDevice = value;
                           _session._emit();
                         },
@@ -1659,33 +1688,35 @@ class _DetectPreviewList extends StatelessWidget {
 class _DetectParameterPanel extends StatelessWidget {
   const _DetectParameterPanel({
     required this.session,
-    required this.confController,
     required this.deviceValue,
+    required this.deviceArgument,
     required this.autoDeviceLabel,
     required this.nvidiaDeviceLabel,
+    required this.hasNvidiaDevice,
     required this.onChooseModel,
     required this.onResetEffect,
     required this.onPredict,
     required this.onSaveCurrent,
     required this.onSaveAll,
     required this.onToggleResult,
-    required this.onApplyConf,
+    required this.onConfChanged,
     required this.onImageSizeChanged,
     required this.onDeviceChanged,
   });
 
   final _DetectVideoSession session;
-  final TextEditingController confController;
   final String deviceValue;
+  final String deviceArgument;
   final String autoDeviceLabel;
   final String nvidiaDeviceLabel;
+  final bool hasNvidiaDevice;
   final VoidCallback onChooseModel;
   final VoidCallback onResetEffect;
   final VoidCallback onPredict;
   final VoidCallback onSaveCurrent;
   final VoidCallback onSaveAll;
   final VoidCallback onToggleResult;
-  final VoidCallback onApplyConf;
+  final ValueChanged<double> onConfChanged;
   final ValueChanged<int> onImageSizeChanged;
   final ValueChanged<String> onDeviceChanged;
 
@@ -1814,77 +1845,79 @@ class _DetectParameterPanel extends StatelessWidget {
                 ],
                 const SizedBox(height: 14),
                 _ParameterSectionTitle(title: t('detect.inferenceParams')),
-                DropdownButtonFormField<int>(
-                  initialValue: session.detectImageSize,
-                  items: [
-                    for (final size in _detectImageSizeOptions)
-                      DropdownMenuItem(value: size, child: Text('$size')),
-                  ],
-                  onChanged: session.predicting
-                      ? null
-                      : (value) {
-                          if (value != null) {
-                            onImageSizeChanged(value);
-                          }
-                        },
-                  decoration: InputDecoration(
-                    labelText: t('detect.imgsz'),
-                    isDense: true,
-                  ),
+                _ImageSizeParameterEditor(
+                  value: session.detectImageSize.toDouble(),
+                  enabled: !session.predicting,
+                  onChanged: (value) => onImageSizeChanged(value.round()),
                 ),
                 const SizedBox(height: 10),
-                TextField(
-                  controller: confController,
-                  enabled: !session.predicting,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  onEditingComplete: onApplyConf,
-                  onSubmitted: (_) => onApplyConf(),
-                  decoration: InputDecoration(
-                    labelText: t('detect.conf'),
-                    isDense: true,
+                Tooltip(
+                  message: t('detect.conf'),
+                  waitDuration: const Duration(milliseconds: 500),
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Column(
+                      children: [
+                        _ParameterHeader(
+                          name: t('detect.conf'),
+                          value:
+                              'conf=${session.detectConf.toStringAsFixed(2)}',
+                        ),
+                        _CompactSlider(
+                          value: session.detectConf,
+                          min: 0.01,
+                          max: 1.0,
+                          divisions: 99,
+                          label: session.detectConf.toStringAsFixed(2),
+                          enabled: !session.predicting,
+                          onChanged: onConfChanged,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(height: 10),
                 Tooltip(
                   message: t('detect.deviceHelp'),
                   waitDuration: const Duration(milliseconds: 500),
-                  child: DropdownButtonFormField<String>(
-                    isExpanded: true,
-                    initialValue: deviceValue,
-                    items: [
-                      DropdownMenuItem(
-                        value: 'auto',
-                        child: Text(
-                          autoDeviceLabel,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _ParameterHeader(
+                          name: t('detect.device'),
+                          value: 'device=$deviceArgument',
                         ),
-                      ),
-                      DropdownMenuItem(
-                        value: 'nv',
-                        child: Text(
-                          nvidiaDeviceLabel,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            _DetectDeviceChip(
+                              value: 'auto',
+                              label: autoDeviceLabel,
+                              selected: deviceValue == 'auto',
+                              enabled: !session.predicting,
+                              onSelected: onDeviceChanged,
+                            ),
+                            _DetectDeviceChip(
+                              value: 'nv',
+                              label: nvidiaDeviceLabel,
+                              selected: deviceValue == 'nv',
+                              enabled: !session.predicting && hasNvidiaDevice,
+                              onSelected: onDeviceChanged,
+                            ),
+                            _DetectDeviceChip(
+                              value: 'cpu',
+                              label: t('detect.deviceCpu'),
+                              selected: deviceValue == 'cpu',
+                              enabled: !session.predicting,
+                              onSelected: onDeviceChanged,
+                            ),
+                          ],
                         ),
-                      ),
-                      DropdownMenuItem(
-                        value: 'cpu',
-                        child: Text(t('detect.deviceCpu')),
-                      ),
-                    ],
-                    onChanged: session.predicting
-                        ? null
-                        : (value) {
-                            if (value != null) {
-                              onDeviceChanged(value);
-                            }
-                          },
-                    decoration: InputDecoration(
-                      labelText: t('detect.device'),
-                      isDense: true,
+                      ],
                     ),
                   ),
                 ),
@@ -1892,6 +1925,46 @@ class _DetectParameterPanel extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _DetectDeviceChip extends StatelessWidget {
+  const _DetectDeviceChip({
+    required this.value,
+    required this.label,
+    required this.selected,
+    required this.enabled,
+    required this.onSelected,
+  });
+
+  final String value;
+  final String label;
+  final bool selected;
+  final bool enabled;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: label,
+      waitDuration: const Duration(milliseconds: 500),
+      child: FilterChip(
+        selected: selected,
+        label: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 210),
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        avatar: Icon(
+          selected ? Icons.check_circle : Icons.memory_outlined,
+          size: 18,
+        ),
+        onSelected: enabled ? (_) => onSelected(value) : null,
       ),
     );
   }

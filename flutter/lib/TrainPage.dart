@@ -1525,6 +1525,7 @@ class _BatchParameterEditor extends StatelessWidget {
                 divisions: 127,
                 label: batchSize.round().toString(),
                 onChanged: onBatchSizeChanged,
+                integer: true,
               )
             else if (mode == _BatchMode.autoGpuRatio)
               _CompactSlider(
@@ -1656,6 +1657,8 @@ class _CompactSlider extends StatelessWidget {
     required this.divisions,
     required this.label,
     required this.onChanged,
+    this.integer = false,
+    this.enabled = true,
   });
 
   final double value;
@@ -1664,6 +1667,8 @@ class _CompactSlider extends StatelessWidget {
   final int divisions;
   final String label;
   final ValueChanged<double> onChanged;
+  final bool integer;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
@@ -1676,11 +1681,125 @@ class _CompactSlider extends StatelessWidget {
             max: max,
             divisions: divisions,
             label: label,
-            onChanged: onChanged,
+            onChanged: enabled ? onChanged : null,
           ),
         ),
-        SizedBox(width: 56, child: Text(label, textAlign: TextAlign.right)),
+        _NumericParameterField(
+          value: value,
+          label: label,
+          min: min,
+          max: max,
+          integer: integer,
+          enabled: enabled,
+          onSubmitted: onChanged,
+        ),
       ],
+    );
+  }
+}
+
+class _NumericParameterField extends StatefulWidget {
+  const _NumericParameterField({
+    required this.value,
+    required this.label,
+    required this.min,
+    required this.max,
+    required this.integer,
+    required this.onSubmitted,
+    this.normalize,
+    this.enabled = true,
+  });
+
+  final double value;
+  final String label;
+  final double min;
+  final double max;
+  final bool integer;
+  final bool enabled;
+  final double Function(double value)? normalize;
+  final ValueChanged<double> onSubmitted;
+
+  @override
+  State<_NumericParameterField> createState() => _NumericParameterFieldState();
+}
+
+class _NumericParameterFieldState extends State<_NumericParameterField> {
+  late final TextEditingController _controller;
+  late final FocusNode _focusNode;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.label);
+    _focusNode = FocusNode(debugLabel: 'parameter-value');
+    _focusNode.addListener(_handleFocusChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant _NumericParameterField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_focusNode.hasFocus &&
+        oldWidget.value != widget.value &&
+        _controller.text != widget.label) {
+      _controller.text = widget.label;
+    }
+  }
+
+  @override
+  void dispose() {
+    _focusNode.removeListener(_handleFocusChanged);
+    _focusNode.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _handleFocusChanged() {
+    if (!_focusNode.hasFocus) {
+      _commit();
+    }
+  }
+
+  void _commit() {
+    if (!widget.enabled) {
+      return;
+    }
+    final parsed = double.tryParse(_controller.text.trim());
+    if (parsed == null) {
+      _controller.text = widget.label;
+      return;
+    }
+    var next = parsed.clamp(widget.min, widget.max).toDouble();
+    if (widget.integer) {
+      next = next.roundToDouble();
+    }
+    next = widget.normalize?.call(next) ?? next;
+    widget.onSubmitted(next);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 72,
+      child: TextField(
+        controller: _controller,
+        focusNode: _focusNode,
+        enabled: widget.enabled,
+        textAlign: TextAlign.right,
+        keyboardType: TextInputType.numberWithOptions(
+          decimal: !widget.integer,
+        ),
+        inputFormatters: [
+          FilteringTextInputFormatter.allow(
+            widget.integer ? RegExp(r'[0-9]') : RegExp(r'[0-9.]'),
+          ),
+        ],
+        decoration: const InputDecoration(
+          isDense: true,
+          border: OutlineInputBorder(),
+          contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        ),
+        onSubmitted: (_) => _commit(),
+      ),
     );
   }
 }
@@ -1709,10 +1828,12 @@ class _ImageSizeParameterEditor extends StatelessWidget {
   const _ImageSizeParameterEditor({
     required this.value,
     required this.onChanged,
+    this.enabled = true,
   });
 
   final double value;
   final ValueChanged<double> onChanged;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
@@ -1733,18 +1854,26 @@ class _ImageSizeParameterEditor extends StatelessWidget {
                 max: (_imageSizeOptions.length - 1).toDouble(),
                 divisions: _imageSizeOptions.length - 1,
                 label: currentSize.toString(),
-                onChanged: (sliderIndex) {
-                  final nextIndex = sliderIndex.round().clamp(
-                    0,
-                    _imageSizeOptions.length - 1,
-                  );
-                  onChanged(_imageSizeOptions[nextIndex].toDouble());
-                },
+                onChanged: enabled
+                    ? (sliderIndex) {
+                        final nextIndex = sliderIndex.round().clamp(
+                          0,
+                          _imageSizeOptions.length - 1,
+                        );
+                        onChanged(_imageSizeOptions[nextIndex].toDouble());
+                      }
+                    : null,
               ),
             ),
-            SizedBox(
-              width: 56,
-              child: Text(currentSize.toString(), textAlign: TextAlign.right),
+            _NumericParameterField(
+              value: currentSize.toDouble(),
+              label: currentSize.toString(),
+              min: _imageSizeOptions.first.toDouble(),
+              max: _imageSizeOptions.last.toDouble(),
+              integer: true,
+              normalize: _nearestImageSizeValue,
+              enabled: enabled,
+              onSubmitted: onChanged,
             ),
           ],
         ),
@@ -1793,7 +1922,15 @@ class _ParameterEditor extends StatelessWidget {
                 onChanged: onChanged,
               ),
             ),
-            SizedBox(width: 56, child: Text(label, textAlign: TextAlign.right)),
+            _NumericParameterField(
+              value: value,
+              label: label,
+              min: min,
+              max: max,
+              integer: integerLike,
+              normalize: (input) => _normalizeParameterValue(name, input),
+              onSubmitted: onChanged,
+            ),
           ],
         ),
       ),
@@ -2239,6 +2376,20 @@ int _nearestImageSizeIndex(double value) {
     }
   }
   return nearestIndex;
+}
+
+double _nearestImageSizeValue(double value) {
+  return _imageSizeOptions[_nearestImageSizeIndex(value)].toDouble();
+}
+
+double _normalizeParameterValue(String name, double value) {
+  if (name == 'imgsz') {
+    return _nearestImageSizeValue(value);
+  }
+  if ({'epochs', 'workers'}.contains(name)) {
+    return value.roundToDouble();
+  }
+  return value;
 }
 
 String _formatParameterValue(String name, double value) {

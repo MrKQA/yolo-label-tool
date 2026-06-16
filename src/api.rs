@@ -450,6 +450,97 @@ pub unsafe extern "C" fn rust_label_db_delete_logs_json(
     vec_into_ffi_buffer(result.into_bytes())
 }
 
+/// C ABI: summarize AnnotationConfig.db tables and config keys.
+#[frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn rust_label_db_overview_json(
+    _request_ptr: *const u8,
+    _request_len: usize,
+) -> RustLabelByteBuffer {
+    let result = database_mod::database_overview().unwrap_or_else(error_json);
+    vec_into_ffi_buffer(result.into_bytes())
+}
+
+/// C ABI: query a whitelisted AnnotationConfig.db table for the database manager.
+#[frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn rust_label_db_table_json(
+    request_ptr: *const u8,
+    request_len: usize,
+) -> RustLabelByteBuffer {
+    let result = string_from_ffi(request_ptr, request_len)
+        .and_then(|request| {
+            let table = required_json_string(&request, "table")?;
+            let project_id = required_json_string(&request, "projectId").unwrap_or_default();
+            let image_id = required_json_string(&request, "imageId").unwrap_or_default();
+            let limit = required_json_string(&request, "limit").unwrap_or_default();
+            let offset = required_json_string(&request, "offset").unwrap_or_default();
+            database_mod::database_table(&table, &project_id, &image_id, &limit, &offset)
+        })
+        .unwrap_or_else(error_json);
+    vec_into_ffi_buffer(result.into_bytes())
+}
+
+/// C ABI: run one read-only SQL query against AnnotationConfig.db.
+#[frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn rust_label_db_sql_query_json(
+    request_ptr: *const u8,
+    request_len: usize,
+) -> RustLabelByteBuffer {
+    let result = string_from_ffi(request_ptr, request_len)
+        .and_then(|request| {
+            let sql = required_json_string(&request, "sql")?;
+            database_mod::database_sql_query(&sql)
+        })
+        .unwrap_or_else(error_json);
+    vec_into_ffi_buffer(result.into_bytes())
+}
+
+/// C ABI: list date-based training terminal logs stored under the project logs folder.
+#[frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn rust_label_training_log_dates_json(
+    _request_ptr: *const u8,
+    _request_len: usize,
+) -> RustLabelByteBuffer {
+    let result = training_mod::training_log_dates_json().unwrap_or_else(error_json);
+    vec_into_ffi_buffer(result.into_bytes())
+}
+
+/// C ABI: read one date-based training terminal log.
+#[frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn rust_label_read_training_log_json(
+    request_ptr: *const u8,
+    request_len: usize,
+) -> RustLabelByteBuffer {
+    let result = string_from_ffi(request_ptr, request_len)
+        .and_then(|request| {
+            let date = required_json_string(&request, "date")?;
+            training_mod::read_training_log_for_date_json(&date)
+        })
+        .unwrap_or_else(error_json);
+    vec_into_ffi_buffer(result.into_bytes())
+}
+
+/// C ABI: delete date-based training terminal logs in a closed range.
+#[frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn rust_label_delete_training_logs_json(
+    request_ptr: *const u8,
+    request_len: usize,
+) -> RustLabelByteBuffer {
+    let result = string_from_ffi(request_ptr, request_len)
+        .and_then(|request| {
+            let start_date = required_json_string(&request, "startDate")?;
+            let end_date = required_json_string(&request, "endDate")?;
+            training_mod::delete_training_logs_by_date_range_json(&start_date, &end_date)
+        })
+        .unwrap_or_else(error_json);
+    vec_into_ffi_buffer(result.into_bytes())
+}
+
 /// C ABI: free buffers returned by `rust_label_*` FFI functions.
 #[frb(ignore)]
 #[no_mangle]

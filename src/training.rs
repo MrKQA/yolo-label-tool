@@ -855,6 +855,82 @@ pub fn training_log_tail(max_chars: usize) -> Result<(String, String), String> {
     Ok((path.to_string_lossy().into_owned(), tail))
 }
 
+pub fn training_log_dates_json() -> Result<String, String> {
+    let directory = training_logs_directory()?;
+    let mut dates = Vec::new();
+    if directory.exists() {
+        for entry in fs::read_dir(&directory)
+            .map_err(|error| format!("read logs dir {}: {error}", directory.display()))?
+        {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("log") {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            if is_safe_log_date(stem) {
+                dates.push(stem.to_string());
+            }
+        }
+    }
+    dates.sort_by(|a, b| b.cmp(a));
+    Ok(string_array_json("dates", &dates))
+}
+
+pub fn read_training_log_for_date_json(date: &str) -> Result<String, String> {
+    let date = safe_log_date(date)?;
+    let path = training_logs_directory()?.join(format!("{date}.log"));
+    let text = if path.exists() {
+        fs::read_to_string(&path)
+            .map_err(|error| format!("read training log {}: {error}", path.display()))?
+    } else {
+        String::new()
+    };
+    Ok(format!(
+        "{{\"ok\":true,\"date\":\"{}\",\"path\":\"{}\",\"text\":\"{}\"}}",
+        json_escape(&date),
+        json_escape(&path.to_string_lossy()),
+        json_escape(&text)
+    ))
+}
+
+pub fn delete_training_logs_by_date_range_json(
+    start_date: &str,
+    end_date: &str,
+) -> Result<String, String> {
+    let start_date = safe_log_date(start_date)?;
+    let end_date = safe_log_date(end_date)?;
+    let (start, end) = if start_date <= end_date {
+        (start_date, end_date)
+    } else {
+        (end_date, start_date)
+    };
+    let directory = training_logs_directory()?;
+    let mut deleted = 0usize;
+    if directory.exists() {
+        for entry in fs::read_dir(&directory)
+            .map_err(|error| format!("read logs dir {}: {error}", directory.display()))?
+        {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("log") {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            if is_safe_log_date(stem) && stem >= start.as_str() && stem <= end.as_str() {
+                fs::remove_file(&path)
+                    .map_err(|error| format!("delete training log {}: {error}", path.display()))?;
+                deleted += 1;
+            }
+        }
+    }
+    Ok(format!("{{\"ok\":true,\"deleted\":{deleted}}}"))
+}
+
 fn run_training_with_pyo3(
     config: &TrainingConfig,
     stop_file: &Path,
@@ -983,10 +1059,14 @@ fn cleanup_finished_training() {
 }
 
 fn training_log_path() -> Result<PathBuf, String> {
-    let directory = project_directory()?.join("logs");
+    let directory = training_logs_directory()?;
     fs::create_dir_all(&directory)
         .map_err(|error| format!("create logs dir {}: {error}", directory.display()))?;
     Ok(directory.join(format!("{}.log", local_log_date_string())))
+}
+
+fn training_logs_directory() -> Result<PathBuf, String> {
+    Ok(project_directory()?.join("logs"))
 }
 
 fn append_log_line(path: &Path, message: &str) {
@@ -1010,6 +1090,55 @@ fn project_directory() -> Result<PathBuf, String> {
             .ok_or_else(|| "Flutter directory has no parent".to_string());
     }
     Ok(current)
+}
+
+fn safe_log_date(value: &str) -> Result<String, String> {
+    let trimmed = value.trim();
+    if is_safe_log_date(trimmed) {
+        Ok(trimmed.to_string())
+    } else {
+        Err(format!("Invalid log date: {value}"))
+    }
+}
+
+fn is_safe_log_date(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 10
+        && bytes[0..4].iter().all(u8::is_ascii_digit)
+        && bytes[4] == b'-'
+        && bytes[5..7].iter().all(u8::is_ascii_digit)
+        && bytes[7] == b'-'
+        && bytes[8..10].iter().all(u8::is_ascii_digit)
+}
+
+fn string_array_json(key: &str, values: &[String]) -> String {
+    let mut output = format!("{{\"ok\":true,\"{}\":[", json_escape(key));
+    for (index, value) in values.iter().enumerate() {
+        if index > 0 {
+            output.push(',');
+        }
+        output.push('"');
+        output.push_str(&json_escape(value));
+        output.push('"');
+    }
+    output.push_str("]}");
+    output
+}
+
+fn json_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            ch if ch.is_control() => escaped.push_str(&format!("\\u{:04x}", ch as u32)),
+            ch => escaped.push(ch),
+        }
+    }
+    escaped
 }
 
 fn local_log_date_string() -> String {

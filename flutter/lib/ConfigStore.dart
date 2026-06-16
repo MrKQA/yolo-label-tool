@@ -161,6 +161,7 @@ class _AppSettings {
     required this.outputPath,
     required this.exportPath,
     this.logLevelIndex = 2, // warning by default
+    this.darkMode = false,
   });
 
   factory _AppSettings.empty() {
@@ -169,6 +170,7 @@ class _AppSettings {
       outputPath: '',
       exportPath: '',
       logLevelIndex: 2,
+      darkMode: false,
     );
   }
 
@@ -176,18 +178,21 @@ class _AppSettings {
   final String outputPath;
   final String exportPath;
   final int logLevelIndex; // 0=debug, 1=info, 2=warning, 3=error
+  final bool darkMode;
 
   _AppSettings copyWith({
     String? pythonPath,
     String? outputPath,
     String? exportPath,
     int? logLevelIndex,
+    bool? darkMode,
   }) {
     return _AppSettings(
       pythonPath: pythonPath ?? this.pythonPath,
       outputPath: outputPath ?? this.outputPath,
       exportPath: exportPath ?? this.exportPath,
       logLevelIndex: logLevelIndex ?? this.logLevelIndex,
+      darkMode: darkMode ?? this.darkMode,
     );
   }
 
@@ -196,6 +201,7 @@ class _AppSettings {
     'outputPath': outputPath,
     'exportPath': exportPath,
     'logLevelIndex': logLevelIndex,
+    'darkMode': darkMode,
   };
 
   static _AppSettings fromJson(Object? value) {
@@ -215,6 +221,7 @@ class _AppSettings {
           ? exportPath
           : _ConfigStore.defaultDatasetsDirectory.path,
       logLevelIndex: _logLevelIndexFromJson(value['logLevelIndex']),
+      darkMode: value['darkMode'] == true,
     );
   }
 }
@@ -389,6 +396,7 @@ class _ConfigStore {
         outputPath: defaultRunsDirectory.path,
         exportPath: defaultDatasetsDirectory.path,
         logLevelIndex: 2,
+        darkMode: false,
       ).toJson(),
     );
     _ensureDbConfig(
@@ -470,6 +478,48 @@ class _ConfigStore {
     } on Object {
       return 0;
     }
+  }
+
+  static Future<Map<String, dynamic>> databaseOverview() {
+    return _RustVideoBackend.databaseOverview();
+  }
+
+  static Future<Map<String, dynamic>> databaseTable({
+    required String table,
+    String projectId = '',
+    String imageId = '',
+    int limit = 50,
+    int offset = 0,
+  }) {
+    return _RustVideoBackend.databaseTable(
+      table: table,
+      projectId: projectId,
+      imageId: imageId,
+      limit: limit,
+      offset: offset,
+    );
+  }
+
+  static Future<Map<String, dynamic>> databaseSqlQuery({required String sql}) {
+    return _RustVideoBackend.databaseSqlQuery(sql: sql);
+  }
+
+  static Future<List<String>> trainingLogDates() {
+    return _RustVideoBackend.trainingLogDates();
+  }
+
+  static Future<String> readTrainingLogForDate(String date) {
+    return _RustVideoBackend.readTrainingLogForDate(date);
+  }
+
+  static Future<int> deleteTrainingLogsByDateRange(
+    String startDate,
+    String endDate,
+  ) {
+    return _RustVideoBackend.deleteTrainingLogsByDateRange(
+      startDate: startDate,
+      endDate: endDate,
+    );
   }
 
   static void appendLogLines(String lines) {

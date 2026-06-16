@@ -189,6 +189,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         outputPath: _outputController.text.trim(),
         exportPath: _exportController.text.trim(),
         logLevelIndex: _logLevelIndex,
+        darkMode: widget.initialSettings.darkMode,
       ),
     );
     _setLogLevel(_logLevelFromIndex(_logLevelIndex), writeLog: true);

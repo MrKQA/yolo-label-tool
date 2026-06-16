@@ -20,6 +20,7 @@ class _LabelPage extends StatelessWidget {
     required this.selectedImage,
     required this.selectedImageIndex,
     required this.zoom,
+    required this.viewportOffset,
     required this.activeTool,
     required this.activeMode,
     required this.imageSplit,
@@ -32,6 +33,7 @@ class _LabelPage extends StatelessWidget {
     required this.onImageSelected,
     required this.onImageContextMenu,
     required this.onPointerSignal,
+    required this.onViewportOffsetChanged,
     required this.onToolSelected,
     required this.onSelectMode,
     required this.onModeSelected,
@@ -60,6 +62,7 @@ class _LabelPage extends StatelessWidget {
   final _ImageItem? selectedImage;
   final int selectedImageIndex;
   final double zoom;
+  final Offset viewportOffset;
   final String activeTool;
   final _AnnotationMode activeMode;
   final String imageSplit;
@@ -73,6 +76,7 @@ class _LabelPage extends StatelessWidget {
   final Future<void> Function(TapDownDetails details, int? index)
   onImageContextMenu;
   final void Function(PointerSignalEvent event) onPointerSignal;
+  final ValueChanged<Offset> onViewportOffsetChanged;
   final ValueChanged<String> onToolSelected;
   final VoidCallback onSelectMode;
   final ValueChanged<_AnnotationMode> onModeSelected;
@@ -114,6 +118,7 @@ class _LabelPage extends StatelessWidget {
               imageIndex: images.isEmpty ? 0 : selectedImageIndex + 1,
               imageCount: images.length,
               zoom: zoom,
+              viewportOffset: viewportOffset,
               activeTool: activeTool,
               activeMode: activeMode,
               imageSplit: imageSplit,
@@ -122,6 +127,7 @@ class _LabelPage extends StatelessWidget {
               selectedAnnotationId: selectedAnnotationId,
               showClassLabels: showClassLabels,
               onPointerSignal: onPointerSignal,
+              onViewportOffsetChanged: onViewportOffsetChanged,
               onModeSelected: onModeSelected,
               onImageSplitChanged: onImageSplitChanged,
               onSelectMode: onSelectMode,
@@ -328,6 +334,7 @@ class _CanvasStage extends StatelessWidget {
     required this.imageIndex,
     required this.imageCount,
     required this.zoom,
+    required this.viewportOffset,
     required this.activeTool,
     required this.activeMode,
     required this.imageSplit,
@@ -336,6 +343,7 @@ class _CanvasStage extends StatelessWidget {
     required this.selectedAnnotationId,
     required this.showClassLabels,
     required this.onPointerSignal,
+    required this.onViewportOffsetChanged,
     required this.onModeSelected,
     required this.onImageSplitChanged,
     required this.onSelectMode,
@@ -354,6 +362,7 @@ class _CanvasStage extends StatelessWidget {
   final int imageIndex;
   final int imageCount;
   final double zoom;
+  final Offset viewportOffset;
   final String activeTool;
   final _AnnotationMode activeMode;
   final String imageSplit;
@@ -362,6 +371,7 @@ class _CanvasStage extends StatelessWidget {
   final String? selectedAnnotationId;
   final bool showClassLabels;
   final void Function(PointerSignalEvent event) onPointerSignal;
+  final ValueChanged<Offset> onViewportOffsetChanged;
   final ValueChanged<_AnnotationMode> onModeSelected;
   final ValueChanged<String> onImageSplitChanged;
   final VoidCallback onSelectMode;
@@ -405,12 +415,14 @@ class _CanvasStage extends StatelessWidget {
                     child: _ImageCanvas(
                       image: image,
                       zoom: zoom,
+                      viewportOffset: viewportOffset,
                       activeTool: activeTool,
                       activeMode: activeMode,
                       labelClasses: labelClasses,
                       annotations: annotations,
                       selectedAnnotationId: selectedAnnotationId,
                       showClassLabels: showClassLabels,
+                      onViewportOffsetChanged: onViewportOffsetChanged,
                       onEnsureClass: onEnsureClass,
                       onSelectMode: onSelectMode,
                       onAnnotationCreated: onAnnotationCreated,
@@ -606,12 +618,14 @@ class _ImageCanvas extends StatefulWidget {
   const _ImageCanvas({
     required this.image,
     required this.zoom,
+    required this.viewportOffset,
     required this.activeTool,
     required this.activeMode,
     required this.labelClasses,
     required this.annotations,
     required this.selectedAnnotationId,
     required this.showClassLabels,
+    required this.onViewportOffsetChanged,
     required this.onEnsureClass,
     required this.onSelectMode,
     required this.onAnnotationCreated,
@@ -626,12 +640,14 @@ class _ImageCanvas extends StatefulWidget {
   final void Function(Size imageDisplaySize)? onImageDisplaySizeChanged;
   final _ImageItem? image;
   final double zoom;
+  final Offset viewportOffset;
   final String activeTool;
   final _AnnotationMode activeMode;
   final List<_LabelClass> labelClasses;
   final List<_AnnotationRegion> annotations;
   final String? selectedAnnotationId;
   final bool showClassLabels;
+  final ValueChanged<Offset> onViewportOffsetChanged;
   final Future<int?> Function() onEnsureClass;
   final VoidCallback onSelectMode;
   final void Function(Rect rect, int classId) onAnnotationCreated;
@@ -663,9 +679,10 @@ class _ImageCanvasState extends State<_ImageCanvas> {
   List<Offset> _segDraftPoints = [];
   int? _hoveredCornerIndex;
   ui.Image? _decodedImage;
-  Offset _scrollOffset = Offset.zero;
 
   double get _scale => widget.zoom / 100;
+
+  Offset get _scrollOffset => widget.viewportOffset;
 
   @override
   void initState() {
@@ -692,11 +709,10 @@ class _ImageCanvasState extends State<_ImageCanvas> {
       _hoverPoint = null;
       _loadedImagePath = null;
       _segDraftPoints = [];
-      _scrollOffset = Offset.zero;
       _loadImageSize();
     }
     if (oldWidget.zoom != widget.zoom) {
-      _scrollOffset = _clampedScrollOffset(_scrollOffset);
+      _scheduleViewportClamp();
     }
     if (oldWidget.activeTool == 'draw' && widget.activeTool != 'draw') {
       _drawStart = null;
@@ -844,15 +860,26 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     if (clamped == _scrollOffset) {
       return;
     }
-    setState(() => _scrollOffset = clamped);
+    widget.onViewportOffsetChanged(clamped);
   }
 
-  void _panViewport(Offset direction) {
+  void _panViewport(Offset direction, {double visualStep = 48.0}) {
     if (_scale <= 1.0) {
       return;
     }
-    const visualStep = 48.0;
     _setScrollOffset(_scrollOffset + direction * (visualStep / _scale));
+  }
+
+  void _scheduleViewportClamp() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      final clamped = _clampedScrollOffset(widget.viewportOffset);
+      if (clamped != widget.viewportOffset) {
+        widget.onViewportOffsetChanged(clamped);
+      }
+    });
   }
 
   KeyEventResult _handleCanvasKeyEvent(FocusNode node, KeyEvent event) {
@@ -1466,6 +1493,12 @@ class _ImageCanvasState extends State<_ImageCanvas> {
                               onPressed: canPanHorizontally
                                   ? () => _panViewport(const Offset(1, 0))
                                   : null,
+                              onRepeat: canPanHorizontally
+                                  ? () => _panViewport(
+                                      const Offset(1, 0),
+                                      visualStep: 8,
+                                    )
+                                  : null,
                             ),
                             const SizedBox(width: 8),
                             _ViewportPanButton(
@@ -1473,6 +1506,12 @@ class _ImageCanvasState extends State<_ImageCanvas> {
                               tooltip: t('viewport.panRight'),
                               onPressed: canPanHorizontally
                                   ? () => _panViewport(const Offset(-1, 0))
+                                  : null,
+                              onRepeat: canPanHorizontally
+                                  ? () => _panViewport(
+                                      const Offset(-1, 0),
+                                      visualStep: 8,
+                                    )
                                   : null,
                             ),
                           ],
@@ -1492,6 +1531,12 @@ class _ImageCanvasState extends State<_ImageCanvas> {
                               onPressed: canPanVertically
                                   ? () => _panViewport(const Offset(0, 1))
                                   : null,
+                              onRepeat: canPanVertically
+                                  ? () => _panViewport(
+                                      const Offset(0, 1),
+                                      visualStep: 8,
+                                    )
+                                  : null,
                             ),
                             const SizedBox(height: 8),
                             _ViewportPanButton(
@@ -1499,6 +1544,12 @@ class _ImageCanvasState extends State<_ImageCanvas> {
                               tooltip: t('viewport.panDown'),
                               onPressed: canPanVertically
                                   ? () => _panViewport(const Offset(0, -1))
+                                  : null,
+                              onRepeat: canPanVertically
+                                  ? () => _panViewport(
+                                      const Offset(0, -1),
+                                      visualStep: 8,
+                                    )
                                   : null,
                             ),
                           ],
@@ -1538,46 +1589,88 @@ class _ResizeHandle {
   final int cornerIndex;
 }
 
-class _ViewportPanButton extends StatelessWidget {
+class _ViewportPanButton extends StatefulWidget {
   const _ViewportPanButton({
     required this.icon,
     required this.tooltip,
     required this.onPressed,
+    this.onRepeat,
   });
 
   final IconData icon;
   final String tooltip;
   final VoidCallback? onPressed;
+  final VoidCallback? onRepeat;
+
+  @override
+  State<_ViewportPanButton> createState() => _ViewportPanButtonState();
+}
+
+class _ViewportPanButtonState extends State<_ViewportPanButton> {
+  Timer? _repeatTimer;
+
+  @override
+  void didUpdateWidget(covariant _ViewportPanButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.onPressed == null) {
+      _stopRepeating();
+    }
+  }
+
+  @override
+  void dispose() {
+    _stopRepeating();
+    super.dispose();
+  }
+
+  void _startRepeating() {
+    final callback = widget.onRepeat ?? widget.onPressed;
+    if (callback == null) {
+      return;
+    }
+    callback();
+    _repeatTimer?.cancel();
+    _repeatTimer = Timer.periodic(const Duration(milliseconds: 16), (_) {
+      callback();
+    });
+  }
+
+  void _stopRepeating() {
+    _repeatTimer?.cancel();
+    _repeatTimer = null;
+  }
 
   @override
   Widget build(BuildContext context) {
-    final enabled = onPressed != null;
+    final enabled = widget.onPressed != null;
     return Tooltip(
-      message: tooltip,
+      message: widget.tooltip,
       child: SizedBox.square(
         dimension: 36,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: widget.onPressed,
+          onLongPressStart: enabled ? (_) => _startRepeating() : null,
+          onLongPressEnd: (_) => _stopRepeating(),
+          onLongPressCancel: _stopRepeating,
+          child: Material(
             color: _controlColor(
               context,
             ).withValues(alpha: enabled ? 0.92 : 0.52),
-            border: Border.all(color: _borderColor(context)),
-            borderRadius: BorderRadius.circular(8),
-            boxShadow: const [
-              BoxShadow(
-                blurRadius: 10,
-                color: Color(0x22000000),
-                offset: Offset(0, 3),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+              side: BorderSide(color: _borderColor(context)),
+            ),
+            elevation: enabled ? 3 : 0,
+            child: Center(
+              child: Icon(
+                widget.icon,
+                size: 22,
+                color: enabled
+                    ? _primaryTextColor(context)
+                    : _primaryTextColor(context).withValues(alpha: 0.32),
               ),
-            ],
-          ),
-          child: IconButton(
-            onPressed: onPressed,
-            padding: EdgeInsets.zero,
-            iconSize: 22,
-            color: _primaryTextColor(context),
-            disabledColor: _primaryTextColor(context).withValues(alpha: 0.32),
-            icon: Icon(icon),
+            ),
           ),
         ),
       ),
@@ -2515,6 +2608,7 @@ class _BottomControls extends StatelessWidget {
     required this.zoomLocked,
     required this.darkMode,
     required this.onZoomChanged,
+    required this.onResetView,
     required this.onToggleZoomLock,
     required this.onToggleThemeMode,
     required this.onOpenKeySettings,
@@ -2524,6 +2618,7 @@ class _BottomControls extends StatelessWidget {
   final bool zoomLocked;
   final bool darkMode;
   final ValueChanged<double> onZoomChanged;
+  final VoidCallback onResetView;
   final VoidCallback onToggleZoomLock;
   final VoidCallback onToggleThemeMode;
   final VoidCallback onOpenKeySettings;
@@ -2560,7 +2655,7 @@ class _BottomControls extends StatelessWidget {
           _ControlButton(
             label: t('bottom.reset'),
             width: 96,
-            onPressed: zoomLocked ? null : () => onZoomChanged(100),
+            onPressed: zoomLocked ? null : onResetView,
           ),
           _ControlButton(
             icon: darkMode

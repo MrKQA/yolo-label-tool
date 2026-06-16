@@ -25,6 +25,7 @@ part 'DetectVideoPage.dart';
 part 'RustVideoBackend.dart';
 part 'ExportDialog.dart';
 part 'CropPage.dart';
+part 'DatabasePage.dart';
 part 'AnnotationModels.dart';
 part 'ConfigStore.dart';
 part 'FloatingMessage.dart';
@@ -281,6 +282,7 @@ class _LanguageStrings {
     'sidebar.label': '标注',
     'sidebar.train': '训练',
     'sidebar.browse': '浏览',
+    'sidebar.database': '数据库',
     'sidebar.expand': '展开侧边栏',
     'sidebar.collapse': '收起侧边栏',
     'label.previewEmpty': '右键或菜单添加图片',
@@ -422,6 +424,46 @@ class _LanguageStrings {
     'logs.deleteRange': '删除日志',
     'logs.deleted': '已删除日志',
     'logs.selectDeleteRange': '选择要删除的日期范围',
+    'database.title': '数据库管理',
+    'database.refresh': '刷新',
+    'database.overview': '数据库概览',
+    'database.path': '文件位置',
+    'database.size': '文件大小',
+    'database.tables': '数据表',
+    'database.appLogs': '应用日志',
+    'database.trainingTerminal': '训练终端',
+    'database.configKeys': '配置键',
+    'database.updatedAt': '更新时间',
+    'database.noConfigKeys': '暂无配置键',
+    'database.noTrainingLogs': '暂无训练终端记录',
+    'database.projects': '项目',
+    'database.allProjects': '全部项目',
+    'database.rows': '行数',
+    'database.noRows': '暂无数据',
+    'database.selectRow': '选择一行查看详情',
+    'database.rowDetail': '行详情',
+    'database.projectFilter': '项目',
+    'database.imageFilter': '图片',
+    'database.viewImageAnnotations': '查看该图片标注',
+    'database.clearImageFilter': '清除图片过滤',
+    'database.cleanedImages': '清理缺失图片',
+    'database.cleanedProjects': '清理空项目',
+    'database.browse': '浏览',
+    'database.structure': '结构',
+    'database.sql': 'SQL',
+    'database.sqlResult': 'SQL 查询结果',
+    'database.runSql': '运行 SQL',
+    'database.sqlHelp': '仅允许只读 SELECT/WITH 和查看结构的 PRAGMA 语句。',
+    'database.sqlRows': '返回行数',
+    'database.truncated': '结果已截断',
+    'database.virtualTable': '虚拟表，不直接存在于 AnnotationConfig.db',
+    'database.table.projects': 'projects',
+    'database.table.images': 'images',
+    'database.table.classes': 'classes',
+    'database.table.annotations': 'annotations',
+    'database.table.app_config': 'app_config',
+    'database.table.app_logs': 'app_logs',
+    'database.table.training_terminal_logs': 'training_terminal_logs',
     'detect.title': '浏览 / 视频检测',
     'detect.chooseImage': '选择图片',
     'detect.chooseFile': '选择文件',
@@ -726,6 +768,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   bool _videoFullscreenVisible = false;
   bool _zoomLocked = false;
   double _zoom = 100;
+  Offset _labelViewportOffset = Offset.zero;
   int _selectedImageIndex = 0;
   String _activeSection = 'label';
   String _activeTool = 'select';
@@ -1148,7 +1191,11 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
         ..addAll(history.files);
       _shortcutConfig = keybindings;
       _appSettings = settings;
+      _darkMode = settings.darkMode;
     });
+    _themeModeNotifier.value = settings.darkMode
+        ? ThemeMode.dark
+        : ThemeMode.light;
     _setLogLevel(_logLevelFromIndex(settings.logLevelIndex));
     _log(
       'APP',
@@ -1191,7 +1238,13 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   }
 
   void _saveAppSettings(_AppSettings settings) {
-    setState(() => _appSettings = settings);
+    setState(() {
+      _appSettings = settings;
+      _darkMode = settings.darkMode;
+    });
+    _themeModeNotifier.value = settings.darkMode
+        ? ThemeMode.dark
+        : ThemeMode.light;
     _ConfigStore.saveSettings(settings);
   }
 
@@ -1200,6 +1253,23 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       return;
     }
     setState(() => _zoom = value.clamp(25, 400).toDouble());
+  }
+
+  void _setLabelViewportOffset(Offset offset) {
+    if (_labelViewportOffset == offset) {
+      return;
+    }
+    setState(() => _labelViewportOffset = offset);
+  }
+
+  void _resetZoomAndViewport() {
+    if (_zoomLocked) {
+      return;
+    }
+    setState(() {
+      _zoom = 100;
+      _labelViewportOffset = Offset.zero;
+    });
   }
 
   void _toggleZoomLock() {
@@ -2894,8 +2964,13 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   }
 
   void _toggleThemeMode() {
-    setState(() => _darkMode = !_darkMode);
-    _themeModeNotifier.value = _darkMode ? ThemeMode.dark : ThemeMode.light;
+    final nextDarkMode = !_darkMode;
+    setState(() {
+      _darkMode = nextDarkMode;
+      _appSettings = _appSettings.copyWith(darkMode: nextDarkMode);
+    });
+    _themeModeNotifier.value = nextDarkMode ? ThemeMode.dark : ThemeMode.light;
+    _ConfigStore.saveSettings(_appSettings);
   }
 
   void _updateShortcut(_ShortcutAction action, LogicalKeyboardKey key) {
@@ -3258,6 +3333,8 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                               ? 1
                               : _activeSection == 'crop'
                               ? 2
+                              : _activeSection == 'database'
+                              ? 4
                               : 3,
                           children: [
                             _LabelPage(
@@ -3266,6 +3343,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                               selectedImage: _selectedImage,
                               selectedImageIndex: _selectedImageIndex,
                               zoom: _zoom,
+                              viewportOffset: _labelViewportOffset,
                               activeTool: _activeTool,
                               activeMode: _activeAnnotationMode,
                               imageSplit: _selectedImageSplit,
@@ -3277,6 +3355,8 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                               onImageSelected: _selectImage,
                               onImageContextMenu: _showImageContextMenu,
                               onPointerSignal: _handlePointerSignal,
+                              onViewportOffsetChanged:
+                                  _setLabelViewportOffset,
                               onToolSelected: _selectTool,
                               onSelectMode: () => _selectTool('select'),
                               onModeSelected: _activateAnnotationMode,
@@ -3320,6 +3400,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                               shortcutConfig: _shortcutConfig,
                               session: _detectVideoSession,
                             ),
+                            const _DatabasePage(),
                           ],
                         ),
                       ),
@@ -3332,6 +3413,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                     zoomLocked: _zoomLocked,
                     darkMode: _darkMode,
                     onZoomChanged: _setZoom,
+                    onResetView: _resetZoomAndViewport,
                     onToggleZoomLock: _toggleZoomLock,
                     onToggleThemeMode: _toggleThemeMode,
                     onOpenKeySettings: _showKeySettings,
@@ -4292,6 +4374,7 @@ class _PrimarySidebar extends StatelessWidget {
     _SectionSpec('train', Icons.model_training, 'sidebar.train'),
     _SectionSpec('browse', Icons.photo_library_outlined, 'sidebar.browse'),
     _SectionSpec('crop', Icons.content_cut, 'sidebar.crop'),
+    _SectionSpec('database', Icons.storage_outlined, 'sidebar.database'),
   ];
 
   @override
