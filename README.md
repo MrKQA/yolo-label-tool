@@ -23,6 +23,8 @@ A YOLO image labeling, training, and video processing tool built with Flutter + 
 - Resume training from `last.pt`: auto-detects `args.yaml` and `data.yaml`.
 - Training history saved locally (up to 40 entries) with timestamps.
 - Browse page includes Rust + FFmpeg video playback capabilities.
+- Database table browsing supports project filtering, pagination, horizontal scrolling, row details, and a resizable detail panel.
+- Read-only SQL queries are supported for inspection.
 
 ## Project Structure
 
@@ -43,6 +45,7 @@ A YOLO image labeling, training, and video processing tool built with Flutter + 
 │       ├── TrainPage.dart      # Training page
 │       ├── DetectVideoPage.dart # Browse / video playback page
 │       ├── CropPage.dart       # Video frame extraction page
+│       ├── DatabasePage.dart   # SQLite database browser / management page
 │       ├── ExportDialog.dart   # Annotation export dialog
 │       ├── ConfigStore.dart    # Config persistence
 │       ├── SettingsDialog.dart # Settings dialog
@@ -110,6 +113,17 @@ Open the app → Settings → Preferences → Python Environment Path. Select `p
 
 Label page → right toolbar → Export button → configure options → exports YOLO directory structure.
 
+### Database Management
+
+The left sidebar contains a database management page for inspecting `AnnotationConfig.db`.
+
+1. Select a table from the collapsible table browser.
+2. Use the Browse tab to view rows. The project selector is below the Browse tab.
+3. Use the bottom bar to change row count (`50 / 100 / 200`) and switch pages.
+4. Drag the divider between the table and the detail panel to resize the detail area.
+5. Use the Structure tab to inspect table fields.
+6. Use the SQL tab for read-only `SELECT` / `WITH` queries and schema `PRAGMA` queries.
+
 ## FFmpeg Setup
 
 Video frame extraction requires FFmpeg. Use [gyan.dev](https://www.gyan.dev/ffmpeg/) Windows builds.
@@ -153,6 +167,10 @@ preferences, training history, application logs, image records, classes, and
 annotations. Legacy JSON config files and the old database name are no longer
 read by the application.
 
+The built-in database page is intended for inspection and troubleshooting. SQL
+execution is limited to read-only queries to avoid accidentally modifying
+annotation data.
+
 ## FAQ
 
 ### Rust compilation fails
@@ -192,6 +210,8 @@ All pages kept alive via `IndexedStack` — training, playback, crop state prese
 - 支持从 `last.pt` 读取训练目录和 `args.yaml`，自动匹配 `data.yaml` 并启用 resume。
 - 最近训练记录保存到本地配置，最多保留 40 条，并显示明确时间点。
 - 浏览页包含 Rust + FFmpeg 视频处理能力。
+- 数据库表浏览支持项目筛选、分页、横向滚动、行详情和可拖拽伸缩的详情区域。
+- SQL 查看支持只读查询。
 
 ## 项目结构
 
@@ -212,6 +232,7 @@ All pages kept alive via `IndexedStack` — training, playback, crop state prese
 │       ├── TrainPage.dart      # 训练页
 │       ├── DetectVideoPage.dart # 浏览/视频播放页
 │       ├── CropPage.dart       # 视频取帧裁剪页
+│       ├── DatabasePage.dart   # SQLite 数据库查看/管理页
 │       ├── ExportDialog.dart   # 标注导出弹窗
 │       ├── ConfigStore.dart    # 配置持久化
 │       ├── SettingsDialog.dart # 设置弹窗
@@ -279,6 +300,17 @@ flutter_rust_bridge_codegen generate
 
 标注页右侧工具栏 → 导出按钮 → 配置选项 → 导出 YOLO 目录结构。
 
+### 数据库管理
+
+左侧侧边栏中包含数据库管理页面，用于查看 `AnnotationConfig.db`。
+
+1. 在可伸缩的数据表列表中选择要查看的表。
+2. 在"浏览"选项卡中查看数据，项目下拉框位于"浏览"选项卡下方。
+3. 底部可选择每页行数（`50 / 100 / 200`）并切换页码。
+4. 表格和右侧详情之间的分隔条可用鼠标左右拖拽，调整详情区域宽度。
+5. "结构"选项卡用于查看表字段。
+6. "SQL"选项卡仅允许只读 `SELECT` / `WITH` 查询和查看结构的 `PRAGMA` 查询。
+
 ## FFmpeg 配置
 
 视频取帧功能依赖 FFmpeg。推荐使用 [gyan.dev](https://www.gyan.dev/ffmpeg/) 的 Windows 构建版本。
@@ -319,6 +351,9 @@ ffmpeg/
 程序根目录会自动创建 `AnnotationConfig.db`，用于保存设置、最近文件/文件夹、
 自定义按键、训练参数偏好、训练历史、应用日志、图片记录、类别和标注信息。
 程序不再读取旧 JSON 配置文件，也不再兼容旧数据库文件名。
+
+内置数据库页面主要用于查看和排查问题。SQL 执行被限制为只读查询，避免误修改
+标注数据或配置数据。
 
 ## 常见问题
 
