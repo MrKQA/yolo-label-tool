@@ -18,6 +18,11 @@ const _databaseTableSpecs = [
   _DatabaseTableSpec('training_terminal_logs', Icons.terminal),
 ];
 
+const _databaseDetailPanelDefaultWidth = 330.0;
+const _databaseDetailPanelMinWidth = 260.0;
+const _databaseDetailPanelMaxWidth = 640.0;
+const _databaseMainTableMinWidth = 520.0;
+
 class _DatabasePage extends StatefulWidget {
   const _DatabasePage();
 
@@ -39,6 +44,8 @@ class _DatabasePageState extends State<_DatabasePage> {
   String? _annotationImageFilterId;
   int _pageIndex = 0;
   int _rowsPerPage = 50;
+  bool _tableBrowserExpanded = true;
+  double _detailPanelWidth = _databaseDetailPanelDefaultWidth;
   int? _selectedRowIndex;
   String _trainingLogText = '';
   String _sqlStatus = '';
@@ -185,6 +192,18 @@ class _DatabasePageState extends State<_DatabasePage> {
       _pageIndex = 0;
     });
     await _reload();
+  }
+
+  void _toggleTableBrowser() {
+    setState(() => _tableBrowserExpanded = !_tableBrowserExpanded);
+  }
+
+  void _resizeDetailPanel(double deltaX, double maxWidth) {
+    setState(() {
+      _detailPanelWidth = (_detailPanelWidth - deltaX)
+          .clamp(_databaseDetailPanelMinWidth, maxWidth)
+          .toDouble();
+    });
   }
 
   Future<void> _selectTable(String table) async {
@@ -440,76 +459,119 @@ class _DatabasePageState extends State<_DatabasePage> {
           ],
           const SizedBox(height: 12),
           Expanded(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                SizedBox(
-                  width: 280,
-                  child: _DatabaseExplorerSidebar(
-                    overview: _overview,
-                    projects: _projectRows,
-                    selectedProjectId: _selectedProjectId,
-                    activeTable: _activeTable,
-                    onProjectSelected: (id) => unawaited(_selectProject(id)),
-                    onTableSelected: (table) => unawaited(_selectTable(table)),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _DatabaseTablePanel(
-                    activeAction: _activeAction,
-                    activeTable: _activeTable,
-                    selectedProjectId: _selectedProjectId,
-                    imageFilterId: _annotationImageFilterId,
-                    columns: _columns,
-                    rows: _rows,
-                    selectedRowIndex: _selectedRowIndex,
-                    pageIndex: _pageIndex,
-                    rowsPerPage: _rowsPerPage,
-                    sqlController: _sqlController,
-                    sqlStatus: _sqlStatus,
-                    onActionSelected: (action) =>
-                        unawaited(_selectAction(action)),
-                    onRunSql: () => unawaited(_runSqlQuery()),
-                    onRowsPerPageChanged: (value) =>
-                        unawaited(_changeRowsPerPage(value)),
-                    onPreviousPage: _pageIndex == 0
-                        ? null
-                        : () => unawaited(_movePage(-1)),
-                    onNextPage: _rows.length < _rowsPerPage
-                        ? null
-                        : () => unawaited(_movePage(1)),
-                    onRowSelected: _selectRow,
-                    onShowImageAnnotations:
-                        _activeAction == 'browse' &&
-                            _activeTable == 'images' &&
-                            _selectedRow != null
-                        ? () => unawaited(_showAnnotationsForSelectedImage())
-                        : null,
-                    onClearImageFilter:
-                        _activeAction == 'browse' &&
-                            _activeTable == 'annotations' &&
-                            _annotationImageFilterId != null
-                        ? () => unawaited(_clearImageFilter())
-                        : null,
-                    onDeleteLogRange:
-                        _activeAction == 'browse' &&
-                            (_activeTable == 'app_logs' ||
-                                _activeTable == 'training_terminal_logs')
-                        ? () => unawaited(_deleteVisibleLogRange())
-                        : null,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                SizedBox(
-                  width: 330,
-                  child: _DatabaseRowDetailPanel(
-                    activeTable: _activeTable,
-                    row: _selectedRow,
-                    trainingLogText: _trainingLogText,
-                  ),
-                ),
-              ],
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final compactTables = constraints.maxWidth < 980;
+                final showDetailPanel = constraints.maxWidth >= 1180;
+                final tableBrowserExpanded =
+                    _tableBrowserExpanded && !compactTables;
+                final browserWidth = tableBrowserExpanded ? 260.0 : 44.0;
+                final maxDetailPanelWidth = math
+                    .min(
+                      _databaseDetailPanelMaxWidth,
+                      constraints.maxWidth -
+                          browserWidth -
+                          _databaseMainTableMinWidth -
+                          40,
+                    )
+                    .clamp(
+                      _databaseDetailPanelMinWidth,
+                      _databaseDetailPanelMaxWidth,
+                    )
+                    .toDouble();
+                final detailPanelWidth = _detailPanelWidth
+                    .clamp(
+                      _databaseDetailPanelMinWidth,
+                      maxDetailPanelWidth,
+                    )
+                    .toDouble();
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      curve: Curves.easeOut,
+                      width: tableBrowserExpanded ? 260 : 44,
+                      child: _DatabaseExplorerSidebar(
+                        overview: _overview,
+                        activeTable: _activeTable,
+                        expanded: tableBrowserExpanded,
+                        onToggleExpanded: _toggleTableBrowser,
+                        onTableSelected: (table) =>
+                            unawaited(_selectTable(table)),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _DatabaseTablePanel(
+                        activeAction: _activeAction,
+                        activeTable: _activeTable,
+                        selectedProjectId: _selectedProjectId,
+                        imageFilterId: _annotationImageFilterId,
+                        projects: _projectRows,
+                        columns: _columns,
+                        rows: _rows,
+                        selectedRowIndex: _selectedRowIndex,
+                        pageIndex: _pageIndex,
+                        rowsPerPage: _rowsPerPage,
+                        sqlController: _sqlController,
+                        sqlStatus: _sqlStatus,
+                        onActionSelected: (action) =>
+                            unawaited(_selectAction(action)),
+                        onProjectSelected: (id) =>
+                            unawaited(_selectProject(id)),
+                        onRunSql: () => unawaited(_runSqlQuery()),
+                        onRowsPerPageChanged: (value) =>
+                            unawaited(_changeRowsPerPage(value)),
+                        onPreviousPage: _pageIndex == 0
+                            ? null
+                            : () => unawaited(_movePage(-1)),
+                        onNextPage: _rows.length < _rowsPerPage
+                            ? null
+                            : () => unawaited(_movePage(1)),
+                        onRowSelected: _selectRow,
+                        onShowImageAnnotations:
+                            _activeAction == 'browse' &&
+                                _activeTable == 'images' &&
+                                _selectedRow != null
+                            ? () =>
+                                unawaited(_showAnnotationsForSelectedImage())
+                            : null,
+                        onClearImageFilter:
+                            _activeAction == 'browse' &&
+                                _activeTable == 'annotations' &&
+                                _annotationImageFilterId != null
+                            ? () => unawaited(_clearImageFilter())
+                            : null,
+                        onDeleteLogRange:
+                            _activeAction == 'browse' &&
+                                (_activeTable == 'app_logs' ||
+                                    _activeTable == 'training_terminal_logs')
+                            ? () => unawaited(_deleteVisibleLogRange())
+                            : null,
+                      ),
+                    ),
+                    if (showDetailPanel) ...[
+                      const SizedBox(width: 8),
+                      _DatabaseDetailResizeHandle(
+                        onDrag: (deltaX) => _resizeDetailPanel(
+                          deltaX,
+                          maxDetailPanelWidth,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        width: detailPanelWidth,
+                        child: _DatabaseRowDetailPanel(
+                          activeTable: _activeTable,
+                          row: _selectedRow,
+                          trainingLogText: _trainingLogText,
+                        ),
+                      ),
+                    ],
+                  ],
+                );
+              },
             ),
           ),
         ],
@@ -521,23 +583,23 @@ class _DatabasePageState extends State<_DatabasePage> {
 class _DatabaseExplorerSidebar extends StatelessWidget {
   const _DatabaseExplorerSidebar({
     required this.overview,
-    required this.projects,
-    required this.selectedProjectId,
     required this.activeTable,
-    required this.onProjectSelected,
+    required this.expanded,
+    required this.onToggleExpanded,
     required this.onTableSelected,
   });
 
   final Map<String, dynamic>? overview;
-  final List<Map<String, String>> projects;
-  final String? selectedProjectId;
   final String activeTable;
-  final ValueChanged<String?> onProjectSelected;
+  final bool expanded;
+  final VoidCallback onToggleExpanded;
   final ValueChanged<String> onTableSelected;
 
   @override
   Widget build(BuildContext context) {
-    final tables = overview?['tables'] is List ? overview!['tables'] as List : const [];
+    final tables = overview?['tables'] is List
+        ? overview!['tables'] as List
+        : const [];
     final tableCounts = <String, String>{};
     for (final table in tables) {
       if (table is Map) {
@@ -545,43 +607,51 @@ class _DatabaseExplorerSidebar extends StatelessWidget {
       }
     }
     return _DatabasePanel(
-      child: ListView(
-        padding: const EdgeInsets.all(12),
+      child: Column(
         children: [
-          Text(
-            t('database.projects'),
-            style: Theme.of(context).textTheme.titleSmall,
-          ),
-          const SizedBox(height: 8),
-          _DatabaseTreeButton(
-            icon: Icons.all_inbox_outlined,
-            label: t('database.allProjects'),
-            trailing: '${projects.length}',
-            selected: selectedProjectId == null,
-            onPressed: () => onProjectSelected(null),
-          ),
-          for (final project in projects)
-            _DatabaseTreeButton(
-              icon: Icons.folder_outlined,
-              label: project['name'] ?? '',
-              trailing: project['image_count'] ?? '',
-              selected: selectedProjectId == project['id'],
-              onPressed: () => onProjectSelected(project['id']),
+          SizedBox(
+            height: 42,
+            child: Row(
+              children: [
+                IconButton(
+                  tooltip: expanded
+                      ? t('sidebar.collapse')
+                      : t('sidebar.expand'),
+                  onPressed: onToggleExpanded,
+                  icon: Icon(
+                    expanded ? Icons.keyboard_tab : Icons.table_rows_outlined,
+                    size: 18,
+                  ),
+                ),
+                if (expanded)
+                  Expanded(
+                    child: Text(
+                      t('database.tables'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                  ),
+              ],
             ),
-          const SizedBox(height: 16),
-          Text(
-            t('database.tables'),
-            style: Theme.of(context).textTheme.titleSmall,
           ),
-          const SizedBox(height: 8),
-          for (final spec in _databaseTableSpecs)
-            _DatabaseTreeButton(
-              icon: spec.icon,
-              label: t('database.table.${spec.name}'),
-              trailing: tableCounts[spec.name] ?? '',
-              selected: activeTable == spec.name,
-              onPressed: () => onTableSelected(spec.name),
+          Divider(height: 1, color: _borderColor(context)),
+          Expanded(
+            child: ListView(
+              padding: EdgeInsets.all(expanded ? 10 : 4),
+              children: [
+                for (final spec in _databaseTableSpecs)
+                  _DatabaseTreeButton(
+                    icon: spec.icon,
+                    label: t('database.table.${spec.name}'),
+                    trailing: tableCounts[spec.name] ?? '',
+                    selected: activeTable == spec.name,
+                    collapsed: !expanded,
+                    onPressed: () => onTableSelected(spec.name),
+                  ),
+              ],
             ),
+          ),
         ],
       ),
     );
@@ -594,6 +664,7 @@ class _DatabaseTablePanel extends StatefulWidget {
     required this.activeTable,
     required this.selectedProjectId,
     required this.imageFilterId,
+    required this.projects,
     required this.columns,
     required this.rows,
     required this.selectedRowIndex,
@@ -602,6 +673,7 @@ class _DatabaseTablePanel extends StatefulWidget {
     required this.sqlController,
     required this.sqlStatus,
     required this.onActionSelected,
+    required this.onProjectSelected,
     required this.onRunSql,
     required this.onRowsPerPageChanged,
     required this.onPreviousPage,
@@ -616,6 +688,7 @@ class _DatabaseTablePanel extends StatefulWidget {
   final String activeTable;
   final String? selectedProjectId;
   final String? imageFilterId;
+  final List<Map<String, String>> projects;
   final List<String> columns;
   final List<Map<String, String>> rows;
   final int? selectedRowIndex;
@@ -624,6 +697,7 @@ class _DatabaseTablePanel extends StatefulWidget {
   final TextEditingController sqlController;
   final String sqlStatus;
   final ValueChanged<String> onActionSelected;
+  final ValueChanged<String?> onProjectSelected;
   final VoidCallback onRunSql;
   final ValueChanged<int> onRowsPerPageChanged;
   final VoidCallback? onPreviousPage;
@@ -645,6 +719,7 @@ class _DatabaseTablePanelState extends State<_DatabaseTablePanel> {
   String get activeTable => widget.activeTable;
   String? get selectedProjectId => widget.selectedProjectId;
   String? get imageFilterId => widget.imageFilterId;
+  List<Map<String, String>> get projects => widget.projects;
   List<String> get columns => widget.columns;
   List<Map<String, String>> get rows => widget.rows;
   int? get selectedRowIndex => widget.selectedRowIndex;
@@ -653,6 +728,7 @@ class _DatabaseTablePanelState extends State<_DatabaseTablePanel> {
   TextEditingController get sqlController => widget.sqlController;
   String get sqlStatus => widget.sqlStatus;
   ValueChanged<String> get onActionSelected => widget.onActionSelected;
+  ValueChanged<String?> get onProjectSelected => widget.onProjectSelected;
   VoidCallback get onRunSql => widget.onRunSql;
   ValueChanged<int> get onRowsPerPageChanged => widget.onRowsPerPageChanged;
   VoidCallback? get onPreviousPage => widget.onPreviousPage;
@@ -679,6 +755,16 @@ class _DatabaseTablePanelState extends State<_DatabaseTablePanel> {
             onActionSelected: onActionSelected,
           ),
           Divider(height: 1, color: _borderColor(context)),
+          if (activeAction == 'browse')
+            _DatabaseBrowseToolbar(
+              projects: projects,
+              selectedProjectId: selectedProjectId,
+              imageFilterId: imageFilterId,
+              onProjectSelected: onProjectSelected,
+              onClearImageFilter: onClearImageFilter,
+              onShowImageAnnotations: onShowImageAnnotations,
+              onDeleteLogRange: onDeleteLogRange,
+            ),
           if (activeAction == 'sql')
             _DatabaseSqlEditor(
               controller: sqlController,
@@ -711,74 +797,6 @@ class _DatabaseTablePanelState extends State<_DatabaseTablePanel> {
                   label: Text('${t('database.rows')}: ${rows.length}'),
                   visualDensity: VisualDensity.compact,
                 ),
-                if (activeAction == 'browse') ...[
-                  const SizedBox(width: 8),
-                  Text(t('database.rowsPerPage')),
-                  const SizedBox(width: 6),
-                  DropdownButton<int>(
-                    value: rowsPerPage,
-                    items: const [
-                      DropdownMenuItem(value: 50, child: Text('50')),
-                      DropdownMenuItem(value: 100, child: Text('100')),
-                      DropdownMenuItem(value: 200, child: Text('200')),
-                    ],
-                    onChanged: (value) {
-                      if (value != null) {
-                        onRowsPerPageChanged(value);
-                      }
-                    },
-                  ),
-                  IconButton(
-                    tooltip: t('database.previousPage'),
-                    onPressed: onPreviousPage,
-                    icon: const Icon(Icons.chevron_left),
-                  ),
-                  Text('${t('database.page')} ${pageIndex + 1}'),
-                  IconButton(
-                    tooltip: t('database.nextPage'),
-                    onPressed: onNextPage,
-                    icon: const Icon(Icons.chevron_right),
-                  ),
-                ],
-                if (selectedProjectId != null) ...[
-                  const SizedBox(width: 8),
-                  Chip(
-                    label: Text(
-                      '${t('database.projectFilter')}: $selectedProjectId',
-                    ),
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ],
-                if (imageFilterId != null) ...[
-                  const SizedBox(width: 8),
-                  Chip(
-                    label: Text('${t('database.imageFilter')}: $imageFilterId'),
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ],
-                const Spacer(),
-                if (onShowImageAnnotations != null)
-                  OutlinedButton.icon(
-                    onPressed: onShowImageAnnotations,
-                    icon: const Icon(Icons.edit_note, size: 18),
-                    label: Text(t('database.viewImageAnnotations')),
-                  ),
-                if (onClearImageFilter != null) ...[
-                  const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    onPressed: onClearImageFilter,
-                    icon: const Icon(Icons.filter_alt_off, size: 18),
-                    label: Text(t('database.clearImageFilter')),
-                  ),
-                ],
-                if (onDeleteLogRange != null) ...[
-                  const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    onPressed: onDeleteLogRange,
-                    icon: const Icon(Icons.delete_outline, size: 18),
-                    label: Text(t('logs.deleteRange')),
-                  ),
-                ],
               ],
             ),
           ),
@@ -787,58 +805,139 @@ class _DatabaseTablePanelState extends State<_DatabaseTablePanel> {
             child: rows.isEmpty
                 ? Center(child: Text(t('database.noRows')))
                 : Scrollbar(
+                    controller: _horizontalController,
                     thumbVisibility: true,
+                    trackVisibility: true,
                     child: SingleChildScrollView(
+                      controller: _horizontalController,
                       scrollDirection: Axis.horizontal,
-                      child: SingleChildScrollView(
-                        child: DataTable(
-                          showCheckboxColumn: false,
-                          headingRowHeight: 38,
-                          dataRowMinHeight: 36,
-                          dataRowMaxHeight: 48,
-                          columns: [
-                            for (final column in columns)
-                              DataColumn(
-                                label: ConstrainedBox(
-                                  constraints: const BoxConstraints(
-                                    minWidth: 90,
-                                    maxWidth: 220,
-                                  ),
-                                  child: Text(
-                                    column,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
+                      child: Scrollbar(
+                        controller: _verticalController,
+                        thumbVisibility: true,
+                        child: SingleChildScrollView(
+                          controller: _verticalController,
+                          child: DataTable(
+                            showCheckboxColumn: false,
+                            headingRowHeight: 38,
+                            dataRowMinHeight: 36,
+                            dataRowMaxHeight: 48,
+                            columns: [
+                              for (final column in columns)
+                                DataColumn(
+                                  label: ConstrainedBox(
+                                    constraints: const BoxConstraints(
+                                      minWidth: 90,
+                                      maxWidth: 220,
+                                    ),
+                                    child: Text(
+                                      column,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
                                   ),
                                 ),
-                              ),
-                          ],
-                          rows: [
-                            for (var index = 0; index < rows.length; index++)
-                              DataRow(
-                                selected: selectedRowIndex == index,
-                                onSelectChanged: (_) => onRowSelected(index),
-                                cells: [
-                                  for (final column in columns)
-                                    DataCell(
-                                      _DatabaseValueCell(
-                                        column: column,
-                                        value: rows[index][column] ?? '',
+                            ],
+                            rows: [
+                              for (var index = 0; index < rows.length; index++)
+                                DataRow(
+                                  selected: selectedRowIndex == index,
+                                  onSelectChanged: (_) => onRowSelected(index),
+                                  cells: [
+                                    for (final column in columns)
+                                      DataCell(
+                                        _DatabaseValueCell(
+                                          column: column,
+                                          value: rows[index][column] ?? '',
+                                        ),
                                       ),
-                                    ),
-                                ],
-                              ),
-                          ],
+                                  ],
+                                ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
                   ),
           ),
+          if (activeAction == 'browse')
+            _DatabasePaginationBar(
+              pageIndex: pageIndex,
+              rowsPerPage: rowsPerPage,
+              canGoPrevious: onPreviousPage != null,
+              canGoNext: onNextPage != null,
+              onRowsPerPageChanged: onRowsPerPageChanged,
+              onPreviousPage: onPreviousPage,
+              onNextPage: onNextPage,
+            ),
         ],
       ),
     );
   }
 }
 
+class _DatabasePaginationBar extends StatelessWidget {
+  const _DatabasePaginationBar({
+    required this.pageIndex,
+    required this.rowsPerPage,
+    required this.canGoPrevious,
+    required this.canGoNext,
+    required this.onRowsPerPageChanged,
+    required this.onPreviousPage,
+    required this.onNextPage,
+  });
+
+  final int pageIndex;
+  final int rowsPerPage;
+  final bool canGoPrevious;
+  final bool canGoNext;
+  final ValueChanged<int> onRowsPerPageChanged;
+  final VoidCallback? onPreviousPage;
+  final VoidCallback? onNextPage;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 46,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: _panelColor(context),
+        border: Border(top: BorderSide(color: _borderColor(context))),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          Text(t('database.rowsPerPage')),
+          const SizedBox(width: 8),
+          DropdownButton<int>(
+            value: rowsPerPage,
+            items: const [
+              DropdownMenuItem(value: 50, child: Text('50')),
+              DropdownMenuItem(value: 100, child: Text('100')),
+              DropdownMenuItem(value: 200, child: Text('200')),
+            ],
+            onChanged: (value) {
+              if (value != null) {
+                onRowsPerPageChanged(value);
+              }
+            },
+          ),
+          const SizedBox(width: 18),
+          IconButton(
+            tooltip: t('database.previousPage'),
+            onPressed: canGoPrevious ? onPreviousPage : null,
+            icon: const Icon(Icons.chevron_left),
+          ),
+          Text('${t('database.page')} ${pageIndex + 1}'),
+          IconButton(
+            tooltip: t('database.nextPage'),
+            onPressed: canGoNext ? onNextPage : null,
+            icon: const Icon(Icons.chevron_right),
+          ),
+        ],
+      ),
+    );
+  }
+}
 class _DatabaseActionTabs extends StatelessWidget {
   const _DatabaseActionTabs({
     required this.activeAction,
@@ -870,6 +969,101 @@ class _DatabaseActionTabs extends StatelessWidget {
                 label: Text(t(action.$3)),
                 onSelected: (_) => onActionSelected(action.$1),
               ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DatabaseBrowseToolbar extends StatelessWidget {
+  const _DatabaseBrowseToolbar({
+    required this.projects,
+    required this.selectedProjectId,
+    required this.imageFilterId,
+    required this.onProjectSelected,
+    required this.onClearImageFilter,
+    required this.onShowImageAnnotations,
+    required this.onDeleteLogRange,
+  });
+
+  final List<Map<String, String>> projects;
+  final String? selectedProjectId;
+  final String? imageFilterId;
+  final ValueChanged<String?> onProjectSelected;
+  final VoidCallback? onClearImageFilter;
+  final VoidCallback? onShowImageAnnotations;
+  final VoidCallback? onDeleteLogRange;
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = selectedProjectId != null &&
+            projects.any((project) => project['id'] == selectedProjectId)
+        ? selectedProjectId
+        : '';
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: _isDarkMode(context)
+            ? const Color(0xFF1B1038)
+            : const Color(0xFFF8FAFC),
+        border: Border(bottom: BorderSide(color: _borderColor(context))),
+      ),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          SizedBox(
+            width: 320,
+            child: DropdownButtonFormField<String>(
+              initialValue: selected,
+              isExpanded: true,
+              decoration: InputDecoration(
+                labelText: t('database.projectFilter'),
+                isDense: true,
+              ),
+              items: [
+                DropdownMenuItem(
+                  value: '',
+                  child: Text(t('database.allProjects')),
+                ),
+                for (final project in projects)
+                  DropdownMenuItem(
+                    value: project['id'] ?? '',
+                    child: Text(
+                      '${project['id'] ?? ''}  ${project['name'] ?? ''}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+              ],
+              onChanged: (value) =>
+                  onProjectSelected(value == null || value.isEmpty ? null : value),
+            ),
+          ),
+          if (imageFilterId != null)
+            Chip(
+              label: Text('${t('database.imageFilter')}: $imageFilterId'),
+              visualDensity: VisualDensity.compact,
+            ),
+          if (onShowImageAnnotations != null)
+            OutlinedButton.icon(
+              onPressed: onShowImageAnnotations,
+              icon: const Icon(Icons.edit_note, size: 18),
+              label: Text(t('database.viewImageAnnotations')),
+            ),
+          if (onClearImageFilter != null)
+            OutlinedButton.icon(
+              onPressed: onClearImageFilter,
+              icon: const Icon(Icons.filter_alt_off, size: 18),
+              label: Text(t('database.clearImageFilter')),
+            ),
+          if (onDeleteLogRange != null)
+            OutlinedButton.icon(
+              onPressed: onDeleteLogRange,
+              icon: const Icon(Icons.delete_outline, size: 18),
+              label: Text(t('logs.deleteRange')),
             ),
         ],
       ),
@@ -1016,6 +1210,37 @@ class _DatabaseRowDetailPanel extends StatelessWidget {
   }
 }
 
+class _DatabaseDetailResizeHandle extends StatelessWidget {
+  const _DatabaseDetailResizeHandle({required this.onDrag});
+
+  final ValueChanged<double> onDrag;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _borderColor(context);
+    return MouseRegion(
+      cursor: SystemMouseCursors.resizeLeftRight,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onHorizontalDragUpdate: (details) => onDrag(details.delta.dx),
+        child: SizedBox(
+          width: 10,
+          child: Center(
+            child: Container(
+              width: 3,
+              margin: const EdgeInsets.symmetric(vertical: 12),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: _isDarkMode(context) ? 0.9 : 1),
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _DatabaseValueCell extends StatelessWidget {
   const _DatabaseValueCell({required this.column, required this.value});
 
@@ -1062,6 +1287,7 @@ class _DatabaseTreeButton extends StatelessWidget {
     required this.label,
     required this.trailing,
     required this.selected,
+    this.collapsed = false,
     required this.onPressed,
   });
 
@@ -1069,6 +1295,7 @@ class _DatabaseTreeButton extends StatelessWidget {
   final String label;
   final String trailing;
   final bool selected;
+  final bool collapsed;
   final VoidCallback onPressed;
 
   @override
@@ -1094,27 +1321,29 @@ class _DatabaseTreeButton extends StatelessWidget {
             height: 34,
             child: Row(
               children: [
-                const SizedBox(width: 8),
+                SizedBox(width: collapsed ? 0 : 8),
                 Icon(icon, size: 18, color: foreground),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: foreground),
-                  ),
-                ),
-                if (trailing.isNotEmpty) ...[
-                  const SizedBox(width: 6),
-                  Text(
-                    trailing,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      fontSize: 12,
+                if (!collapsed) ...[
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: foreground),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  if (trailing.isNotEmpty) ...[
+                    const SizedBox(width: 6),
+                    Text(
+                      trailing,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
                 ],
               ],
             ),
