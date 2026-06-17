@@ -670,6 +670,11 @@ class _ImageCanvasState extends State<_ImageCanvas> {
   String? _movingAnnotationId;
   String? _resizingAnnotationId;
   int? _resizingCornerIndex;
+  String? _draggingSegAnnotationId;
+  int? _draggingSegPointIndex;
+  Timer? _segAutoPointTimer;
+  Offset? _segAutoPoint;
+  int? _segAutoClassId;
   bool _draggingSelection = false;
   Size? _imageSize;
   Size? _sampleImageSize;
@@ -678,6 +683,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
   String? _loadedImagePath;
   List<Offset> _segDraftPoints = [];
   int? _hoveredCornerIndex;
+  _SegVertexHandle? _hoveredSegVertex;
   ui.Image? _decodedImage;
 
   double get _scale => widget.zoom / 100;
@@ -692,6 +698,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
 
   @override
   void dispose() {
+    _stopSegAutoPointTimer();
     _canvasFocusNode.dispose();
     _decodedImage?.dispose();
     super.dispose();
@@ -707,6 +714,14 @@ class _ImageCanvasState extends State<_ImageCanvas> {
       _decodedImage?.dispose();
       _decodedImage = null;
       _hoverPoint = null;
+      _movingAnnotationId = null;
+      _resizingAnnotationId = null;
+      _resizingCornerIndex = null;
+      _draggingSegAnnotationId = null;
+      _draggingSegPointIndex = null;
+      _hoveredSegVertex = null;
+      _draggingSelection = false;
+      _stopSegAutoPointTimer();
       _loadedImagePath = null;
       _segDraftPoints = [];
       _loadImageSize();
@@ -715,11 +730,18 @@ class _ImageCanvasState extends State<_ImageCanvas> {
       _scheduleViewportClamp();
     }
     if (oldWidget.activeTool == 'draw' && widget.activeTool != 'draw') {
+      _stopSegAutoPointTimer();
       _drawStart = null;
       _draftRect = null;
       _draftClassId = null;
       _segDraftPoints = [];
       _hoverPoint = null;
+    }
+    if (oldWidget.activeTool != widget.activeTool) {
+      _hoveredSegVertex = null;
+    }
+    if (oldWidget.activeMode != widget.activeMode) {
+      _stopSegAutoPointTimer();
     }
   }
 
@@ -958,6 +980,90 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     return luminance > 0.52 ? const Color(0xFF111827) : Colors.white;
   }
 
+  double get _segCloseDistance => 10 / _scale;
+
+  void _stopSegAutoPointTimer() {
+    _segAutoPointTimer?.cancel();
+    _segAutoPointTimer = null;
+    _segAutoPoint = null;
+    _segAutoClassId = null;
+  }
+
+  void _startSegAutoPointTimer(Offset imagePoint, int classId) {
+    _stopSegAutoPointTimer();
+    _segAutoPoint = imagePoint;
+    _segAutoClassId = classId;
+    _segAutoPointTimer = Timer.periodic(
+      const Duration(milliseconds: 50),
+      (_) {
+        if (!mounted ||
+            widget.activeTool != 'draw' ||
+            widget.activeMode != _AnnotationMode.seg ||
+            _segDraftPoints.isEmpty) {
+          _stopSegAutoPointTimer();
+          return;
+        }
+        final point = _segAutoPoint;
+        final classId = _segAutoClassId;
+        if (point == null || classId == null) {
+          return;
+        }
+        _addSegDraftPoint(point, classId, force: false);
+      },
+    );
+  }
+
+  void _updateSegAutoPoint(Offset imagePoint) {
+    if (_segAutoPointTimer != null) {
+      _segAutoPoint = imagePoint;
+    }
+  }
+
+  bool _closeSegDraftIfNeeded(Offset imagePoint, int classId) {
+    final first = _segDraftPoints.isEmpty ? null : _segDraftPoints.first;
+    if (first == null || _segDraftPoints.length < 3) {
+      return false;
+    }
+    if ((imagePoint - first).distance > _segCloseDistance) {
+      return false;
+    }
+    _stopSegAutoPointTimer();
+    widget.onSegAnnotationCreated(List<Offset>.of(_segDraftPoints), classId);
+    setState(() {
+      _segDraftPoints = [];
+      _draftClassId = null;
+    });
+    return true;
+  }
+
+  void _addSegDraftPoint(
+    Offset imagePoint,
+    int classId, {
+    required bool force,
+  }) {
+    final point = _clampOffset(imagePoint, _imageBounds());
+    if (_closeSegDraftIfNeeded(point, classId)) {
+      return;
+    }
+    final last = _segDraftPoints.isEmpty ? null : _segDraftPoints.last;
+    if (!force && last != null && (point - last).distance <= _segCloseDistance) {
+      return;
+    }
+    setState(() {
+      _draftClassId = classId;
+      _segDraftPoints = [..._segDraftPoints, point];
+    });
+  }
+
+  void _undoSegDraftPointToStart() {
+    if (_segDraftPoints.length <= 1) {
+      return;
+    }
+    setState(() {
+      _segDraftPoints = _segDraftPoints.sublist(0, _segDraftPoints.length - 1);
+    });
+  }
+
   _AnnotationRegion? _annotationAt(Offset point) {
     final imagePoint = _toImagePoint(point);
     final hits = widget.annotations
@@ -997,9 +1103,12 @@ class _ImageCanvasState extends State<_ImageCanvas> {
       _draftRect = null;
       _draftClassId = null;
       _segDraftPoints = [];
+      _stopSegAutoPointTimer();
       _movingAnnotationId = null;
       _resizingAnnotationId = null;
       _resizingCornerIndex = null;
+      _draggingSegAnnotationId = null;
+      _draggingSegPointIndex = null;
       _lastMovePoint = null;
       _draggingSelection = false;
       if (!hadDraft && selectModeWhenEmpty) {
@@ -1033,6 +1142,55 @@ class _ImageCanvasState extends State<_ImageCanvas> {
       }
     }
     return null;
+  }
+
+  _SegVertexHandle? _segVertexHandleAt(Offset point) {
+    final imagePoint = _toImagePoint(point);
+    final selected = _selectedAnnotation();
+    final candidates = <_AnnotationRegion>[
+      if (selected != null && selected.mode == _AnnotationMode.seg) selected,
+      for (final annotation in widget.annotations.reversed)
+        if (annotation.mode == _AnnotationMode.seg &&
+            annotation.id != selected?.id)
+          annotation,
+    ];
+    for (final annotation in candidates) {
+      final points = annotation.points.length >= 3
+          ? annotation.points
+          : _rectToPoints(annotation.rect);
+      for (var index = points.length - 1; index >= 0; index--) {
+        if ((points[index] - imagePoint).distance <= 8 / _scale) {
+          return _SegVertexHandle(annotation.id, index);
+        }
+      }
+    }
+    return null;
+  }
+
+  _AnnotationRegion _updatedSegVertex(
+    _AnnotationRegion annotation,
+    int pointIndex,
+    Offset point,
+  ) {
+    if (annotation.mode != _AnnotationMode.seg) {
+      return annotation;
+    }
+    final points = annotation.points.length >= 3
+        ? List<Offset>.of(annotation.points)
+        : _rectToPoints(annotation.rect);
+    if (pointIndex < 0 || pointIndex >= points.length) {
+      return annotation;
+    }
+    points[pointIndex] = point;
+    final xs = points.map((item) => item.dx);
+    final ys = points.map((item) => item.dy);
+    final rect = Rect.fromLTRB(
+      xs.reduce(math.min),
+      ys.reduce(math.min),
+      xs.reduce(math.max),
+      ys.reduce(math.max),
+    );
+    return annotation.copyWith(points: points, rect: _normalizeRect(rect));
   }
 
   _AnnotationRegion _resizedAnnotation(
@@ -1091,6 +1249,13 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     final hit = insideImage ? _annotationAt(rawPoint) : null;
 
     if (event.buttons == kSecondaryMouseButton) {
+      if (widget.activeTool == 'draw' &&
+          widget.activeMode == _AnnotationMode.seg &&
+          _segDraftPoints.isNotEmpty) {
+        _stopSegAutoPointTimer();
+        _undoSegDraftPointToStart();
+        return;
+      }
       if (!insideImage) {
         return;
       }
@@ -1126,6 +1291,15 @@ class _ImageCanvasState extends State<_ImageCanvas> {
         _draggingSelection = true;
         return;
       }
+      final segHandle = insideImage ? _segVertexHandleAt(rawPoint) : null;
+      if (segHandle != null) {
+        widget.onAnnotationSelected(segHandle.annotationId);
+        widget.onAnnotationDragStarted();
+        _draggingSegAnnotationId = segHandle.annotationId;
+        _draggingSegPointIndex = segHandle.pointIndex;
+        _draggingSelection = true;
+        return;
+      }
       widget.onAnnotationSelected(hit?.id);
       if (hit != null) {
         widget.onAnnotationDragStarted();
@@ -1143,23 +1317,11 @@ class _ImageCanvasState extends State<_ImageCanvas> {
       if (!mounted || classId == null) {
         return;
       }
-      final first = _segDraftPoints.isEmpty ? null : _segDraftPoints.first;
-      final canClose =
-          first != null &&
-          _segDraftPoints.length >= 3 &&
-          (_toImagePoint(localPoint) - first).distance <= 10 / _scale;
-      if (canClose) {
-        widget.onSegAnnotationCreated(_segDraftPoints, classId);
-        setState(() {
-          _segDraftPoints = [];
-          _draftClassId = null;
-        });
-        return;
+      final imagePoint = _toImagePoint(localPoint);
+      _addSegDraftPoint(imagePoint, classId, force: true);
+      if (_segDraftPoints.isNotEmpty) {
+        _startSegAutoPointTimer(imagePoint, classId);
       }
-      setState(() {
-        _draftClassId = classId;
-        _segDraftPoints = [..._segDraftPoints, _toImagePoint(localPoint)];
-      });
       return;
     }
 
@@ -1281,6 +1443,29 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     _updateHoverPoint(event.localPosition);
     final localPoint = _toContentPoint(event.localPosition);
     final imagePoint = _toImagePoint(localPoint);
+    if (_segAutoPointTimer != null && event.buttons == kPrimaryMouseButton) {
+      _updateSegAutoPoint(imagePoint);
+    }
+    final segId = _draggingSegAnnotationId;
+    final segIndex = _draggingSegPointIndex;
+    if (segId != null &&
+        segIndex != null &&
+        event.buttons == kPrimaryMouseButton) {
+      final current = widget.annotations
+          .where((annotation) => annotation.id == segId)
+          .firstOrNullValue;
+      if (current != null) {
+        final imageBounds = _imageBounds();
+        widget.onAnnotationUpdated(
+          _updatedSegVertex(
+            current,
+            segIndex,
+            _clampOffset(imagePoint, imageBounds),
+          ),
+        );
+      }
+      return;
+    }
     final resizingId = _resizingAnnotationId;
     final resizingCorner = _resizingCornerIndex;
     if (resizingId != null &&
@@ -1334,8 +1519,15 @@ class _ImageCanvasState extends State<_ImageCanvas> {
         ? _resizeHandleAt(_toUnclampedContentPoint(event.localPosition))
         : null;
     final cornerIndex = handle?.cornerIndex;
-    if (cornerIndex != _hoveredCornerIndex) {
-      setState(() => _hoveredCornerIndex = cornerIndex);
+    final segHandle = widget.image != null && widget.activeTool == 'select'
+        ? _segVertexHandleAt(_toUnclampedContentPoint(event.localPosition))
+        : null;
+    if (cornerIndex != _hoveredCornerIndex ||
+        segHandle != _hoveredSegVertex) {
+      setState(() {
+        _hoveredCornerIndex = cornerIndex;
+        _hoveredSegVertex = segHandle;
+      });
     }
 
     final start = _drawStart;
@@ -1352,11 +1544,14 @@ class _ImageCanvasState extends State<_ImageCanvas> {
   }
 
   void _handlePointerUp(PointerUpEvent event) {
+    _stopSegAutoPointTimer();
     if (_draggingSelection) {
       setState(() {
         _movingAnnotationId = null;
         _resizingAnnotationId = null;
         _resizingCornerIndex = null;
+        _draggingSegAnnotationId = null;
+        _draggingSegPointIndex = null;
         _lastMovePoint = null;
         _draggingSelection = false;
       });
@@ -1375,6 +1570,18 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     final showPanButtons = widget.image != null && widget.zoom > 70;
     final canPanHorizontally = maxScrollOffset.dx > 0;
     final canPanVertically = maxScrollOffset.dy > 0;
+    final MouseCursor canvasCursor;
+    if (_hoveredCornerIndex != null) {
+      canvasCursor = (_hoveredCornerIndex == 0 || _hoveredCornerIndex == 2)
+          ? SystemMouseCursors.resizeUpLeftDownRight
+          : SystemMouseCursors.resizeUpRightDownLeft;
+    } else if (_hoveredSegVertex != null) {
+      canvasCursor = SystemMouseCursors.move;
+    } else if (widget.activeTool == 'draw') {
+      canvasCursor = SystemMouseCursors.precise;
+    } else {
+      canvasCursor = MouseCursor.defer;
+    }
     return Shortcuts(
       shortcuts: const {
         SingleActivator(LogicalKeyboardKey.escape): _CancelDraftIntent(),
@@ -1408,17 +1615,12 @@ class _ImageCanvasState extends State<_ImageCanvas> {
               ],
             ),
             child: MouseRegion(
-              cursor: _hoveredCornerIndex == null
-                  ? widget.activeTool == 'draw'
-                        ? SystemMouseCursors.precise
-                        : MouseCursor.defer
-                  : (_hoveredCornerIndex == 0 || _hoveredCornerIndex == 2)
-                  ? SystemMouseCursors.resizeUpLeftDownRight
-                  : SystemMouseCursors.resizeUpRightDownLeft,
+              cursor: canvasCursor,
               onExit: (_) {
                 setState(() {
                   _hoverPoint = null;
                   _hoveredCornerIndex = null;
+                  _hoveredSegVertex = null;
                 });
               },
               child: ClipRect(
@@ -1471,6 +1673,27 @@ class _ImageCanvasState extends State<_ImageCanvas> {
                                           crosshairColor: crosshairColor,
                                         ),
                                       ),
+                                      if (selectedAnnotation != null)
+                                        _SelectedAnnotationFilter(
+                                          annotation: selectedAnnotation,
+                                          imageRect: imageRect,
+                                          imageOffset: _scrollOffset,
+                                        ),
+                                      if (selectedAnnotation != null)
+                                        CustomPaint(
+                                          painter:
+                                              _SelectedAnnotationOverlayPainter(
+                                                annotation: selectedAnnotation,
+                                                classes: widget.labelClasses,
+                                                imageRect: imageRect,
+                                                imageOffset: _scrollOffset,
+                                                scale: _scale,
+                                                showClassLabels:
+                                                    widget.showClassLabels,
+                                                darkMode:
+                                                    _isDarkMode(context),
+                                              ),
+                                        ),
                                     ],
                                   ),
                                 ),
@@ -1587,6 +1810,23 @@ class _ResizeHandle {
 
   final String annotationId;
   final int cornerIndex;
+}
+
+class _SegVertexHandle {
+  const _SegVertexHandle(this.annotationId, this.pointIndex);
+
+  final String annotationId;
+  final int pointIndex;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is _SegVertexHandle &&
+          other.annotationId == annotationId &&
+          other.pointIndex == pointIndex;
+
+  @override
+  int get hashCode => Object.hash(annotationId, pointIndex);
 }
 
 class _ViewportPanButton extends StatefulWidget {
@@ -1732,13 +1972,11 @@ class _AnnotationPainter extends CustomPainter {
 
     final selected = selectedAnnotation;
     if (selected != null) {
-      final overlayRect = selected.mode == _AnnotationMode.obb
-          ? _rotatedBoundingRect(
-              selected.rect,
-              selected.rotationDegrees,
-            ).shift(canvasOrigin)
-          : selected.rect.shift(canvasOrigin);
-      _drawOutsideOverlay(canvas, placedImageRect, overlayRect);
+      _drawOutsideOverlay(
+        canvas,
+        placedImageRect,
+        _annotationDisplayPath(selected, imageRect, imageOffset),
+      );
     }
 
     _drawImageBounds(canvas, placedImageRect);
@@ -1779,6 +2017,17 @@ class _AnnotationPainter extends CustomPainter {
       final color = _classById(draftClassId)?.color ?? const Color(0xFF2563EB);
       final canvasPoints = draftSegPoints.map((p) => p + canvasOrigin).toList();
       _drawDraftSegPolygon(canvas, canvasPoints, color);
+      final previewEnd = crosshairPoint;
+      if (draftMode == _AnnotationMode.seg &&
+          previewEnd != null &&
+          placedImageRect.contains(previewEnd)) {
+        _drawDraftSegPreviewLine(
+          canvas,
+          canvasPoints.last,
+          previewEnd,
+          color,
+        );
+      }
     }
 
     final crosshair = crosshairPoint;
@@ -1797,42 +2046,20 @@ class _AnnotationPainter extends CustomPainter {
     return classes.where((item) => item.id == id).firstOrNullValue;
   }
 
-  Rect _rotatedBoundingRect(Rect rect, double degrees) {
-    final corners = _rotatedCorners(rect, degrees);
-    final xs = corners.map((p) => p.dx);
-    final ys = corners.map((p) => p.dy);
-    return Rect.fromLTRB(
-      xs.reduce(math.min),
-      ys.reduce(math.min),
-      xs.reduce(math.max),
-      ys.reduce(math.max),
-    );
-  }
-
-  void _drawOutsideOverlay(Canvas canvas, Rect bounds, Rect rect) {
-    final target = rect.intersect(bounds);
-    if (target.isEmpty) {
+  void _drawOutsideOverlay(Canvas canvas, Rect bounds, Path selectedPath) {
+    final selectedBounds = selectedPath.getBounds();
+    if (selectedBounds.isEmpty || !selectedBounds.overlaps(bounds)) {
       return;
     }
     final paint = Paint()
       ..color = (darkMode ? Colors.black : Colors.grey).withValues(alpha: 0.42);
-    canvas
-      ..drawRect(
-        Rect.fromLTRB(bounds.left, bounds.top, bounds.right, target.top),
-        paint,
-      )
-      ..drawRect(
-        Rect.fromLTRB(bounds.left, target.bottom, bounds.right, bounds.bottom),
-        paint,
-      )
-      ..drawRect(
-        Rect.fromLTRB(bounds.left, target.top, target.left, target.bottom),
-        paint,
-      )
-      ..drawRect(
-        Rect.fromLTRB(target.right, target.top, bounds.right, target.bottom),
-        paint,
-      );
+    final boundsPath = Path()..addRect(bounds);
+    final outsidePath = Path.combine(
+      ui.PathOperation.difference,
+      boundsPath,
+      selectedPath,
+    );
+    canvas.drawPath(outsidePath, paint);
   }
 
   void _drawImageBounds(Canvas canvas, Rect placedRect) {
@@ -1902,6 +2129,27 @@ class _AnnotationPainter extends CustomPainter {
     }
     canvas.drawPath(path, paint);
     _drawSegNodes(canvas, points, closeHint: points.length >= 3);
+  }
+
+  void _drawDraftSegPreviewLine(
+    Canvas canvas,
+    Offset start,
+    Offset end,
+    Color color,
+  ) {
+    final contrast = color.computeLuminance() > 0.5
+        ? const Color(0xFF111827)
+        : Colors.white;
+    final underlay = Paint()
+      ..color = contrast.withValues(alpha: 0.50)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3 / scale;
+    final paint = Paint()
+      ..color = color.withValues(alpha: 0.88)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.4 / scale;
+    _drawDashedLine(canvas, start, end, underlay);
+    _drawDashedLine(canvas, start, end, paint);
   }
 
   void _drawAnnotation(
@@ -2057,6 +2305,250 @@ class _AnnotationPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _AnnotationPainter oldDelegate) => true;
+}
+
+class _SelectedAnnotationFilter extends StatelessWidget {
+  const _SelectedAnnotationFilter({
+    required this.annotation,
+    required this.imageRect,
+    required this.imageOffset,
+  });
+
+  final _AnnotationRegion annotation;
+  final Rect imageRect;
+  final Offset imageOffset;
+
+  @override
+  Widget build(BuildContext context) {
+    final outsidePath = _annotationOutsideDisplayPath(
+      annotation,
+      imageRect,
+      imageOffset,
+    );
+    if (outsidePath.getBounds().isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return IgnorePointer(
+      child: ClipPath(
+        clipper: _AnnotationPathClipper(outsidePath),
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: 2.2, sigmaY: 2.2),
+          child: const SizedBox.expand(),
+        ),
+      ),
+    );
+  }
+}
+
+class _AnnotationPathClipper extends CustomClipper<Path> {
+  const _AnnotationPathClipper(this.path);
+
+  final Path path;
+
+  @override
+  Path getClip(Size size) => path;
+
+  @override
+  bool shouldReclip(covariant _AnnotationPathClipper oldClipper) =>
+      oldClipper.path != path;
+}
+
+class _SelectedAnnotationOverlayPainter extends CustomPainter {
+  const _SelectedAnnotationOverlayPainter({
+    required this.annotation,
+    required this.classes,
+    required this.imageRect,
+    required this.imageOffset,
+    required this.scale,
+    required this.showClassLabels,
+    required this.darkMode,
+  });
+
+  final _AnnotationRegion annotation;
+  final List<_LabelClass> classes;
+  final Rect imageRect;
+  final Offset imageOffset;
+  final double scale;
+  final bool showClassLabels;
+  final bool darkMode;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = _annotationDisplayPath(annotation, imageRect, imageOffset);
+    if (path.getBounds().isEmpty) {
+      return;
+    }
+    final color = _classColorById(classes, annotation.classId);
+    final outlineUnderlay = Paint()
+      ..color = (darkMode ? Colors.white : const Color(0xFF0F172A))
+          .withValues(alpha: 0.72)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 4.4 / scale
+      ..strokeJoin = StrokeJoin.round;
+    final outline = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.6 / scale
+      ..strokeJoin = StrokeJoin.round;
+    canvas
+      ..drawPath(path, outlineUnderlay)
+      ..drawPath(path, outline);
+
+    final displayPoints = _annotationDisplayPoints(
+      annotation,
+      imageRect,
+      imageOffset,
+    );
+    if (annotation.mode == _AnnotationMode.seg) {
+      _drawSegOverlayNodes(canvas, displayPoints);
+    } else {
+      _drawBoxOverlayHandles(canvas, displayPoints);
+    }
+
+    final labelClass = classes
+        .where((item) => item.id == annotation.classId)
+        .firstOrNullValue;
+    if (showClassLabels && labelClass != null) {
+      _drawSelectedLabel(canvas, path.getBounds(), labelClass.name, color);
+    }
+  }
+
+  void _drawBoxOverlayHandles(Canvas canvas, List<Offset> points) {
+    final fill = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+    final border = Paint()
+      ..color = const Color(0xFF334155)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1 / scale;
+    for (final point in points) {
+      final handle = Rect.fromCenter(
+        center: point,
+        width: 8 / scale,
+        height: 8 / scale,
+      );
+      canvas
+        ..drawRect(handle, fill)
+        ..drawRect(handle, border);
+    }
+  }
+
+  void _drawSegOverlayNodes(Canvas canvas, List<Offset> points) {
+    final fill = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+    final border = Paint()
+      ..color = const Color(0xFF334155)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1 / scale;
+    for (final point in points) {
+      canvas
+        ..drawCircle(point, 4 / scale, fill)
+        ..drawCircle(point, 4 / scale, border);
+    }
+  }
+
+  void _drawSelectedLabel(
+    Canvas canvas,
+    Rect bounds,
+    String label,
+    Color color,
+  ) {
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: label,
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 13 / scale,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+      maxLines: 1,
+    )..layout(maxWidth: 180 / scale);
+    final origin = Offset(
+      bounds.left,
+      (bounds.top - 20 / scale).clamp(0, bounds.top).toDouble(),
+    );
+    final background = Rect.fromLTWH(
+      origin.dx - 4 / scale,
+      origin.dy - 2 / scale,
+      textPainter.width + 8 / scale,
+      textPainter.height + 4 / scale,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(background, Radius.circular(3 / scale)),
+      Paint()..color = color.withValues(alpha: 0.95),
+    );
+    textPainter.paint(canvas, origin);
+  }
+
+  @override
+  bool shouldRepaint(covariant _SelectedAnnotationOverlayPainter oldDelegate) =>
+      oldDelegate.annotation != annotation ||
+      oldDelegate.classes != classes ||
+      oldDelegate.imageRect != imageRect ||
+      oldDelegate.imageOffset != imageOffset ||
+      oldDelegate.scale != scale ||
+      oldDelegate.showClassLabels != showClassLabels ||
+      oldDelegate.darkMode != darkMode;
+}
+
+Path _annotationDisplayPath(
+  _AnnotationRegion annotation,
+  Rect imageRect,
+  Offset imageOffset,
+) {
+  final points = _annotationDisplayPoints(annotation, imageRect, imageOffset);
+  if (points.length >= 3) {
+    return Path()..addPolygon(points, true);
+  }
+  return Path();
+}
+
+Path _annotationOutsideDisplayPath(
+  _AnnotationRegion annotation,
+  Rect imageRect,
+  Offset imageOffset,
+) {
+  final imagePath = Path()..addRect(imageRect.shift(imageOffset));
+  final selectedPath = _annotationDisplayPath(annotation, imageRect, imageOffset);
+  if (selectedPath.getBounds().isEmpty) {
+    return imagePath;
+  }
+  return Path.combine(ui.PathOperation.difference, imagePath, selectedPath);
+}
+
+List<Offset> _annotationDisplayPoints(
+  _AnnotationRegion annotation,
+  Rect imageRect,
+  Offset imageOffset,
+) {
+  final origin = imageRect.topLeft + imageOffset;
+  if (annotation.mode == _AnnotationMode.seg) {
+    final points = annotation.points.length >= 3
+        ? annotation.points
+        : _rectToPoints(annotation.rect);
+    return [for (final point in points) point + origin];
+  }
+  if (annotation.mode == _AnnotationMode.obb) {
+    return [
+      for (final point in _rotatedCorners(
+        annotation.rect,
+        annotation.rotationDegrees,
+      ))
+        point + origin,
+    ];
+  }
+  return [for (final point in _rectToPoints(annotation.rect)) point + origin];
+}
+
+Color _classColorById(List<_LabelClass> classes, int classId) {
+  return classes
+          .where((item) => item.id == classId)
+          .firstOrNullValue
+          ?.color ??
+      const Color(0xFF2563EB);
 }
 
 /// 右侧 AI/标注工具栏，包含工具按钮和类别管理。

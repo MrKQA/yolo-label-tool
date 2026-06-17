@@ -1988,7 +1988,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     );
     setState(() {
       _annotationsByImage.putIfAbsent(imageKey, () => []).add(annotation);
-      _selectedAnnotationId = annotation.id;
+      _selectedAnnotationId = null;
       _activeTool = 'draw';
     });
     _log(
@@ -2018,7 +2018,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     );
     setState(() {
       _annotationsByImage.putIfAbsent(imageKey, () => []).add(annotation);
-      _selectedAnnotationId = annotation.id;
+      _selectedAnnotationId = null;
       _activeTool = 'draw';
     });
     _log(
