@@ -842,7 +842,7 @@ class _DetectVideoPage extends StatefulWidget {
 class _DetectVideoPageState extends State<_DetectVideoPage> {
   final FocusNode _focusNode = FocusNode(debugLabel: 'detect-video');
   late final TextEditingController _confController;
-  late final List<_TrainingDeviceOption> _nvidiaDeviceOptions;
+  List<_TrainingDeviceOption> _nvidiaDeviceOptions = const [];
   late final String _autoFallbackDeviceLabel;
   String? _activePredictionCancelPath;
   int? _pendingPredictionStartFrame;
@@ -858,8 +858,8 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
     _confController = TextEditingController(
       text: _session.detectConf.toStringAsFixed(2),
     );
-    _nvidiaDeviceOptions = _detectNvidiaDevices();
     _autoFallbackDeviceLabel = _detectPrimaryProcessorName();
+    unawaited(_loadNvidiaDeviceOptions());
     _session.predictAll = false;
     _session.addListener(_handleSessionChanged);
     _schedulePreviewHide();
@@ -874,6 +874,10 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
   @override
   void didUpdateWidget(covariant _DetectVideoPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.settings.pythonPath.trim() !=
+        widget.settings.pythonPath.trim()) {
+      unawaited(_loadNvidiaDeviceOptions());
+    }
     if (oldWidget.session != widget.session) {
       oldWidget.session.removeListener(_handleSessionChanged);
       widget.session.addListener(_handleSessionChanged);
@@ -889,6 +893,21 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
     _confController.dispose();
     _focusNode.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadNvidiaDeviceOptions() async {
+    if (_resolvePythonExecutable(widget.settings.pythonPath.trim()) == null) {
+      if (mounted && _nvidiaDeviceOptions.isNotEmpty) {
+        setState(() => _nvidiaDeviceOptions = const []);
+      }
+      return;
+    }
+    final devices = await _detectNvidiaDevices();
+    devices.sort((a, b) => _naturalCompare(a.id, b.id));
+    if (!mounted) {
+      return;
+    }
+    setState(() => _nvidiaDeviceOptions = devices);
   }
 
   void _handleSessionChanged() {
@@ -1454,7 +1473,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
     final autoDeviceLabel =
         '${t('detect.deviceAuto')} | '
         '${_friendlyDeviceLabel(_nvidiaDeviceOptions.firstOrNullValue?.label ?? _autoFallbackDeviceLabel)}';
-    return Expanded(
+    return SizedBox.expand(
       child: Row(
         children: [
           Expanded(

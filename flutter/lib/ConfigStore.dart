@@ -162,15 +162,20 @@ class _AppSettings {
     required this.exportPath,
     this.logLevelIndex = 2, // warning by default
     this.darkMode = false,
+    this.collaborationHostId = '',
+    this.collaborationUserId = '',
   });
 
   factory _AppSettings.empty() {
-    return const _AppSettings(
+    final identity = _ConfigStore.loadStableCollaborationIdentity();
+    return _AppSettings(
       pythonPath: '',
       outputPath: '',
       exportPath: '',
       logLevelIndex: 2,
       darkMode: false,
+      collaborationHostId: identity.hostId,
+      collaborationUserId: identity.userId,
     );
   }
 
@@ -179,6 +184,8 @@ class _AppSettings {
   final String exportPath;
   final int logLevelIndex; // 0=debug, 1=info, 2=warning, 3=error
   final bool darkMode;
+  final String collaborationHostId;
+  final String collaborationUserId;
 
   _AppSettings copyWith({
     String? pythonPath,
@@ -186,6 +193,8 @@ class _AppSettings {
     String? exportPath,
     int? logLevelIndex,
     bool? darkMode,
+    String? collaborationHostId,
+    String? collaborationUserId,
   }) {
     return _AppSettings(
       pythonPath: pythonPath ?? this.pythonPath,
@@ -193,6 +202,8 @@ class _AppSettings {
       exportPath: exportPath ?? this.exportPath,
       logLevelIndex: logLevelIndex ?? this.logLevelIndex,
       darkMode: darkMode ?? this.darkMode,
+      collaborationHostId: collaborationHostId ?? this.collaborationHostId,
+      collaborationUserId: collaborationUserId ?? this.collaborationUserId,
     );
   }
 
@@ -202,12 +213,15 @@ class _AppSettings {
     'exportPath': exportPath,
     'logLevelIndex': logLevelIndex,
     'darkMode': darkMode,
+    'collaborationHostId': collaborationHostId,
+    'collaborationUserId': collaborationUserId,
   };
 
   static _AppSettings fromJson(Object? value) {
     if (value is! Map) {
       return _AppSettings.empty();
     }
+    final identity = _ConfigStore.loadStableCollaborationIdentity();
     final outputPath = value['outputPath'];
     final exportPath = value['exportPath'];
     return _AppSettings(
@@ -222,6 +236,64 @@ class _AppSettings {
           : _ConfigStore.defaultDatasetsDirectory.path,
       logLevelIndex: _logLevelIndexFromJson(value['logLevelIndex']),
       darkMode: value['darkMode'] == true,
+      collaborationHostId: _collaborationIdFromJson(
+        value['collaborationHostId'],
+        'host',
+        identity.hostId,
+      ),
+      collaborationUserId: _collaborationIdFromJson(
+        value['collaborationUserId'],
+        'user',
+        identity.userId,
+      ),
+    );
+  }
+}
+
+String _collaborationIdFromJson(
+  Object? value,
+  String prefix,
+  String stableFallback,
+) {
+  if (value is String && value.trim().isNotEmpty) {
+    final id = value.trim();
+    if (!_looksLikeRandomCollaborationId(id, prefix) &&
+        !id.toLowerCase().startsWith('$prefix-')) {
+      return id;
+    }
+  }
+  return stableFallback;
+}
+
+bool _looksLikeRandomCollaborationId(String id, String prefix) {
+  return RegExp('^$prefix-[0-9a-z]+-[0-9a-z]+\$').hasMatch(id);
+}
+
+class _CollaborationIdentityConfig {
+  const _CollaborationIdentityConfig({
+    required this.hostId,
+    required this.userId,
+  });
+
+  final String hostId;
+  final String userId;
+
+  Map<String, Object> toJson() => {
+    'hostId': hostId,
+    'userId': userId,
+  };
+
+  static _CollaborationIdentityConfig fromJson(Object? value) {
+    if (value is! Map) {
+      return const _CollaborationIdentityConfig(hostId: '', userId: '');
+    }
+    return _CollaborationIdentityConfig(
+      hostId: value['hostId'] is String
+          ? (value['hostId'] as String).trim()
+          : '',
+      userId: value['userId'] is String
+          ? (value['userId'] as String).trim()
+          : '',
     );
   }
 }
@@ -360,6 +432,7 @@ List<_RecentEntry> _recentEntriesFromJson(Object? value) {
 
 class _ConfigStore {
   static const databaseFileName = 'AnnotationConfig.db';
+  static const collaborationIdentityFileName = 'CollaborationIdentity.json';
   static const _historyKey = 'history';
   static const _keybindingsKey = 'keybindings';
   static const _settingsKey = 'settings';
@@ -367,11 +440,11 @@ class _ConfigStore {
   static const _trainingPreferencesKey = 'training_preferences';
 
   static Directory get projectDirectory {
-    final current = Directory.current;
-    if (_fileName(current.path).toLowerCase() == 'flutter') {
-      return current.parent;
-    }
-    return current;
+    // Use the executable directory as the application root so packaged builds
+    // read and write the same AnnotationConfig.db shown in the settings page.
+    //
+    // 使用 exe 所在目录作为程序根目录，避免打包后 Rust 侧回读源码目录中的旧数据库。
+    return File(Platform.resolvedExecutable).parent;
   }
 
   static Directory get defaultRunsDirectory =>
@@ -383,7 +456,11 @@ class _ConfigStore {
   static File get databaseFile =>
       File('${projectDirectory.path}\\$databaseFileName');
 
+  static File get collaborationIdentityFile =>
+      File('${projectDirectory.path}\\$collaborationIdentityFileName');
+
   static void ensureDefaultConfig() {
+    final identity = loadStableCollaborationIdentity();
     _ensureDbConfig(
       _historyKey,
       const _HistoryConfig(folders: [], files: []).toJson(),
@@ -397,6 +474,8 @@ class _ConfigStore {
         exportPath: defaultDatasetsDirectory.path,
         logLevelIndex: 2,
         darkMode: false,
+        collaborationHostId: identity.hostId,
+        collaborationUserId: identity.userId,
       ).toJson(),
     );
     _ensureDbConfig(
@@ -435,6 +514,99 @@ class _ConfigStore {
 
   static void saveSettings(_AppSettings value) {
     _writeDbJson(_settingsKey, value.toJson());
+  }
+
+  static _CollaborationIdentityConfig loadStableCollaborationIdentity() {
+    final machineSource = _machineIdentitySource();
+    if (machineSource.isNotEmpty) {
+      final userName = _collaborationIdSegment(
+        Platform.environment['USERNAME'] ?? Platform.environment['USER'] ?? '',
+      );
+      final identity = _CollaborationIdentityConfig(
+        hostId: machineSource,
+        userId: userName.isEmpty ? machineSource : userName,
+      );
+      _writeCollaborationIdentityFile(identity);
+      return identity;
+    }
+
+    final stored = _readCollaborationIdentityFile();
+    if (stored.hostId.isNotEmpty && stored.userId.isNotEmpty) {
+      return stored;
+    }
+    final generated = _CollaborationIdentityConfig(
+      hostId: _newCollaborationId('host'),
+      userId: _newCollaborationId('user'),
+    );
+    _writeCollaborationIdentityFile(generated);
+    return generated;
+  }
+
+  static String _machineIdentitySource() {
+    final candidates = [
+      Platform.environment['COMPUTERNAME'],
+      Platform.environment['HOSTNAME'],
+      Platform.localHostname,
+      Platform.environment['USERDOMAIN'],
+    ];
+    for (final candidate in candidates) {
+      final normalized = _collaborationIdSegment(candidate ?? '');
+      if (normalized.isNotEmpty) {
+        return normalized;
+      }
+    }
+    return '';
+  }
+
+  static String _collaborationIdSegment(String value) {
+    final normalized = value
+        .trim()
+        .toUpperCase()
+        .replaceAll(RegExp(r'[^A-Z0-9]+'), '-')
+        .replaceAll(RegExp(r'^-+|-+$'), '');
+    if (normalized.length <= 48) {
+      return normalized;
+    }
+    return '${normalized.substring(0, 39)}-${_stableIdentityHash(normalized)}';
+  }
+
+  static String _stableIdentityHash(String value) {
+    var hash = 2166136261;
+    for (final codeUnit in value.codeUnits) {
+      hash ^= codeUnit;
+      hash = (hash * 16777619) & 0xFFFFFFFF;
+    }
+    return hash.toRadixString(16).padLeft(8, '0').toUpperCase();
+  }
+
+  static _CollaborationIdentityConfig _readCollaborationIdentityFile() {
+    try {
+      final file = collaborationIdentityFile;
+      if (!file.existsSync()) {
+        return const _CollaborationIdentityConfig(hostId: '', userId: '');
+      }
+      return _CollaborationIdentityConfig.fromJson(
+        jsonDecode(file.readAsStringSync()),
+      );
+    } on Object {
+      return const _CollaborationIdentityConfig(hostId: '', userId: '');
+    }
+  }
+
+  static void _writeCollaborationIdentityFile(
+    _CollaborationIdentityConfig value,
+  ) {
+    try {
+      final file = collaborationIdentityFile;
+      final parent = file.parent;
+      if (!parent.existsSync()) {
+        parent.createSync(recursive: true);
+      }
+      const encoder = JsonEncoder.withIndent('  ');
+      file.writeAsStringSync(encoder.convert(value.toJson()));
+    } on Object {
+      // The DB settings still keep the current identity when the file is locked.
+    }
   }
 
   static void saveTrainingHistory(_TrainingHistoryConfig value) {

@@ -343,7 +343,7 @@ class _CropPageState extends State<_CropPage> {
   @override
   Widget build(BuildContext context) {
     final hasVideos = _videos.isNotEmpty;
-    return Expanded(
+    return SizedBox.expand(
       child: Container(
         color: _workspaceColor(context),
         padding: const EdgeInsets.all(32),

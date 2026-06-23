@@ -36,6 +36,21 @@ struct DbAnnotation {
     points: String,
     source: String,
     confidence: f64,
+    author_id: String,
+    author_name: String,
+    author_color: i64,
+}
+
+#[derive(Debug, Clone)]
+struct DbCollaborationPermission {
+    user_id: String,
+    user_name: String,
+    color: i64,
+    can_edit_others: bool,
+    can_delete_others: bool,
+    can_change_class: bool,
+    assignment_start: i64,
+    assignment_end: i64,
 }
 
 #[derive(Debug, Default)]
@@ -44,6 +59,7 @@ struct SnapshotPayload {
     classes: Vec<DbClass>,
     images: Vec<DbImage>,
     annotations: Vec<DbAnnotation>,
+    collaboration_permissions: Vec<DbCollaborationPermission>,
 }
 
 pub fn save_snapshot(payload: &str) -> Result<String, String> {
@@ -59,6 +75,7 @@ pub fn save_snapshot(payload: &str) -> Result<String, String> {
     save_classes(&tx, project_id, &snapshot.classes)?;
     save_images(&tx, project_id, &snapshot.images)?;
     save_annotations(&tx, project_id, &snapshot.images, &snapshot.annotations)?;
+    save_collaboration_permissions(&tx, project_id, &snapshot.collaboration_permissions)?;
     delete_images_not_in_snapshot(&tx, project_id, &snapshot.images)?;
     tx.commit().map_err(|error| error.to_string())?;
     Ok(format!(
@@ -258,6 +275,7 @@ pub fn database_overview() -> Result<String, String> {
         "images",
         "classes",
         "annotations",
+        "collaboration_permissions",
         "app_config",
         "app_logs",
     ];
@@ -510,6 +528,37 @@ pub fn database_table(
                 )
             }
         }
+        "collaboration_permissions" => query_table_json(
+            &connection,
+            &db_path,
+            "collaboration_permissions",
+            &[
+                "id",
+                "project_id",
+                "project_name",
+                "user_id",
+                "user_name",
+                "color",
+                "can_edit_others",
+                "can_delete_others",
+                "can_change_class",
+                "assignment_start",
+                "assignment_end",
+                "updated_at",
+            ],
+            r#"
+            SELECT cp.id, cp.project_id, p.name AS project_name, cp.user_id,
+                   cp.user_name, cp.color, cp.can_edit_others,
+                   cp.can_delete_others, cp.can_change_class,
+                   cp.assignment_start, cp.assignment_end, cp.updated_at
+            FROM collaboration_permissions cp
+            INNER JOIN projects p ON p.id = cp.project_id
+            WHERE (? = 0 OR cp.project_id = ?)
+            ORDER BY p.name, cp.user_name, cp.user_id
+            LIMIT ? OFFSET ?
+            "#,
+            params![project_id.unwrap_or(0), project_id.unwrap_or(0), limit, offset],
+        ),
         "app_config" => query_table_json(
             &connection,
             &db_path,
@@ -550,27 +599,13 @@ fn database_path() -> Result<PathBuf, String> {
 }
 
 fn application_root() -> Result<PathBuf, String> {
-    let current = env::current_dir().map_err(|error| format!("current dir: {error}"))?;
-    if is_project_root(&current) {
-        return Ok(current);
-    }
-
     if let Ok(exe) = env::current_exe() {
         if let Some(parent) = exe.parent() {
-            for ancestor in parent.ancestors() {
-                if is_project_root(ancestor) {
-                    return Ok(ancestor.to_path_buf());
-                }
-            }
             return Ok(parent.to_path_buf());
         }
     }
 
-    Ok(current)
-}
-
-fn is_project_root(path: &Path) -> bool {
-    path.join("flutter_rust_bridge.yaml").exists() || path.join("Cargo.toml").exists()
+    env::current_dir().map_err(|error| format!("current dir: {error}"))
 }
 
 fn open_database(path: &Path) -> Result<Connection, String> {
@@ -604,7 +639,10 @@ fn cleanup_missing_label_data(connection: &Connection) -> Result<(usize, usize),
 
     for image_id in &missing_image_ids {
         connection
-            .execute("DELETE FROM annotations WHERE image_id=?", params![image_id])
+            .execute(
+                "DELETE FROM annotations WHERE image_id=?",
+                params![image_id],
+            )
             .map_err(|error| error.to_string())?;
         connection
             .execute("DELETE FROM images WHERE id=?", params![image_id])
@@ -634,7 +672,10 @@ fn cleanup_missing_label_data(connection: &Connection) -> Result<(usize, usize),
 
     for project_id in &remove_project_ids {
         connection
-            .execute("DELETE FROM classes WHERE project_id=?", params![project_id])
+            .execute(
+                "DELETE FROM classes WHERE project_id=?",
+                params![project_id],
+            )
             .map_err(|error| error.to_string())?;
         connection
             .execute("DELETE FROM projects WHERE id=?", params![project_id])
@@ -863,6 +904,9 @@ fn annotation_columns() -> &'static [&'static str] {
         "points",
         "source",
         "confidence",
+        "author_id",
+        "author_name",
+        "author_color",
         "updated_at",
     ]
 }
@@ -873,7 +917,8 @@ fn annotation_sql(where_clause: &str) -> String {
         SELECT a.id, a.image_id, i.project_id, i.file_name, i.path,
                a.kind, a.class_id, COALESCE(c.name, '') AS class_name,
                a.left, a.top, a.right, a.bottom, a.rotation,
-               a.points, a.source, a.confidence, a.updated_at
+               a.points, a.source, a.confidence, a.author_id,
+               a.author_name, a.author_color, a.updated_at
         FROM annotations a
         INNER JOIN images i ON i.id = a.image_id
         LEFT JOIN classes c ON c.project_id = i.project_id AND c.class_id = a.class_id
@@ -894,11 +939,7 @@ fn parse_optional_i64(value: &str) -> Option<i64> {
 }
 
 fn parse_page_limit(value: &str) -> i64 {
-    value
-        .trim()
-        .parse::<i64>()
-        .unwrap_or(50)
-        .clamp(1, 200)
+    value.trim().parse::<i64>().unwrap_or(50).clamp(1, 200)
 }
 
 fn parse_nonnegative_i64(value: &str) -> i64 {
@@ -943,11 +984,35 @@ fn parse_payload(payload: &str) -> SnapshotPayload {
                 points: fields[10].to_string(),
                 source: fields[11].to_string(),
                 confidence: parse_f64(fields[12]),
+                author_id: fields.get(13).copied().unwrap_or("").to_string(),
+                author_name: fields.get(14).copied().unwrap_or("").to_string(),
+                author_color: fields.get(15).map_or(0, |value| parse_i64(value)),
             }),
+            Some("COLLAB_USER") if fields.len() >= 7 => {
+                result
+                    .collaboration_permissions
+                    .push(DbCollaborationPermission {
+                        user_id: fields[1].to_string(),
+                        user_name: fields[2].to_string(),
+                        color: parse_i64(fields[3]),
+                        can_edit_others: parse_bool(fields[4]),
+                        can_delete_others: parse_bool(fields[5]),
+                        can_change_class: parse_bool(fields[6]),
+                        assignment_start: fields.get(7).map_or(1, |value| parse_i64(value)),
+                        assignment_end: fields.get(8).map_or(1, |value| parse_i64(value)),
+                    })
+            }
             _ => {}
         }
     }
     result
+}
+
+fn parse_bool(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "y"
+    )
 }
 
 fn project_key(value: &str) -> String {
@@ -1038,6 +1103,9 @@ fn init_schema(connection: &Connection) -> Result<(), String> {
                 points TEXT NOT NULL DEFAULT '',
                 source TEXT NOT NULL DEFAULT 'manual',
                 confidence REAL NOT NULL DEFAULT 0,
+                author_id TEXT NOT NULL DEFAULT '',
+                author_name TEXT NOT NULL DEFAULT '',
+                author_color INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY(image_id, id),
@@ -1049,6 +1117,24 @@ fn init_schema(connection: &Connection) -> Result<(), String> {
                 ON annotations(kind);
             CREATE INDEX IF NOT EXISTS idx_annotations_class_kind
                 ON annotations(class_id, kind);
+            CREATE TABLE IF NOT EXISTS collaboration_permissions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                user_id TEXT NOT NULL,
+                user_name TEXT NOT NULL DEFAULT '',
+                color INTEGER NOT NULL DEFAULT 0,
+                can_edit_others INTEGER NOT NULL DEFAULT 0,
+                can_delete_others INTEGER NOT NULL DEFAULT 0,
+                can_change_class INTEGER NOT NULL DEFAULT 0,
+                assignment_start INTEGER NOT NULL DEFAULT 1,
+                assignment_end INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(project_id, user_id),
+                FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_collab_permissions_project
+                ON collaboration_permissions(project_id, user_id);
             CREATE TABLE IF NOT EXISTS app_config (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
@@ -1069,7 +1155,64 @@ fn init_schema(connection: &Connection) -> Result<(), String> {
             PRAGMA user_version = 1;
             "#,
         )
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    ensure_column(
+        connection,
+        "annotations",
+        "author_id",
+        "TEXT NOT NULL DEFAULT ''",
+    )?;
+    ensure_column(
+        connection,
+        "annotations",
+        "author_name",
+        "TEXT NOT NULL DEFAULT ''",
+    )?;
+    ensure_column(
+        connection,
+        "annotations",
+        "author_color",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    ensure_column(
+        connection,
+        "collaboration_permissions",
+        "assignment_start",
+        "INTEGER NOT NULL DEFAULT 1",
+    )?;
+    ensure_column(
+        connection,
+        "collaboration_permissions",
+        "assignment_end",
+        "INTEGER NOT NULL DEFAULT 1",
+    )?;
+    Ok(())
+}
+
+fn ensure_column(
+    connection: &Connection,
+    table_name: &str,
+    column_name: &str,
+    definition: &str,
+) -> Result<(), String> {
+    let mut stmt = connection
+        .prepare(&format!("PRAGMA table_info({table_name})"))
+        .map_err(|error| error.to_string())?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| error.to_string())?;
+    for row in rows {
+        if row.map_err(|error| error.to_string())? == column_name {
+            return Ok(());
+        }
+    }
+    connection
+        .execute(
+            &format!("ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}"),
+            [],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 fn save_classes(
@@ -1203,9 +1346,10 @@ fn save_annotations(
             r#"
             INSERT INTO annotations(
                 id, image_id, class_id, kind, left, top, right, bottom,
-                rotation, points, source, confidence, updated_at
+                rotation, points, source, confidence, author_id, author_name,
+                author_color, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(image_id, id) DO UPDATE SET
                 class_id=excluded.class_id,
                 kind=excluded.kind,
@@ -1217,6 +1361,9 @@ fn save_annotations(
                 points=excluded.points,
                 source=excluded.source,
                 confidence=excluded.confidence,
+                author_id=excluded.author_id,
+                author_name=excluded.author_name,
+                author_color=excluded.author_color,
                 updated_at=CURRENT_TIMESTAMP
             "#,
         )
@@ -1239,6 +1386,72 @@ fn save_annotations(
             annotation.points,
             annotation.source,
             finite_f64(annotation.confidence),
+            annotation.author_id,
+            annotation.author_name,
+            annotation.author_color,
+        ])
+        .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn save_collaboration_permissions(
+    connection: &Connection,
+    project_id: i64,
+    permissions: &[DbCollaborationPermission],
+) -> Result<(), String> {
+    if permissions.is_empty() {
+        return Ok(());
+    }
+    let mut stmt = connection
+        .prepare(
+            r#"
+            INSERT INTO collaboration_permissions(
+                project_id, user_id, user_name, color, can_edit_others,
+                can_delete_others, can_change_class, assignment_start,
+                assignment_end, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(project_id, user_id) DO UPDATE SET
+                user_name=excluded.user_name,
+                color=excluded.color,
+                can_edit_others=excluded.can_edit_others,
+                can_delete_others=excluded.can_delete_others,
+                can_change_class=excluded.can_change_class,
+                assignment_start=excluded.assignment_start,
+                assignment_end=excluded.assignment_end,
+                updated_at=CURRENT_TIMESTAMP
+            "#,
+        )
+        .map_err(|error| error.to_string())?;
+    for permission in permissions {
+        if permission.user_id.trim().is_empty() {
+            continue;
+        }
+        stmt.execute(params![
+            project_id,
+            permission.user_id,
+            permission.user_name,
+            permission.color,
+            if permission.can_edit_others {
+                1_i64
+            } else {
+                0_i64
+            },
+            if permission.can_delete_others {
+                1_i64
+            } else {
+                0_i64
+            },
+            if permission.can_change_class {
+                1_i64
+            } else {
+                0_i64
+            },
+            permission.assignment_start.max(1),
+            permission
+                .assignment_end
+                .max(permission.assignment_start.max(1)),
         ])
         .map_err(|error| error.to_string())?;
     }
@@ -1308,7 +1521,8 @@ fn load_annotations(
         .prepare(
             r#"
             SELECT i.path, a.id, a.kind, a.class_id, a.left, a.top, a.right,
-                   a.bottom, a.rotation, a.points, a.source, a.confidence
+                   a.bottom, a.rotation, a.points, a.source, a.confidence,
+                   a.author_id, a.author_name, a.author_color
             FROM annotations a
             INNER JOIN images i ON i.id = a.image_id
             WHERE i.project_id=?
@@ -1331,6 +1545,9 @@ fn load_annotations(
                 points: row.get(9)?,
                 source: row.get(10)?,
                 confidence: row.get(11)?,
+                author_id: row.get(12)?,
+                author_name: row.get(13)?,
+                author_color: row.get(14)?,
             })
         })
         .map_err(|error| error.to_string())?;
@@ -1426,7 +1643,7 @@ fn snapshot_json(path: &Path, classes: &[DbClass], annotations: &[DbAnnotation])
             output.push(',');
         }
         output.push_str(&format!(
-            "{{\"imagePath\":\"{}\",\"id\":\"{}\",\"kind\":\"{}\",\"classId\":{},\"left\":{},\"top\":{},\"right\":{},\"bottom\":{},\"rotation\":{},\"points\":\"{}\",\"source\":\"{}\",\"confidence\":{}}}",
+            "{{\"imagePath\":\"{}\",\"id\":\"{}\",\"kind\":\"{}\",\"classId\":{},\"left\":{},\"top\":{},\"right\":{},\"bottom\":{},\"rotation\":{},\"points\":\"{}\",\"source\":\"{}\",\"confidence\":{},\"authorId\":\"{}\",\"authorName\":\"{}\",\"authorColor\":{}}}",
             json_escape(&annotation.image_path),
             json_escape(&annotation.id),
             json_escape(&annotation.kind),
@@ -1439,6 +1656,9 @@ fn snapshot_json(path: &Path, classes: &[DbClass], annotations: &[DbAnnotation])
             json_escape(&annotation.points),
             json_escape(&annotation.source),
             finite_json_number(annotation.confidence),
+            json_escape(&annotation.author_id),
+            json_escape(&annotation.author_name),
+            annotation.author_color,
         ));
     }
     output.push_str("]}");

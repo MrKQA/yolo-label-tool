@@ -71,6 +71,9 @@ class _AnnotationRegion {
     required this.classId,
     this.rotationDegrees = 0,
     this.points = const [],
+    this.authorId = '',
+    this.authorName = '',
+    this.authorColorValue = 0,
   });
 
   factory _AnnotationRegion.fromRect({
@@ -78,6 +81,9 @@ class _AnnotationRegion {
     required _AnnotationMode mode,
     required Rect rect,
     required int classId,
+    String authorId = '',
+    String authorName = '',
+    int authorColorValue = 0,
   }) {
     final normalized = _normalizeRect(rect);
     return _AnnotationRegion(
@@ -88,6 +94,9 @@ class _AnnotationRegion {
       points: mode == _AnnotationMode.seg
           ? _rectToPoints(normalized)
           : const [],
+      authorId: authorId,
+      authorName: authorName,
+      authorColorValue: authorColorValue,
     );
   }
 
@@ -97,12 +106,18 @@ class _AnnotationRegion {
   final int classId;
   final double rotationDegrees;
   final List<Offset> points;
+  final String authorId;
+  final String authorName;
+  final int authorColorValue;
 
   _AnnotationRegion copyWith({
     Rect? rect,
     int? classId,
     double? rotationDegrees,
     List<Offset>? points,
+    String? authorId,
+    String? authorName,
+    int? authorColorValue,
   }) {
     return _AnnotationRegion(
       id: id,
@@ -111,6 +126,9 @@ class _AnnotationRegion {
       classId: classId ?? this.classId,
       rotationDegrees: rotationDegrees ?? this.rotationDegrees,
       points: points ?? this.points,
+      authorId: authorId ?? this.authorId,
+      authorName: authorName ?? this.authorName,
+      authorColorValue: authorColorValue ?? this.authorColorValue,
     );
   }
 
@@ -170,6 +188,9 @@ class _AnnotationRegion {
       classId: classId,
       rotationDegrees: rotationDegrees,
       points: [for (final point in points) point + const Offset(18, 18)],
+      authorId: authorId,
+      authorName: authorName,
+      authorColorValue: authorColorValue,
     );
   }
 

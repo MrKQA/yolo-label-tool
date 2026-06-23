@@ -160,6 +160,20 @@ class _RustVideoBackend {
     return Isolate.run(() => _databaseSqlQuerySync(sql: sql));
   }
 
+  static Future<Map<String, dynamic>> collaborationCommand({
+    required Map<String, Object?> request,
+  }) {
+    return Isolate.run(() => _collaborationCommandSync(request: request));
+  }
+
+  static Future<List<Map<String, dynamic>>> collaborationPollEvents({
+    int maxEvents = 50,
+  }) {
+    return Isolate.run(
+      () => _collaborationPollEventsSync(maxEvents: maxEvents),
+    );
+  }
+
   static Future<List<String>> trainingLogDates() {
     return Isolate.run(() {
       final result = _trainingLogDatabaseSync(mode: 'dates');
@@ -633,6 +647,54 @@ class _RustVideoBackend {
     }
   }
 
+  static Map<String, dynamic> _collaborationCommandSync({
+    required Map<String, Object?> request,
+  }) {
+    final bindings = _RustVideoBindings.open();
+    final requestBytes = Uint8List.fromList(utf8.encode(jsonEncode(request)));
+    final requestPtr = bindings.allocator.allocate(requestBytes);
+    try {
+      final buffer = bindings.collabCommandJson(
+        requestPtr,
+        requestBytes.length,
+      );
+      return _decodeDbResponse(bindings, buffer, 'collaboration command failed');
+    } finally {
+      bindings.allocator.free(requestPtr);
+    }
+  }
+
+  static List<Map<String, dynamic>> _collaborationPollEventsSync({
+    required int maxEvents,
+  }) {
+    final bindings = _RustVideoBindings.open();
+    final request = jsonEncode({'maxEvents': maxEvents});
+    final requestBytes = Uint8List.fromList(utf8.encode(request));
+    final requestPtr = bindings.allocator.allocate(requestBytes);
+    try {
+      final buffer = bindings.collabPollJson(requestPtr, requestBytes.length);
+      final decoded = _decodeDbResponse(
+        bindings,
+        buffer,
+        'collaboration event poll failed',
+      );
+      final events = decoded['events'];
+      if (events is! List) {
+        return const <Map<String, dynamic>>[];
+      }
+      return events
+          .whereType<Map>()
+          .map(
+            (event) => event.map(
+              (key, value) => MapEntry(key.toString(), value),
+            ),
+          )
+          .toList(growable: false);
+    } finally {
+      bindings.allocator.free(requestPtr);
+    }
+  }
+
   static Map<String, dynamic> _trainingLogDatabaseSync({
     String date = '',
     String startDate = '',
@@ -1077,6 +1139,14 @@ typedef _DeleteTrainingLogsJsonNative =
     _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
 typedef _DeleteTrainingLogsJsonDart =
     _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+typedef _CollabCommandJsonNative =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef _CollabCommandJsonDart =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+typedef _CollabPollJsonNative =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef _CollabPollJsonDart =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 
 typedef _FreeByteBufferNative = ffi.Void Function(_RustVideoByteBuffer);
 typedef _FreeByteBufferDart = void Function(_RustVideoByteBuffer);
@@ -1186,6 +1256,14 @@ class _RustVideoBindings {
             _DeleteTrainingLogsJsonNative,
             _DeleteTrainingLogsJsonDart
           >('rust_label_delete_training_logs_json'),
+      collabCommandJson = library
+          .lookupFunction<_CollabCommandJsonNative, _CollabCommandJsonDart>(
+            'rust_label_collab_command_json',
+          ),
+      collabPollJson = library
+          .lookupFunction<_CollabPollJsonNative, _CollabPollJsonDart>(
+            'rust_label_collab_poll_json',
+          ),
       _freeByteBuffer = library
           .lookupFunction<_FreeByteBufferNative, _FreeByteBufferDart>(
             'rust_label_free_byte_buffer',
@@ -1217,6 +1295,8 @@ class _RustVideoBindings {
   final _TrainingLogDatesJsonDart trainingLogDatesJson;
   final _ReadTrainingLogJsonDart readTrainingLogJson;
   final _DeleteTrainingLogsJsonDart deleteTrainingLogsJson;
+  final _CollabCommandJsonDart collabCommandJson;
+  final _CollabPollJsonDart collabPollJson;
   final _FreeByteBufferDart _freeByteBuffer;
 
   static _RustVideoBindings open() {

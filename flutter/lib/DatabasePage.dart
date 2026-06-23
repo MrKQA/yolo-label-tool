@@ -13,6 +13,7 @@ const _databaseTableSpecs = [
   _DatabaseTableSpec('images', Icons.image_outlined),
   _DatabaseTableSpec('classes', Icons.palette_outlined),
   _DatabaseTableSpec('annotations', Icons.edit_note),
+  _DatabaseTableSpec('collaboration_permissions', Icons.verified_user_outlined),
   _DatabaseTableSpec('app_config', Icons.tune_outlined),
   _DatabaseTableSpec('app_logs', Icons.article_outlined),
   _DatabaseTableSpec('training_terminal_logs', Icons.terminal),

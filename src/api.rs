@@ -17,6 +17,9 @@ pub mod detecting_mod;
 #[path = "database.rs"]
 pub mod database_mod;
 
+#[path = "collaboration.rs"]
+pub mod collaboration_mod;
+
 use training_mod::{TrainingConfig, TrainingProgress};
 
 /// Smoke-test function exposed to Flutter through flutter_rust_bridge.
@@ -537,6 +540,33 @@ pub unsafe extern "C" fn rust_label_delete_training_logs_json(
             let end_date = required_json_string(&request, "endDate")?;
             training_mod::delete_training_logs_by_date_range_json(&start_date, &end_date)
         })
+        .unwrap_or_else(error_json);
+    vec_into_ffi_buffer(result.into_bytes())
+}
+
+/// C ABI: dispatch one collaboration-network command.
+#[frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn rust_label_collab_command_json(
+    request_ptr: *const u8,
+    request_len: usize,
+) -> RustLabelByteBuffer {
+    let result = string_from_ffi(request_ptr, request_len)
+        .and_then(|request| collaboration_mod::command_json(&request))
+        .unwrap_or_else(error_json);
+    vec_into_ffi_buffer(result.into_bytes())
+}
+
+/// C ABI: poll pending collaboration-network events.
+#[frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn rust_label_collab_poll_json(
+    request_ptr: *const u8,
+    request_len: usize,
+) -> RustLabelByteBuffer {
+    let result = string_from_ffi(request_ptr, request_len)
+        .map(|request| json_u32_field(&request, "maxEvents").unwrap_or(50) as usize)
+        .and_then(collaboration_mod::poll_events_json)
         .unwrap_or_else(error_json);
     vec_into_ffi_buffer(result.into_bytes())
 }

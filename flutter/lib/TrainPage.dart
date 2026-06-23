@@ -120,10 +120,19 @@ class _TrainPageState extends State<_TrainPage> {
   void initState() {
     super.initState();
     _trainingHistory = _ConfigStore.loadTrainingHistory().entries;
-    _loadDeviceOptions();
+    unawaited(_loadDeviceOptions());
     _loadModelOptions();
     _scheduleHide();
     _restorePreferences();
+  }
+
+  @override
+  void didUpdateWidget(covariant _TrainPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.settings.pythonPath.trim() !=
+        widget.settings.pythonPath.trim()) {
+      unawaited(_loadDeviceOptions());
+    }
   }
 
   @override
@@ -227,9 +236,7 @@ class _TrainPageState extends State<_TrainPage> {
       _ampEnabled = prefs.ampEnabled;
       _manualDeviceSelection = prefs.manualDeviceSelection;
       if (_manualDeviceSelection && prefs.selectedDeviceIds.isNotEmpty) {
-        _selectedDeviceIds = _normalizeTrainingDeviceSelection(
-          prefs.selectedDeviceIds.toSet(),
-        );
+        _selectedDeviceIds = prefs.selectedDeviceIds.toSet();
       }
       if (prefs.modelPath != null && File(prefs.modelPath!).existsSync()) {
         _modelOptions = _dedupeModelOptions(
@@ -309,19 +316,34 @@ class _TrainPageState extends State<_TrainPage> {
     }
   }
 
-  void _loadDeviceOptions() {
-    final devices = _detectNvidiaDevices()
-      ..sort((a, b) => _naturalCompare(a.id, b.id));
-    if (devices.isEmpty) {
-      _deviceOptions = const [_TrainingDeviceOption(id: 'cpu', label: 'CPU')];
-      _selectedDeviceIds = const {'cpu'};
+  Future<void> _loadDeviceOptions() async {
+    if (_resolvePythonExecutable(widget.settings.pythonPath.trim()) == null) {
+      if (mounted) {
+        setState(() {
+          _deviceOptions = const [_TrainingDeviceOption(id: 'cpu', label: 'CPU')];
+          _selectedDeviceIds = const {'cpu'};
+        });
+      }
       return;
     }
-    _deviceOptions = [
-      ...devices,
-      const _TrainingDeviceOption(id: 'cpu', label: 'CPU'),
-    ];
-    _selectedDeviceIds = _autoTrainingDeviceSelection();
+    final devices = await _detectNvidiaDevices();
+    devices.sort((a, b) => _naturalCompare(a.id, b.id));
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      if (devices.isEmpty) {
+        _deviceOptions = const [_TrainingDeviceOption(id: 'cpu', label: 'CPU')];
+      } else {
+        _deviceOptions = [
+          ...devices,
+          const _TrainingDeviceOption(id: 'cpu', label: 'CPU'),
+        ];
+      }
+      _selectedDeviceIds = _manualDeviceSelection
+          ? _normalizeTrainingDeviceSelection(_selectedDeviceIds)
+          : _autoTrainingDeviceSelection();
+    });
   }
 
   Set<String> _autoTrainingDeviceSelection() {
@@ -947,7 +969,7 @@ class _TrainPageState extends State<_TrainPage> {
       preferredPath: _modelPath,
     );
     final modelDropdownValue = _modelDropdownValue(modelOptions);
-    return Expanded(
+    return SizedBox.expand(
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -2305,12 +2327,15 @@ List<_TrainingMetricPoint> _trimTrainingMetricPoints(
   return points.sublist(points.length - _trainingChartPointLimit);
 }
 
-List<_TrainingDeviceOption> _detectNvidiaDevices() {
+Future<List<_TrainingDeviceOption>> _detectNvidiaDevices() async {
   try {
-    final result = Process.runSync('nvidia-smi', [
+    final result = await Process.run('nvidia-smi', [
       '--query-gpu=index,name',
       '--format=csv,noheader',
-    ]);
+    ]).timeout(
+      const Duration(seconds: 2),
+      onTimeout: () => ProcessResult(0, 124, '', 'nvidia-smi timeout'),
+    );
     if (result.exitCode != 0) {
       return const [];
     }

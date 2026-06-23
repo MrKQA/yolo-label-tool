@@ -19,6 +19,7 @@ class _LabelPage extends StatelessWidget {
     required this.images,
     required this.selectedImage,
     required this.selectedImageIndex,
+    required this.unauthorized,
     required this.zoom,
     required this.viewportOffset,
     required this.activeTool,
@@ -30,6 +31,7 @@ class _LabelPage extends StatelessWidget {
     required this.selectedAnnotationId,
     required this.showClassLabels,
     required this.aiPanelVisible,
+    required this.classesEditable,
     required this.onImageSelected,
     required this.onImageContextMenu,
     required this.onPointerSignal,
@@ -61,6 +63,7 @@ class _LabelPage extends StatelessWidget {
   final List<_ImageItem> images;
   final _ImageItem? selectedImage;
   final int selectedImageIndex;
+  final bool unauthorized;
   final double zoom;
   final Offset viewportOffset;
   final String activeTool;
@@ -72,6 +75,7 @@ class _LabelPage extends StatelessWidget {
   final String? selectedAnnotationId;
   final bool showClassLabels;
   final bool aiPanelVisible;
+  final bool classesEditable;
   final ValueChanged<int> onImageSelected;
   final Future<void> Function(TapDownDetails details, int? index)
   onImageContextMenu;
@@ -102,7 +106,7 @@ class _LabelPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
+    return SizedBox.expand(
       child: Row(
         children: [
           _ImagePreviewPane(
@@ -115,6 +119,7 @@ class _LabelPage extends StatelessWidget {
             child: _CanvasStage(
               bridgeStatus: status,
               image: selectedImage,
+              unauthorized: unauthorized,
               imageIndex: images.isEmpty ? 0 : selectedImageIndex + 1,
               imageCount: images.length,
               zoom: zoom,
@@ -149,6 +154,7 @@ class _LabelPage extends StatelessWidget {
             selectedAnnotationId: selectedAnnotationId,
             showClassLabels: showClassLabels,
             aiPanelVisible: aiPanelVisible,
+            classesEditable: classesEditable,
             onToolSelected: onToolSelected,
             onClassSelected: onClassSelected,
             onClassAdded: onClassAdded,
@@ -331,6 +337,7 @@ class _CanvasStage extends StatelessWidget {
   const _CanvasStage({
     required this.bridgeStatus,
     required this.image,
+    required this.unauthorized,
     required this.imageIndex,
     required this.imageCount,
     required this.zoom,
@@ -359,6 +366,7 @@ class _CanvasStage extends StatelessWidget {
 
   final _BridgeStatus bridgeStatus;
   final _ImageItem? image;
+  final bool unauthorized;
   final int imageIndex;
   final int imageCount;
   final double zoom;
@@ -414,6 +422,7 @@ class _CanvasStage extends StatelessWidget {
                     height: _annotationWorkspaceHeight,
                     child: _ImageCanvas(
                       image: image,
+                      unauthorized: unauthorized,
                       zoom: zoom,
                       viewportOffset: viewportOffset,
                       activeTool: activeTool,
@@ -617,6 +626,7 @@ class _StatusPill extends StatelessWidget {
 class _ImageCanvas extends StatefulWidget {
   const _ImageCanvas({
     required this.image,
+    required this.unauthorized,
     required this.zoom,
     required this.viewportOffset,
     required this.activeTool,
@@ -639,6 +649,7 @@ class _ImageCanvas extends StatefulWidget {
 
   final void Function(Size imageDisplaySize)? onImageDisplaySizeChanged;
   final _ImageItem? image;
+  final bool unauthorized;
   final double zoom;
   final Offset viewportOffset;
   final String activeTool;
@@ -1641,7 +1652,13 @@ class _ImageCanvasState extends State<_ImageCanvas> {
                             painter: _CanvasGridPainter(_isDarkMode(context)),
                           ),
                           if (widget.image == null)
-                            Center(child: Text(t('label.openPrompt')))
+                            Center(
+                              child: Text(
+                                widget.unauthorized
+                                    ? t('label.unauthorized')
+                                    : t('label.openPrompt'),
+                              ),
+                            )
                           else
                             Center(
                               child: Transform.scale(
@@ -1987,11 +2004,17 @@ class _AnnotationPainter extends CustomPainter {
       final selected = annotation.id == selectedAnnotation?.id;
       _drawAnnotation(canvas, annotation, color, selected);
       if (showClassLabels && labelClass != null) {
+        final authorColor = annotation.authorColorValue == 0
+            ? color
+            : Color(annotation.authorColorValue);
+        final authorLabel = annotation.authorName.trim().isEmpty
+            ? ''
+            : ' · ${annotation.authorName}#${_shortCollaborationId(annotation.authorId)}';
         _drawLabel(
           canvas,
           annotation.rect.shift(canvasOrigin),
-          labelClass.name,
-          color,
+          '${labelClass.name}$authorLabel',
+          authorColor,
           selected,
         );
       }
@@ -2409,7 +2432,18 @@ class _SelectedAnnotationOverlayPainter extends CustomPainter {
         .where((item) => item.id == annotation.classId)
         .firstOrNullValue;
     if (showClassLabels && labelClass != null) {
-      _drawSelectedLabel(canvas, path.getBounds(), labelClass.name, color);
+      final authorLabel = annotation.authorName.trim().isEmpty
+          ? ''
+          : ' · ${annotation.authorName}#${_shortCollaborationId(annotation.authorId)}';
+      final authorColor = annotation.authorColorValue == 0
+          ? color
+          : Color(annotation.authorColorValue);
+      _drawSelectedLabel(
+        canvas,
+        path.getBounds(),
+        '${labelClass.name}$authorLabel',
+        authorColor,
+      );
     }
   }
 
@@ -2562,6 +2596,7 @@ class _AiToolbar extends StatelessWidget {
     required this.selectedAnnotationId,
     required this.showClassLabels,
     required this.aiPanelVisible,
+    required this.classesEditable,
     required this.onToolSelected,
     required this.onClassSelected,
     required this.onClassAdded,
@@ -2582,6 +2617,7 @@ class _AiToolbar extends StatelessWidget {
   final String? selectedAnnotationId;
   final bool showClassLabels;
   final bool aiPanelVisible;
+  final bool classesEditable;
   final ValueChanged<String> onToolSelected;
   final ValueChanged<int> onClassSelected;
   final VoidCallback onClassAdded;
@@ -2687,6 +2723,7 @@ class _AiToolbar extends StatelessWidget {
                 activeClassId: activeClassId,
                 labelClasses: labelClasses,
                 showClassLabels: showClassLabels,
+                classesEditable: classesEditable,
                 onClassSelected: onClassSelected,
                 onClassAdded: onClassAdded,
                 onClassEdited: onClassEdited,
@@ -2797,13 +2834,23 @@ class _AnnotationListPanel extends StatelessWidget {
         final labelClass = labelClasses
             .where((item) => item.id == annotation.classId)
             .firstOrNullValue;
+        final authorLabel = annotation.authorName.trim().isEmpty
+            ? ''
+            : '${annotation.authorName}#${_shortCollaborationId(annotation.authorId)}';
+        final authorColor = annotation.authorColorValue == 0
+            ? null
+            : Color(annotation.authorColorValue);
+        final selectedBorderColor = selected
+            ? (authorColor ?? Theme.of(context).colorScheme.primary)
+            : _borderColor(context);
+        final selectedBackgroundColor = selected && authorColor != null
+            ? authorColor.withValues(alpha: _isDarkMode(context) ? 0.24 : 0.14)
+            : Theme.of(context).colorScheme.primaryContainer;
         return Tooltip(
           waitDuration: const Duration(milliseconds: 350),
           message: _annotationCoordinateTooltip(annotation),
           child: Material(
-            color: selected
-                ? Theme.of(context).colorScheme.primaryContainer
-                : _controlColor(context),
+            color: selected ? selectedBackgroundColor : _controlColor(context),
             borderRadius: BorderRadius.circular(6),
             child: InkWell(
               onTap: () => onAnnotationSelected(annotation.id),
@@ -2811,11 +2858,7 @@ class _AnnotationListPanel extends StatelessWidget {
               child: Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  border: Border.all(
-                    color: selected
-                        ? Theme.of(context).colorScheme.primary
-                        : _borderColor(context),
-                  ),
+                  border: Border.all(color: selectedBorderColor),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Column(
@@ -2838,6 +2881,30 @@ class _AnnotationListPanel extends StatelessWidget {
                           ),
                       ],
                     ),
+                    if (authorLabel.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          if (authorColor != null)
+                            DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: authorColor,
+                                shape: BoxShape.circle,
+                              ),
+                              child: const SizedBox.square(dimension: 10),
+                            ),
+                          if (authorColor != null) const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              authorLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.labelSmall,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                     const SizedBox(height: 6),
                     DropdownButtonFormField<int>(
                       initialValue: annotation.classId,
@@ -2911,6 +2978,7 @@ class _ClassManager extends StatelessWidget {
     required this.activeClassId,
     required this.labelClasses,
     required this.showClassLabels,
+    required this.classesEditable,
     required this.onClassSelected,
     required this.onClassAdded,
     required this.onClassEdited,
@@ -2923,6 +2991,7 @@ class _ClassManager extends StatelessWidget {
   final int? activeClassId;
   final List<_LabelClass> labelClasses;
   final bool showClassLabels;
+  final bool classesEditable;
   final ValueChanged<int> onClassSelected;
   final VoidCallback onClassAdded;
   final ValueChanged<_LabelClass> onClassEdited;
@@ -2948,7 +3017,7 @@ class _ClassManager extends StatelessWidget {
               Tooltip(
                 message: t('label.addClass'),
                 child: IconButton(
-                  onPressed: onClassAdded,
+                  onPressed: classesEditable ? onClassAdded : null,
                   icon: const Icon(Icons.add),
                 ),
               ),
@@ -2982,7 +3051,9 @@ class _ClassManager extends StatelessWidget {
               : ReorderableListView.builder(
                   padding: const EdgeInsets.fromLTRB(10, 0, 10, 12),
                   itemCount: labelClasses.length,
-                  onReorderItem: onClassReordered,
+                  onReorderItem: classesEditable
+                      ? onClassReordered
+                      : (_, __) {},
                   buildDefaultDragHandles: false,
                   itemBuilder: (context, index) {
                     final labelClass = labelClasses[index];
@@ -2991,6 +3062,7 @@ class _ClassManager extends StatelessWidget {
                       index: index,
                       labelClass: labelClass,
                       selected: labelClass.id == activeClassId,
+                      editable: classesEditable,
                       onSelected: () => onClassSelected(labelClass.id),
                       onEdit: () => onClassEdited(labelClass),
                       onColor: () => onClassColorChanged(labelClass),
@@ -3010,6 +3082,7 @@ class _ClassTile extends StatelessWidget {
     required this.index,
     required this.labelClass,
     required this.selected,
+    required this.editable,
     required this.onSelected,
     required this.onEdit,
     required this.onColor,
@@ -3019,6 +3092,7 @@ class _ClassTile extends StatelessWidget {
   final int index;
   final _LabelClass labelClass;
   final bool selected;
+  final bool editable;
   final VoidCallback onSelected;
   final VoidCallback onEdit;
   final VoidCallback onColor;
@@ -3047,7 +3121,7 @@ class _ClassTile extends StatelessWidget {
               children: [
                 const SizedBox(width: 8),
                 GestureDetector(
-                  onTap: onColor,
+                  onTap: editable ? onColor : null,
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       color: labelClass.color,
@@ -3067,22 +3141,23 @@ class _ClassTile extends StatelessWidget {
                 IconButton(
                   tooltip: t('label.editClass'),
                   visualDensity: VisualDensity.compact,
-                  onPressed: onEdit,
+                  onPressed: editable ? onEdit : null,
                   icon: const Icon(Icons.edit_outlined, size: 18),
                 ),
                 IconButton(
                   tooltip: t('label.deleteClass'),
                   visualDensity: VisualDensity.compact,
-                  onPressed: onDelete,
+                  onPressed: editable ? onDelete : null,
                   icon: const Icon(Icons.close, size: 18),
                 ),
-                ReorderableDragStartListener(
-                  index: index,
-                  child: const Padding(
-                    padding: EdgeInsets.only(right: 6),
-                    child: Icon(Icons.drag_indicator, size: 18),
+                if (editable)
+                  ReorderableDragStartListener(
+                    index: index,
+                    child: const Padding(
+                      padding: EdgeInsets.only(right: 6),
+                      child: Icon(Icons.drag_indicator, size: 18),
+                    ),
                   ),
-                ),
               ],
             ),
           ),

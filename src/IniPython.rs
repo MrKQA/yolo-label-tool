@@ -1,12 +1,32 @@
 use std::env;
+use std::ffi::{c_char, c_int, c_void, CString};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::ptr;
 use std::sync::Mutex;
 
 use once_cell::sync::Lazy;
-use pyo3::prelude::*;
 
-static PYTHON_RUNTIME_HOME: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
+static PYTHON_RUNTIME: Lazy<Mutex<Option<PythonRuntime>>> = Lazy::new(|| Mutex::new(None));
+
+type PyInitializeEx = unsafe extern "C" fn(c_int);
+type PyIsInitialized = unsafe extern "C" fn() -> c_int;
+type PyRunSimpleStringFlags = unsafe extern "C" fn(*const c_char, *mut c_void) -> c_int;
+type PyGilStateEnsure = unsafe extern "C" fn() -> c_int;
+type PyGilStateRelease = unsafe extern "C" fn(c_int);
+
+struct PythonRuntime {
+    home_key: String,
+    dll_path: PathBuf,
+    _module: usize,
+    py_initialize_ex: PyInitializeEx,
+    py_is_initialized: PyIsInitialized,
+    py_run_simple_string_flags: PyRunSimpleStringFlags,
+    py_gil_state_ensure: PyGilStateEnsure,
+    py_gil_state_release: PyGilStateRelease,
+}
+
+unsafe impl Send for PythonRuntime {}
 
 pub fn initialize_python(python_path: &str) -> Result<String, String> {
     let verified = verify_python_path(python_path)?;
@@ -47,35 +67,40 @@ pub fn verify_python_path(path: &str) -> Result<String, String> {
 pub fn configure_python_runtime(python_path: &str) -> Result<(), String> {
     let paths = PythonRuntimePaths::from_executable(python_path)?;
     let runtime_key = path_key(&paths.python_home);
-    {
-        let mut active_home = PYTHON_RUNTIME_HOME.lock().unwrap();
-        if let Some(existing) = active_home.as_ref() {
-            if existing != &runtime_key {
-                return Err(format!(
-                    "PyO3 Python runtime is already initialized with {}. Restart the app before switching to {}.",
-                    existing,
-                    paths.python_home.display()
-                ));
-            }
-        } else {
-            if python_is_initialized() {
-                return Err(
-                    "Python runtime was initialized before the configured Python path was applied. Restart the app and start training again."
-                        .to_string(),
-                );
-            }
-            apply_python_environment(&paths);
-            pyo3::prepare_freethreaded_python();
-            *active_home = Some(runtime_key);
+    let mut active = PYTHON_RUNTIME.lock().unwrap();
+    if let Some(runtime) = active.as_ref() {
+        if runtime.home_key == runtime_key {
+            return Ok(());
+        }
+        return Err(format!(
+            "Python runtime is already initialized with {}. Restart the app before switching to {}.",
+            runtime.home_key,
+            paths.python_home.display()
+        ));
+    }
+
+    apply_python_environment(&paths);
+    let dll_path = find_python_dll(&paths)?;
+    let runtime = load_python_runtime(&dll_path, runtime_key)?;
+    unsafe {
+        if (runtime.py_is_initialized)() == 0 {
+            (runtime.py_initialize_ex)(0);
+        }
+        if (runtime.py_is_initialized)() == 0 {
+            return Err(format!(
+                "Python initialization failed: {}",
+                dll_path.display()
+            ));
         }
     }
+    run_python_code_with_runtime(&runtime, "import sys\n")?;
+    *active = Some(runtime);
     Ok(())
 }
 
 pub fn preload_yolo_modules() -> Result<(), String> {
-    Python::with_gil(|py| -> PyResult<()> {
-        py.run_bound(
-            r#"
+    run_python_code(
+        r#"
 import builtins
 import os
 import sys
@@ -91,23 +116,24 @@ if hasattr(os, "add_dll_directory"):
             except Exception:
                 pass
 import torch
+try:
+    import onnxruntime
+except Exception as error:
+    print(f"import onnxruntime error....... {error}")
+    python_exe = os.environ.get("RUSTLABEL_PYTHON_EXE") or sys.executable
+    os.system(f'"{python_exe}" -m pip install onnxruntime-gpu')
+    import onnxruntime
 from ultralytics import YOLO
 "#,
-            None,
-            None,
-        )?;
-        Ok(())
-    })
-    .map_err(|error| error.to_string())
+    )
 }
 
 pub fn shutdown_python_runtime() -> Result<(), String> {
     if !python_is_initialized() {
         return Ok(());
     }
-    Python::with_gil(|py| -> PyResult<()> {
-        py.run_bound(
-            r#"
+    run_python_code(
+        r#"
 try:
     import multiprocessing
     for child in multiprocessing.active_children():
@@ -133,46 +159,48 @@ try:
 except Exception:
     pass
 "#,
-            None,
-            None,
-        )?;
-        Ok(())
-    })
-    .map_err(|error| error.to_string())
+    )
 }
 
-pub fn format_python_error(error: PyErr) -> String {
-    Python::with_gil(|py| {
-        if let Ok(traceback) = py.import_bound("traceback") {
-            if let Ok(lines) = traceback
-                .call_method1(
-                    "format_exception",
-                    (
-                        error.get_type_bound(py),
-                        error.value_bound(py),
-                        error.traceback_bound(py),
-                    ),
-                )
-                .and_then(|value| value.extract::<Vec<String>>())
-            {
-                let joined = lines.join("");
-                if !joined.trim().is_empty() {
-                    return joined;
-                }
-            }
-        }
-        let value = error.value_bound(py);
-        value
-            .str()
-            .map(|text| text.to_string_lossy().into_owned())
-            .unwrap_or_else(|_| error.to_string())
-    })
+pub fn run_python_code(code: &str) -> Result<(), String> {
+    let active = PYTHON_RUNTIME.lock().unwrap();
+    let runtime = active
+        .as_ref()
+        .ok_or_else(|| "Python runtime is not initialized.".to_string())?;
+    run_python_code_with_runtime(runtime, code)
+}
+
+pub fn python_is_initialized() -> bool {
+    let active = PYTHON_RUNTIME.lock().unwrap();
+    let Some(runtime) = active.as_ref() else {
+        return false;
+    };
+    unsafe { (runtime.py_is_initialized)() != 0 }
+}
+
+fn run_python_code_with_runtime(runtime: &PythonRuntime, code: &str) -> Result<(), String> {
+    let code = CString::new(code).map_err(|_| "Python code contains NUL byte".to_string())?;
+    let result = unsafe {
+        let gil = (runtime.py_gil_state_ensure)();
+        let result = (runtime.py_run_simple_string_flags)(code.as_ptr(), ptr::null_mut());
+        (runtime.py_gil_state_release)(gil);
+        result
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(format!(
+            "Python code execution failed in {}. See the training terminal/log output for details.",
+            runtime.dll_path.display()
+        ))
+    }
 }
 
 #[derive(Debug)]
 struct PythonRuntimePaths {
     executable: PathBuf,
     python_home: PathBuf,
+    env_root: PathBuf,
     extra_python_paths: Vec<PathBuf>,
     path_prefixes: Vec<PathBuf>,
 }
@@ -219,6 +247,7 @@ impl PythonRuntimePaths {
         Ok(Self {
             executable,
             python_home,
+            env_root,
             extra_python_paths,
             path_prefixes,
         })
@@ -273,12 +302,138 @@ fn apply_python_environment(paths: &PythonRuntimePaths) {
     env::set_var("RUSTLABEL_PYTHON_EXE", paths.executable.as_os_str());
 }
 
-fn has_python_encodings(path: &Path) -> bool {
-    path.join("Lib").join("encodings").is_dir()
+fn find_python_dll(paths: &PythonRuntimePaths) -> Result<PathBuf, String> {
+    let mut candidates = Vec::<PathBuf>::new();
+    for directory in dedupe_pathbufs(vec![
+        paths
+            .executable
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| paths.env_root.clone()),
+        paths.env_root.clone(),
+        paths.python_home.clone(),
+        paths.env_root.join("DLLs"),
+        paths.python_home.join("DLLs"),
+    ]) {
+        if !directory.is_dir() {
+            continue;
+        }
+        let Ok(entries) = fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            if python_dll_score(name).is_some() {
+                candidates.push(path);
+            }
+        }
+    }
+    candidates.sort_by(|a, b| {
+        let a_name = a.file_name().and_then(|value| value.to_str()).unwrap_or("");
+        let b_name = b.file_name().and_then(|value| value.to_str()).unwrap_or("");
+        python_dll_score(a_name)
+            .unwrap_or(99)
+            .cmp(&python_dll_score(b_name).unwrap_or(99))
+            .then_with(|| a_name.cmp(b_name))
+    });
+    candidates.into_iter().next().ok_or_else(|| {
+        format!(
+            "Python DLL was not found near {}. Expected pythonXY.dll or python3.dll.",
+            paths.executable.display()
+        )
+    })
 }
 
-fn python_is_initialized() -> bool {
-    unsafe { pyo3::ffi::Py_IsInitialized() != 0 }
+fn python_dll_score(name: &str) -> Option<u8> {
+    let lower = name.to_ascii_lowercase();
+    if !lower.starts_with("python") || !lower.ends_with(".dll") {
+        return None;
+    }
+    let stem = lower.trim_end_matches(".dll");
+    let suffix = stem.trim_start_matches("python");
+    if !suffix.is_empty() && suffix.chars().all(|ch| ch.is_ascii_digit()) {
+        return Some(0);
+    }
+    if stem == "python3" {
+        return Some(1);
+    }
+    Some(2)
+}
+
+fn load_python_runtime(dll_path: &Path, home_key: String) -> Result<PythonRuntime, String> {
+    let module = load_library(dll_path)?;
+    let runtime = unsafe {
+        PythonRuntime {
+            home_key,
+            dll_path: dll_path.to_path_buf(),
+            _module: module,
+            py_initialize_ex: load_symbol(module, "Py_InitializeEx")?,
+            py_is_initialized: load_symbol(module, "Py_IsInitialized")?,
+            py_run_simple_string_flags: load_symbol(module, "PyRun_SimpleStringFlags")?,
+            py_gil_state_ensure: load_symbol(module, "PyGILState_Ensure")?,
+            py_gil_state_release: load_symbol(module, "PyGILState_Release")?,
+        }
+    };
+    Ok(runtime)
+}
+
+#[cfg(windows)]
+fn load_library(path: &Path) -> Result<usize, String> {
+    use std::os::windows::ffi::OsStrExt;
+
+    const LOAD_WITH_ALTERED_SEARCH_PATH: u32 = 0x00000008;
+
+    extern "system" {
+        fn LoadLibraryExW(
+            lp_lib_file_name: *const u16,
+            h_file: *mut c_void,
+            dw_flags: u32,
+        ) -> *mut c_void;
+    }
+
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let handle = unsafe {
+        LoadLibraryExW(
+            wide.as_ptr(),
+            ptr::null_mut(),
+            LOAD_WITH_ALTERED_SEARCH_PATH,
+        )
+    };
+    if handle.is_null() {
+        return Err(format!("LoadLibraryExW failed: {}", path.display()));
+    }
+    Ok(handle as usize)
+}
+
+#[cfg(not(windows))]
+fn load_library(_path: &Path) -> Result<usize, String> {
+    Err("Dynamic Python loading is currently implemented for Windows.".to_string())
+}
+
+#[cfg(windows)]
+unsafe fn load_symbol<T: Copy>(module: usize, name: &str) -> Result<T, String> {
+    extern "system" {
+        fn GetProcAddress(h_module: *mut c_void, lp_proc_name: *const c_char) -> *mut c_void;
+    }
+
+    let name_c = CString::new(name).map_err(|_| format!("Invalid symbol name: {name}"))?;
+    let pointer = GetProcAddress(module as *mut c_void, name_c.as_ptr());
+    if pointer.is_null() {
+        return Err(format!("Python symbol was not found: {name}"));
+    }
+    Ok(std::mem::transmute_copy(&pointer))
+}
+
+#[cfg(not(windows))]
+unsafe fn load_symbol<T: Copy>(_module: usize, name: &str) -> Result<T, String> {
+    Err(format!("Python symbol was not found: {name}"))
+}
+
+fn has_python_encodings(path: &Path) -> bool {
+    path.join("Lib").join("encodings").is_dir()
 }
 
 fn file_name_eq(path: &Path, expected: &str) -> bool {

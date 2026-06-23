@@ -9,8 +9,6 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::ini_python;
 use once_cell::sync::Lazy;
-use pyo3::prelude::*;
-use pyo3::types::PyDict;
 
 static ACTIVE_HANDLE: Lazy<Mutex<Option<JoinHandle<()>>>> = Lazy::new(|| Mutex::new(None));
 static ACTIVE_RUN_DIR: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
@@ -691,7 +689,8 @@ pub fn start_training(mut config: TrainingConfig) -> Result<String, String> {
     let thread_log_path = log_path.clone();
     let handle = thread::spawn(move || {
         append_log_line(&thread_log_path, "training thread started");
-        let result = run_training_with_pyo3(&config, &thread_stop_file, &thread_log_path);
+        let result =
+            run_training_with_embedded_python(&config, &thread_stop_file, &thread_log_path);
         match result {
             Ok(()) => {
                 append_log_line(&thread_log_path, "training completed");
@@ -931,42 +930,104 @@ pub fn delete_training_logs_by_date_range_json(
     Ok(format!("{{\"ok\":true,\"deleted\":{deleted}}}"))
 }
 
-fn run_training_with_pyo3(
+fn run_training_with_embedded_python(
     config: &TrainingConfig,
     stop_file: &Path,
     log_path: &Path,
 ) -> Result<(), String> {
-    Python::with_gil(|py| -> PyResult<()> {
-        let locals = PyDict::new_bound(py);
-        locals.set_item("python_path", config.python_path.as_str())?;
-        locals.set_item("model_path", config.model_path.as_str())?;
-        locals.set_item("data_yaml_path", config.data_yaml_path.as_str())?;
-        locals.set_item("project_dir", config.project_dir.as_str())?;
-        locals.set_item("experiment_name", config.experiment_name.as_str())?;
-        locals.set_item("epochs", config.epochs)?;
-        locals.set_item("imgsz", config.imgsz)?;
-        locals.set_item("batch", config.batch.as_str())?;
-        locals.set_item("device", config.device.as_str())?;
-        locals.set_item("lr0", config.lr0)?;
-        locals.set_item("momentum", config.momentum)?;
-        locals.set_item("hsv_s", config.hsv_s)?;
-        locals.set_item("hsv_v", config.hsv_v)?;
-        locals.set_item("translate", config.translate)?;
-        locals.set_item("scale", config.scale)?;
-        locals.set_item("shear", config.shear)?;
-        locals.set_item("flipud", config.flipud)?;
-        locals.set_item("fliplr", config.fliplr)?;
-        locals.set_item("degrees", config.degrees)?;
-        locals.set_item("workers", config.workers)?;
-        locals.set_item("amp", config.amp)?;
-        locals.set_item("resume", config.resume)?;
-        locals.set_item("cls_pw", config.cls_pw)?;
-        locals.set_item("stop_file", stop_file.to_string_lossy().as_ref())?;
-        locals.set_item("log_path", log_path.to_string_lossy().as_ref())?;
-        py.run_bound(TRAINING_CODE, Some(&locals), Some(&locals))?;
-        Ok(())
-    })
-    .map_err(|error| ini_python::format_python_error(error))
+    let code = training_code_with_locals(config, stop_file, log_path);
+    ini_python::run_python_code(&code)
+}
+
+fn training_code_with_locals(config: &TrainingConfig, stop_file: &Path, log_path: &Path) -> String {
+    format!(
+        concat!(
+            "python_path = {}\n",
+            "model_path = {}\n",
+            "data_yaml_path = {}\n",
+            "project_dir = {}\n",
+            "experiment_name = {}\n",
+            "epochs = {}\n",
+            "imgsz = {}\n",
+            "batch = {}\n",
+            "device = {}\n",
+            "lr0 = {}\n",
+            "momentum = {}\n",
+            "hsv_s = {}\n",
+            "hsv_v = {}\n",
+            "translate = {}\n",
+            "scale = {}\n",
+            "shear = {}\n",
+            "flipud = {}\n",
+            "fliplr = {}\n",
+            "degrees = {}\n",
+            "workers = {}\n",
+            "amp = {}\n",
+            "resume = {}\n",
+            "cls_pw = {}\n",
+            "stop_file = {}\n",
+            "log_path = {}\n\n",
+            "{}"
+        ),
+        python_string_literal(&config.python_path),
+        python_string_literal(&config.model_path),
+        python_string_literal(&config.data_yaml_path),
+        python_string_literal(&config.project_dir),
+        python_string_literal(&config.experiment_name),
+        config.epochs,
+        config.imgsz,
+        python_string_literal(&config.batch),
+        python_string_literal(&config.device),
+        finite_python_number(config.lr0),
+        finite_python_number(config.momentum),
+        finite_python_number(config.hsv_s),
+        finite_python_number(config.hsv_v),
+        finite_python_number(config.translate),
+        finite_python_number(config.scale),
+        finite_python_number(config.shear),
+        finite_python_number(config.flipud),
+        finite_python_number(config.fliplr),
+        finite_python_number(config.degrees),
+        config.workers,
+        python_bool(config.amp),
+        python_bool(config.resume),
+        finite_python_number(config.cls_pw),
+        python_string_literal(&stop_file.to_string_lossy()),
+        python_string_literal(&log_path.to_string_lossy()),
+        TRAINING_CODE
+    )
+}
+
+fn python_string_literal(value: &str) -> String {
+    let mut output = String::from("'");
+    for ch in value.chars() {
+        match ch {
+            '\\' => output.push_str("\\\\"),
+            '\'' => output.push_str("\\'"),
+            '\n' => output.push_str("\\n"),
+            '\r' => output.push_str("\\r"),
+            '\t' => output.push_str("\\t"),
+            _ => output.push(ch),
+        }
+    }
+    output.push('\'');
+    output
+}
+
+fn python_bool(value: bool) -> &'static str {
+    if value {
+        "True"
+    } else {
+        "False"
+    }
+}
+
+fn finite_python_number(value: f64) -> String {
+    if value.is_finite() {
+        value.to_string()
+    } else {
+        "0".to_string()
+    }
 }
 
 fn preload_training_modules(log_path: &Path) -> Result<(), String> {

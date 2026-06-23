@@ -190,6 +190,8 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         exportPath: _exportController.text.trim(),
         logLevelIndex: _logLevelIndex,
         darkMode: widget.initialSettings.darkMode,
+        collaborationHostId: widget.initialSettings.collaborationHostId,
+        collaborationUserId: widget.initialSettings.collaborationUserId,
       ),
     );
     _setLogLevel(_logLevelFromIndex(_logLevelIndex), writeLog: true);
@@ -434,13 +436,15 @@ class _PythonEnvironmentCheck {
     required String onnxRuntimeDevice,
   }) {
     final gpuName = cudaDeviceName.isEmpty ? 'GPU -' : cudaDeviceName;
+    final onnxText = onnxRuntimeDevice.isEmpty
+        ? 'ONNXRuntime -'
+        : 'ONNXRuntime $onnxRuntimeDevice';
     return _PythonEnvironmentCheck(
       valid: true,
       executablePath: executablePath,
       message:
           '${t('settings.pythonValid')}: PyTorch $torchVersion, '
-          'CUDA $cudaAvailable, GPU $cudaDeviceCount $gpuName, '
-          'ONNXRuntime $onnxRuntimeDevice',
+          'CUDA $cudaAvailable, GPU $cudaDeviceCount $gpuName, $onnxText',
     );
   }
 
@@ -506,20 +510,24 @@ Future<_PythonEnvironmentCheck> _probePythonEnvironment(
   const script = '''
 import json
 import torch
-import onnxruntime
+try:
+    import onnxruntime
+except Exception:
+    onnxruntime = None
 
 cuda_available = torch.cuda.is_available()
 device_count = torch.cuda.device_count()
 device_name = ""
 if cuda_available and device_count > 0:
     device_name = torch.cuda.get_device_name(0)
+onnxruntime_device = "" if onnxruntime is None else onnxruntime.get_device()
 
 print(json.dumps({
     "torch_version": torch.__version__,
     "cuda_available": cuda_available,
     "cuda_device_count": device_count,
     "cuda_device_name": device_name,
-    "onnxruntime_device": onnxruntime.get_device(),
+    "onnxruntime_device": onnxruntime_device,
 }, ensure_ascii=False))
 ''';
   try {
