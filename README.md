@@ -16,6 +16,7 @@ A YOLO image labeling, training, and video processing tool built with Flutter + 
 ## Current Features
 
 - HBB / OBB / SEG annotation interface.
+- Collaborative annotation over LAN with host approval and collaborator image-range assignment.
 - `data.yaml` import, export, and Roboflow path compatibility.
 - Training page: select `.pt` model, read dataset statistics, configure hyperparameters.
 - Training engine uses PyO3 to call Python/Ultralytics for training.
@@ -35,6 +36,7 @@ A YOLO image labeling, training, and video processing tool built with Flutter + 
 │   ├── api.rs                  # Public API exposed to Flutter
 │   ├── training.rs             # PyO3 + Ultralytics training backend
 │   ├── detecting.rs            # PyO3 + Ultralytics YOLO inference
+│   ├── collaboration.rs        # LAN collaboration transport
 │   ├── main.rs                 # Dev launcher
 │   └── frb_generated.rs        # FRB auto-generated glue code
 ├── flutter/                    # Flutter frontend
@@ -46,6 +48,7 @@ A YOLO image labeling, training, and video processing tool built with Flutter + 
 │       ├── DetectVideoPage.dart # Browse / video playback page
 │       ├── CropPage.dart       # Video frame extraction page
 │       ├── DatabasePage.dart   # SQLite database browser / management page
+│       ├── CollaborationPage.dart # Collaboration host/client page
 │       ├── ExportDialog.dart   # Annotation export dialog
 │       ├── ConfigStore.dart    # Config persistence
 │       ├── SettingsDialog.dart # Settings dialog
@@ -112,6 +115,13 @@ Open the app → Settings → Preferences → Python Environment Path. Select `p
 ### Annotation Export
 
 Label page → right toolbar → Export button → configure options → exports YOLO directory structure.
+
+### Collaborative Annotation
+
+1. Host opens images and starts host mode on the Collaboration page.
+2. Collaborators discover the host on LAN and request to join.
+3. Host approves collaborators and assigns image index ranges.
+4. Collaborators annotate assigned images; classes, colors, authors, and boxes sync through the host.
 
 ### Database Management
 
@@ -203,6 +213,7 @@ All pages kept alive via `IndexedStack` — training, playback, crop state prese
 ## 当前能力
 
 - HBB / OBB / SEG 标注界面。
+- 局域网协助标注：主机确认加入，并为协助者分配图片索引范围。
 - `data.yaml` 导入、导出和 Roboflow 路径兼容。
 - 训练页支持选择 `.pt` 模型、读取数据集统计、设置超参数。
 - 训练引擎使用 PyO3 调用 Python / Ultralytics 执行训练。
@@ -222,6 +233,7 @@ All pages kept alive via `IndexedStack` — training, playback, crop state prese
 │   ├── api.rs                  # 对 Flutter 暴露的接口
 │   ├── training.rs             # PyO3 + Ultralytics 训练后端
 │   ├── detecting.rs            # PyO3 + Ultralytics YOLO 推理
+│   ├── collaboration.rs        # 局域网协作传输
 │   ├── main.rs                 # 开发启动器
 │   └── frb_generated.rs        # FRB 自动生成的胶水代码
 ├── flutter/                    # Flutter 前端
@@ -233,6 +245,7 @@ All pages kept alive via `IndexedStack` — training, playback, crop state prese
 │       ├── DetectVideoPage.dart # 浏览/视频播放页
 │       ├── CropPage.dart       # 视频取帧裁剪页
 │       ├── DatabasePage.dart   # SQLite 数据库查看/管理页
+│       ├── CollaborationPage.dart # 协作主机/客户端页
 │       ├── ExportDialog.dart   # 标注导出弹窗
 │       ├── ConfigStore.dart    # 配置持久化
 │       ├── SettingsDialog.dart # 设置弹窗
@@ -299,6 +312,13 @@ flutter_rust_bridge_codegen generate
 ### 标注导出
 
 标注页右侧工具栏 → 导出按钮 → 配置选项 → 导出 YOLO 目录结构。
+
+### 协助标注
+
+1. 主机打开图片后，在协作页面开启主机。
+2. 协助者在局域网内发现主机并申请加入。
+3. 主机确认协助者，并分配图片索引范围。
+4. 协助者标注分配范围内的图片，类别、颜色、作者和标注框通过主机同步。
 
 ### 数据库管理
 
