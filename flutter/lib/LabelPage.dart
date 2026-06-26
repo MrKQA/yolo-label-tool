@@ -116,56 +116,60 @@ class _LabelPage extends StatelessWidget {
             onContextMenu: onImageContextMenu,
           ),
           Expanded(
-            child: _CanvasStage(
-              bridgeStatus: status,
-              image: selectedImage,
-              unauthorized: unauthorized,
-              imageIndex: images.isEmpty ? 0 : selectedImageIndex + 1,
-              imageCount: images.length,
-              zoom: zoom,
-              viewportOffset: viewportOffset,
+            child: ClipRect(
+              child: _CanvasStage(
+                bridgeStatus: status,
+                image: selectedImage,
+                unauthorized: unauthorized,
+                imageIndex: images.isEmpty ? 0 : selectedImageIndex + 1,
+                imageCount: images.length,
+                zoom: zoom,
+                viewportOffset: viewportOffset,
+                activeTool: activeTool,
+                activeMode: activeMode,
+                imageSplit: imageSplit,
+                labelClasses: labelClasses,
+                annotations: annotations,
+                selectedAnnotationId: selectedAnnotationId,
+                showClassLabels: showClassLabels,
+                onPointerSignal: onPointerSignal,
+                onViewportOffsetChanged: onViewportOffsetChanged,
+                onModeSelected: onModeSelected,
+                onImageSplitChanged: onImageSplitChanged,
+                onSelectMode: onSelectMode,
+                onEnsureClass: onEnsureClass,
+                onAnnotationCreated: onAnnotationCreated,
+                onSegAnnotationCreated: onSegAnnotationCreated,
+                onAnnotationSelected: onAnnotationSelected,
+                onAnnotationUpdated: onAnnotationUpdated,
+                onAnnotationDeleted: onAnnotationDeleted,
+                onAnnotationDragStarted: onAnnotationDragStarted,
+                onImageDisplaySizeChanged: onImageDisplaySizeChanged,
+              ),
+            ),
+          ),
+          RepaintBoundary(
+            child: _AiToolbar(
               activeTool: activeTool,
-              activeMode: activeMode,
-              imageSplit: imageSplit,
+              activeClassId: activeClassId,
               labelClasses: labelClasses,
               annotations: annotations,
               selectedAnnotationId: selectedAnnotationId,
               showClassLabels: showClassLabels,
-              onPointerSignal: onPointerSignal,
-              onViewportOffsetChanged: onViewportOffsetChanged,
-              onModeSelected: onModeSelected,
-              onImageSplitChanged: onImageSplitChanged,
-              onSelectMode: onSelectMode,
-              onEnsureClass: onEnsureClass,
-              onAnnotationCreated: onAnnotationCreated,
-              onSegAnnotationCreated: onSegAnnotationCreated,
+              aiPanelVisible: aiPanelVisible,
+              classesEditable: classesEditable,
+              onToolSelected: onToolSelected,
+              onClassSelected: onClassSelected,
+              onClassAdded: onClassAdded,
+              onClassEdited: onClassEdited,
+              onClassColorChanged: onClassColorChanged,
+              onClassDeleted: onClassDeleted,
+              onClassReordered: onClassReordered,
+              onToggleClassLabels: onToggleClassLabels,
               onAnnotationSelected: onAnnotationSelected,
-              onAnnotationUpdated: onAnnotationUpdated,
-              onAnnotationDeleted: onAnnotationDeleted,
-              onAnnotationDragStarted: onAnnotationDragStarted,
-              onImageDisplaySizeChanged: onImageDisplaySizeChanged,
+              onAnnotationClassChanged: onAnnotationClassChanged,
+              onAiConfigPressed: onAiConfigPressed,
             ),
-          ),
-          _AiToolbar(
-            activeTool: activeTool,
-            activeClassId: activeClassId,
-            labelClasses: labelClasses,
-            annotations: annotations,
-            selectedAnnotationId: selectedAnnotationId,
-            showClassLabels: showClassLabels,
-            aiPanelVisible: aiPanelVisible,
-            classesEditable: classesEditable,
-            onToolSelected: onToolSelected,
-            onClassSelected: onClassSelected,
-            onClassAdded: onClassAdded,
-            onClassEdited: onClassEdited,
-            onClassColorChanged: onClassColorChanged,
-            onClassDeleted: onClassDeleted,
-            onClassReordered: onClassReordered,
-            onToggleClassLabels: onToggleClassLabels,
-            onAnnotationSelected: onAnnotationSelected,
-            onAnnotationClassChanged: onAnnotationClassChanged,
-            onAiConfigPressed: onAiConfigPressed,
           ),
         ],
       ),
@@ -415,34 +419,46 @@ class _CanvasStage extends StatelessWidget {
             const SizedBox(height: 16),
             Expanded(
               child: ClipRect(
-                child: Align(
-                  alignment: Alignment.topLeft,
-                  child: SizedBox(
-                    width: _annotationWorkspaceWidth,
-                    height: _annotationWorkspaceHeight,
-                    child: _ImageCanvas(
-                      image: image,
-                      unauthorized: unauthorized,
-                      zoom: zoom,
-                      viewportOffset: viewportOffset,
-                      activeTool: activeTool,
-                      activeMode: activeMode,
-                      labelClasses: labelClasses,
-                      annotations: annotations,
-                      selectedAnnotationId: selectedAnnotationId,
-                      showClassLabels: showClassLabels,
-                      onViewportOffsetChanged: onViewportOffsetChanged,
-                      onEnsureClass: onEnsureClass,
-                      onSelectMode: onSelectMode,
-                      onAnnotationCreated: onAnnotationCreated,
-                      onSegAnnotationCreated: onSegAnnotationCreated,
-                      onAnnotationSelected: onAnnotationSelected,
-                      onAnnotationUpdated: onAnnotationUpdated,
-                      onAnnotationDeleted: onAnnotationDeleted,
-                      onAnnotationDragStarted: onAnnotationDragStarted,
-                      onImageDisplaySizeChanged: onImageDisplaySizeChanged,
-                    ),
-                  ),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final alignment = Alignment(
+                      constraints.maxWidth > _annotationWorkspaceWidth
+                          ? 0.0
+                          : -1.0,
+                      constraints.maxHeight > _annotationWorkspaceHeight
+                          ? 0.0
+                          : -1.0,
+                    );
+                    return Align(
+                      alignment: alignment,
+                      child: SizedBox(
+                        width: _annotationWorkspaceWidth,
+                        height: _annotationWorkspaceHeight,
+                        child: _ImageCanvas(
+                          image: image,
+                          unauthorized: unauthorized,
+                          zoom: zoom,
+                          viewportOffset: viewportOffset,
+                          activeTool: activeTool,
+                          activeMode: activeMode,
+                          labelClasses: labelClasses,
+                          annotations: annotations,
+                          selectedAnnotationId: selectedAnnotationId,
+                          showClassLabels: showClassLabels,
+                          onViewportOffsetChanged: onViewportOffsetChanged,
+                          onEnsureClass: onEnsureClass,
+                          onSelectMode: onSelectMode,
+                          onAnnotationCreated: onAnnotationCreated,
+                          onSegAnnotationCreated: onSegAnnotationCreated,
+                          onAnnotationSelected: onAnnotationSelected,
+                          onAnnotationUpdated: onAnnotationUpdated,
+                          onAnnotationDeleted: onAnnotationDeleted,
+                          onAnnotationDragStarted: onAnnotationDragStarted,
+                          onImageDisplaySizeChanged: onImageDisplaySizeChanged,
+                        ),
+                      ),
+                    );
+                  },
                 ),
               ),
             ),
@@ -691,6 +707,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
   Size? _sampleImageSize;
   Uint8List? _sampleRgbaBytes;
   Offset? _hoverPoint;
+  Offset? _lastPointerLocalPosition;
   String? _loadedImagePath;
   List<Offset> _segDraftPoints = [];
   int? _hoveredCornerIndex;
@@ -725,6 +742,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
       _decodedImage?.dispose();
       _decodedImage = null;
       _hoverPoint = null;
+      _lastPointerLocalPosition = null;
       _movingAnnotationId = null;
       _resizingAnnotationId = null;
       _resizingCornerIndex = null;
@@ -739,6 +757,10 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     }
     if (oldWidget.zoom != widget.zoom) {
       _scheduleViewportClamp();
+      _refreshPointerStateAfterViewportChange();
+    }
+    if (oldWidget.viewportOffset != widget.viewportOffset) {
+      _refreshPointerStateAfterViewportChange();
     }
     if (oldWidget.activeTool == 'draw' && widget.activeTool != 'draw') {
       _stopSegAutoPointTimer();
@@ -785,6 +807,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
       widget.onImageDisplaySizeChanged?.call(
         Size(displayRect.width, displayRect.height),
       );
+      _scheduleViewportClamp();
     } on Object {
       if (mounted && widget.image?.path == path) {
         setState(() {
@@ -843,7 +866,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     );
   }
 
-  Rect _placedImageRect() => _imageDisplayRect().shift(_scrollOffset);
+  Rect _placedImageRect() => _imageDisplayRect();
 
   Rect _imageBounds() {
     final imageRect = _imageDisplayRect();
@@ -858,25 +881,57 @@ class _ImageCanvasState extends State<_ImageCanvas> {
   }
 
   Offset _toUnclampedContentPoint(Offset localPoint) {
-    final center = const Offset(
-      _annotationWorkspaceWidth / 2,
-      _annotationWorkspaceHeight / 2,
-    );
-    return (localPoint - center) / _scale + center;
+    return _localToContentPoint(localPoint);
+  }
+
+  Offset _localToContentPoint(Offset localPoint) {
+    final inverse = Matrix4.inverted(_contentTransform());
+    return MatrixUtils.transformPoint(inverse, localPoint);
+  }
+
+  Offset _contentToLocalPoint(Offset contentPoint) {
+    return MatrixUtils.transformPoint(_contentTransform(), contentPoint);
   }
 
   Offset _toImagePoint(Offset contentPoint) {
     return contentPoint - _placedImageRect().topLeft;
   }
 
+  Rect _visibleContentRect() {
+    final center = const Offset(
+      _annotationWorkspaceWidth / 2,
+      _annotationWorkspaceHeight / 2,
+    );
+    return Rect.fromCenter(
+      center: center,
+      width: _annotationWorkspaceWidth / _scale,
+      height: _annotationWorkspaceHeight / _scale,
+    );
+  }
+
+  Matrix4 _contentTransform() {
+    final center = const Offset(
+      _annotationWorkspaceWidth / 2,
+      _annotationWorkspaceHeight / 2,
+    );
+    return Matrix4.identity()
+      ..translate(center.dx, center.dy)
+      ..scale(_scale, _scale)
+      ..translate(
+        _scrollOffset.dx - center.dx,
+        _scrollOffset.dy - center.dy,
+      );
+  }
+
   Offset _maxScrollOffset() {
     if (_scale <= 1.0) {
       return Offset.zero;
     }
-    final factor = 1 - 1 / _scale;
+    final imageRect = _imageDisplayRect();
+    final visibleRect = _visibleContentRect();
     return Offset(
-      _annotationWorkspaceWidth * factor / 2,
-      _annotationWorkspaceHeight * factor / 2,
+      math.max(0.0, (imageRect.width - visibleRect.width) / 2),
+      math.max(0.0, (imageRect.height - visibleRect.height) / 2),
     );
   }
 
@@ -915,6 +970,50 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     });
   }
 
+  void _refreshPointerStateAfterViewportChange() {
+    final localPosition = _lastPointerLocalPosition;
+    if (localPosition == null) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _lastPointerLocalPosition != localPosition) {
+        return;
+      }
+      _refreshPointerStateForLocalPosition(localPosition);
+    });
+  }
+
+  void _refreshPointerStateForLocalPosition(Offset localPosition) {
+    _updateHoverPoint(localPosition);
+    final start = _drawStart;
+    if (widget.image == null || start == null) {
+      return;
+    }
+    final imageBounds = _imageBounds();
+    final localPoint = _toContentPoint(localPosition);
+    final nextDraft = Rect.fromPoints(
+      start,
+      _clampOffset(_toImagePoint(localPoint), imageBounds),
+    ).intersect(imageBounds);
+    if (_draftRect != nextDraft) {
+      setState(() => _draftRect = nextDraft);
+    }
+  }
+
+  void _handleCanvasPointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent) {
+      return;
+    }
+    final localPosition = event.localPosition;
+    _lastPointerLocalPosition = localPosition;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _lastPointerLocalPosition != localPosition) {
+        return;
+      }
+      _refreshPointerStateForLocalPosition(localPosition);
+    });
+  }
+
   KeyEventResult _handleCanvasKeyEvent(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
@@ -944,6 +1043,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
   }
 
   void _updateHoverPoint(Offset localPosition) {
+    _lastPointerLocalPosition = localPosition;
     if (widget.image == null || widget.activeTool != 'draw') {
       if (_hoverPoint != null) {
         setState(() => _hoverPoint = null);
@@ -1253,6 +1353,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     if (widget.image == null) {
       return;
     }
+    _lastPointerLocalPosition = event.localPosition;
     _canvasFocusNode.requestFocus();
     final rawPoint = _toUnclampedContentPoint(event.localPosition);
     final insideImage = _placedImageRect().contains(rawPoint);
@@ -1629,6 +1730,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
               cursor: canvasCursor,
               onExit: (_) {
                 setState(() {
+                  _lastPointerLocalPosition = null;
                   _hoverPoint = null;
                   _hoveredCornerIndex = null;
                   _hoveredSegVertex = null;
@@ -1643,6 +1745,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
                       onPointerDown: _handlePointerDown,
                       onPointerMove: _handlePointerMove,
                       onPointerHover: _handlePointerHover,
+                      onPointerSignal: _handleCanvasPointerSignal,
                       onPointerUp: _handlePointerUp,
                       onPointerCancel: (_) => _cancelDraft(),
                       child: Stack(
@@ -1661,8 +1764,8 @@ class _ImageCanvasState extends State<_ImageCanvas> {
                             )
                           else
                             Center(
-                              child: Transform.scale(
-                                scale: _scale,
+                              child: Transform(
+                                transform: _contentTransform(),
                                 child: SizedBox(
                                   width: _annotationWorkspaceWidth,
                                   height: _annotationWorkspaceHeight,
@@ -1679,7 +1782,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
                                           draftRect: _draftRect,
                                           draftSegPoints: _segDraftPoints,
                                           imageRect: imageRect,
-                                          imageOffset: _scrollOffset,
+                                          imageOffset: Offset.zero,
                                           draftMode: widget.activeMode,
                                           draftClassId: _draftClassId,
                                           showClassLabels:
@@ -1694,7 +1797,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
                                         _SelectedAnnotationFilter(
                                           annotation: selectedAnnotation,
                                           imageRect: imageRect,
-                                          imageOffset: _scrollOffset,
+                                          imageOffset: Offset.zero,
                                         ),
                                       if (selectedAnnotation != null)
                                         CustomPaint(
@@ -1703,7 +1806,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
                                                 annotation: selectedAnnotation,
                                                 classes: widget.labelClasses,
                                                 imageRect: imageRect,
-                                                imageOffset: _scrollOffset,
+                                                imageOffset: Offset.zero,
                                                 scale: _scale,
                                                 showClassLabels:
                                                     widget.showClassLabels,
@@ -1712,9 +1815,9 @@ class _ImageCanvasState extends State<_ImageCanvas> {
                                               ),
                                         ),
                                     ],
+                                    ),
                                   ),
                                 ),
-                              ),
                             ),
                         ],
                       ),
@@ -2009,7 +2112,7 @@ class _AnnotationPainter extends CustomPainter {
             : Color(annotation.authorColorValue);
         final authorLabel = annotation.authorName.trim().isEmpty
             ? ''
-            : ' · ${annotation.authorName}#${_shortCollaborationId(annotation.authorId)}';
+            : ' · ${annotation.authorName}';
         _drawLabel(
           canvas,
           annotation.rect.shift(canvasOrigin),
@@ -2118,6 +2221,7 @@ class _AnnotationPainter extends CustomPainter {
     _drawDashedLine(canvas, vertical.first, vertical.last, underlay);
     _drawDashedLine(canvas, horizontal.first, horizontal.last, paint);
     _drawDashedLine(canvas, vertical.first, vertical.last, paint);
+    canvas.drawCircle(point, 2.2 / scale, Paint()..color = color);
   }
 
   void _drawDashedLine(Canvas canvas, Offset start, Offset end, Paint paint) {
@@ -2173,6 +2277,7 @@ class _AnnotationPainter extends CustomPainter {
       ..strokeWidth = 1.4 / scale;
     _drawDashedLine(canvas, start, end, underlay);
     _drawDashedLine(canvas, start, end, paint);
+    canvas.drawCircle(end, 2.2 / scale, Paint()..color = color);
   }
 
   void _drawAnnotation(
@@ -2434,7 +2539,7 @@ class _SelectedAnnotationOverlayPainter extends CustomPainter {
     if (showClassLabels && labelClass != null) {
       final authorLabel = annotation.authorName.trim().isEmpty
           ? ''
-          : ' · ${annotation.authorName}#${_shortCollaborationId(annotation.authorId)}';
+          : ' · ${annotation.authorName}';
       final authorColor = annotation.authorColorValue == 0
           ? color
           : Color(annotation.authorColorValue);
@@ -2648,6 +2753,7 @@ class _AiToolbar extends StatelessWidget {
         selectedAnnotationId != null || activeTool == 'annotations';
     return Container(
       width: _toolbarWidth,
+      clipBehavior: Clip.hardEdge,
       decoration: BoxDecoration(
         color: _panelColor(context),
         border: Border(left: BorderSide(color: _borderColor(context))),
@@ -2836,7 +2942,7 @@ class _AnnotationListPanel extends StatelessWidget {
             .firstOrNullValue;
         final authorLabel = annotation.authorName.trim().isEmpty
             ? ''
-            : '${annotation.authorName}#${_shortCollaborationId(annotation.authorId)}';
+            : annotation.authorName;
         final authorColor = annotation.authorColorValue == 0
             ? null
             : Color(annotation.authorColorValue);

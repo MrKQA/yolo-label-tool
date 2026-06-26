@@ -71,7 +71,81 @@ class _HistoryConfig {
   }
 }
 
-/// 软件设置，先保存 Python 环境和训练结果路径。
+/// Last label-page image position per project.
+class _LabelResumePosition {
+  const _LabelResumePosition({
+    required this.projectKey,
+    required this.imagePath,
+    required this.imageIndex,
+    required this.updatedAt,
+  });
+
+  final String projectKey;
+  final String imagePath;
+  final int imageIndex;
+  final DateTime updatedAt;
+
+  Map<String, Object> toJson() => {
+    'projectKey': projectKey,
+    'imagePath': imagePath,
+    'imageIndex': imageIndex,
+    'updatedAt': updatedAt.toIso8601String(),
+  };
+
+  static _LabelResumePosition? fromJson(Object? value) {
+    if (value is! Map) {
+      return null;
+    }
+    final projectKey = '${value['projectKey'] ?? ''}'.trim();
+    final imagePath = '${value['imagePath'] ?? ''}'.trim();
+    final imageIndex = value['imageIndex'] is num
+        ? (value['imageIndex'] as num).round()
+        : -1;
+    final updatedAt =
+        DateTime.tryParse('${value['updatedAt'] ?? ''}') ??
+        DateTime.fromMillisecondsSinceEpoch(0);
+    if (projectKey.isEmpty || imagePath.isEmpty || imageIndex < 0) {
+      return null;
+    }
+    return _LabelResumePosition(
+      projectKey: projectKey,
+      imagePath: imagePath,
+      imageIndex: imageIndex,
+      updatedAt: updatedAt,
+    );
+  }
+}
+
+class _LabelResumePositionsConfig {
+  const _LabelResumePositionsConfig({required this.entries});
+
+  final Map<String, _LabelResumePosition> entries;
+
+  Map<String, Object> toJson() => {
+    'entries': [for (final entry in _recentEntries()) entry.toJson()],
+  };
+
+  Iterable<_LabelResumePosition> _recentEntries() {
+    final values = entries.values.toList()
+      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    return values.take(80);
+  }
+
+  static _LabelResumePositionsConfig fromJson(Object? value) {
+    if (value is! Map || value['entries'] is! List) {
+      return const _LabelResumePositionsConfig(entries: {});
+    }
+    final entries = <String, _LabelResumePosition>{};
+    for (final item in value['entries'] as List) {
+      final position = _LabelResumePosition.fromJson(item);
+      if (position != null) {
+        entries[position.projectKey] = position;
+      }
+    }
+    return _LabelResumePositionsConfig(entries: entries);
+  }
+}
+
 /// Application settings for Python environment and training output path.
 enum _TrainingHistoryAction { start, resume, stop }
 
@@ -438,6 +512,7 @@ class _ConfigStore {
   static const _settingsKey = 'settings';
   static const _trainingHistoryKey = 'training_history';
   static const _trainingPreferencesKey = 'training_preferences';
+  static const _labelResumePositionsKey = 'label_resume_positions';
 
   static Directory get projectDirectory {
     // Use the executable directory as the application root so packaged builds
@@ -486,6 +561,10 @@ class _ConfigStore {
       _trainingPreferencesKey,
       _TrainingPreferences.fromJson(null).toJson(),
     );
+    _ensureDbConfig(
+      _labelResumePositionsKey,
+      const _LabelResumePositionsConfig(entries: {}).toJson(),
+    );
   }
 
   static _HistoryConfig loadHistory() {
@@ -504,6 +583,13 @@ class _ConfigStore {
     return _TrainingHistoryConfig.fromJson(_readDbJson(_trainingHistoryKey));
   }
 
+  static _LabelResumePosition? loadLabelResumePosition(String projectKey) {
+    final config = _LabelResumePositionsConfig.fromJson(
+      _readDbJson(_labelResumePositionsKey),
+    );
+    return config.entries[projectKey];
+  }
+
   static void saveHistory(_HistoryConfig value) {
     _writeDbJson(_historyKey, value.toJson());
   }
@@ -514,6 +600,18 @@ class _ConfigStore {
 
   static void saveSettings(_AppSettings value) {
     _writeDbJson(_settingsKey, value.toJson());
+  }
+
+  static void saveLabelResumePosition(_LabelResumePosition value) {
+    final config = _LabelResumePositionsConfig.fromJson(
+      _readDbJson(_labelResumePositionsKey),
+    );
+    final entries = Map<String, _LabelResumePosition>.of(config.entries);
+    entries[value.projectKey] = value;
+    _writeDbJson(
+      _labelResumePositionsKey,
+      _LabelResumePositionsConfig(entries: entries).toJson(),
+    );
   }
 
   static _CollaborationIdentityConfig loadStableCollaborationIdentity() {

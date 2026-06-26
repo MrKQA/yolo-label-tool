@@ -12,6 +12,7 @@ static PYTHON_RUNTIME: Lazy<Mutex<Option<PythonRuntime>>> = Lazy::new(|| Mutex::
 type PyInitializeEx = unsafe extern "C" fn(c_int);
 type PyIsInitialized = unsafe extern "C" fn() -> c_int;
 type PyRunSimpleStringFlags = unsafe extern "C" fn(*const c_char, *mut c_void) -> c_int;
+type PyEvalSaveThread = unsafe extern "C" fn() -> *mut c_void;
 type PyGilStateEnsure = unsafe extern "C" fn() -> c_int;
 type PyGilStateRelease = unsafe extern "C" fn(c_int);
 
@@ -22,6 +23,7 @@ struct PythonRuntime {
     py_initialize_ex: PyInitializeEx,
     py_is_initialized: PyIsInitialized,
     py_run_simple_string_flags: PyRunSimpleStringFlags,
+    py_eval_save_thread: PyEvalSaveThread,
     py_gil_state_ensure: PyGilStateEnsure,
     py_gil_state_release: PyGilStateRelease,
 }
@@ -82,7 +84,8 @@ pub fn configure_python_runtime(python_path: &str) -> Result<(), String> {
     apply_python_environment(&paths);
     let dll_path = find_python_dll(&paths)?;
     let runtime = load_python_runtime(&dll_path, runtime_key)?;
-    unsafe {
+    let initialized_here = unsafe {
+        let initialized_here = (runtime.py_is_initialized)() == 0;
         if (runtime.py_is_initialized)() == 0 {
             (runtime.py_initialize_ex)(0);
         }
@@ -91,6 +94,12 @@ pub fn configure_python_runtime(python_path: &str) -> Result<(), String> {
                 "Python initialization failed: {}",
                 dll_path.display()
             ));
+        }
+        initialized_here
+    };
+    if initialized_here {
+        unsafe {
+            (runtime.py_eval_save_thread)();
         }
     }
     run_python_code_with_runtime(&runtime, "import sys\n")?;
@@ -354,7 +363,7 @@ fn python_dll_score(name: &str) -> Option<u8> {
     }
     let stem = lower.trim_end_matches(".dll");
     let suffix = stem.trim_start_matches("python");
-    if !suffix.is_empty() && suffix.chars().all(|ch| ch.is_ascii_digit()) {
+    if suffix.len() >= 2 && suffix.chars().all(|ch| ch.is_ascii_digit()) {
         return Some(0);
     }
     if stem == "python3" {
@@ -373,6 +382,7 @@ fn load_python_runtime(dll_path: &Path, home_key: String) -> Result<PythonRuntim
             py_initialize_ex: load_symbol(module, "Py_InitializeEx")?,
             py_is_initialized: load_symbol(module, "Py_IsInitialized")?,
             py_run_simple_string_flags: load_symbol(module, "PyRun_SimpleStringFlags")?,
+            py_eval_save_thread: load_symbol(module, "PyEval_SaveThread")?,
             py_gil_state_ensure: load_symbol(module, "PyGILState_Ensure")?,
             py_gil_state_release: load_symbol(module, "PyGILState_Release")?,
         }

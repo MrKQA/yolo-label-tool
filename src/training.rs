@@ -69,9 +69,6 @@ if os.name == "nt":
     pythonw_path = os.path.join(python_exe_dir, "pythonw.exe")
     if os.path.isfile(pythonw_path):
         worker_python_path = pythonw_path
-    elif workers > 0:
-        print("[rustlabel] pythonw.exe was not found; forcing workers=0 to avoid worker console windows")
-        workers = 0
 
 print("[rustlabel] Python training bootstrap")
 print(f"[rustlabel] python_path={python_path}")
@@ -649,16 +646,6 @@ pub fn start_training(mut config: TrainingConfig) -> Result<String, String> {
         &format!("experiment_name={}", config.experiment_name),
     );
 
-    if let Err(error) = ini_python::configure_python_runtime(&config.python_path) {
-        append_log_line(
-            &log_path,
-            &format!("python runtime configure failed: {error}"),
-        );
-        return Err(error);
-    }
-    if let Err(error) = preload_training_modules(&log_path) {
-        append_log_line(&log_path, &format!("python preload warning: {error}"));
-    }
     let project = PathBuf::from(config.project_dir.trim());
     if config.project_dir.trim().is_empty() {
         append_log_line(&log_path, "training output path is empty");
@@ -689,8 +676,7 @@ pub fn start_training(mut config: TrainingConfig) -> Result<String, String> {
     let thread_log_path = log_path.clone();
     let handle = thread::spawn(move || {
         append_log_line(&thread_log_path, "training thread started");
-        let result =
-            run_training_with_embedded_python(&config, &thread_stop_file, &thread_log_path);
+        let result = run_training_thread(&config, &thread_stop_file, &thread_log_path);
         match result {
             Ok(()) => {
                 append_log_line(&thread_log_path, "training completed");
@@ -928,6 +914,26 @@ pub fn delete_training_logs_by_date_range_json(
         }
     }
     Ok(format!("{{\"ok\":true,\"deleted\":{deleted}}}"))
+}
+
+fn run_training_thread(
+    config: &TrainingConfig,
+    stop_file: &Path,
+    log_path: &Path,
+) -> Result<(), String> {
+    append_log_line(log_path, "python runtime configure starting");
+    if let Err(error) = ini_python::configure_python_runtime(&config.python_path) {
+        append_log_line(log_path, &format!("python runtime configure failed: {error}"));
+        return Err(error);
+    }
+    append_log_line(log_path, "python runtime configured");
+
+    append_log_line(log_path, "python modules preload starting");
+    if let Err(error) = preload_training_modules(log_path) {
+        append_log_line(log_path, &format!("python preload warning: {error}"));
+    }
+
+    run_training_with_embedded_python(config, stop_file, log_path)
 }
 
 fn run_training_with_embedded_python(

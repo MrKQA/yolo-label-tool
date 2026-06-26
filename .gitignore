@@ -19,6 +19,7 @@ FEATURES.md
 .idea/
 .vscode/
 .claude/
+.agents/
 
 # models
 models/

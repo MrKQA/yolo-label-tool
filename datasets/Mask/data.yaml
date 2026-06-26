@@ -1,0 +1,7 @@
+path: D:/Project/Rust/datasets/Mask
+train: train/images
+val: val/images
+
+nc: 1
+names:
+  0: MASK

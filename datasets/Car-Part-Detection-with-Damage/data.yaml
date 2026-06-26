@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 21
+names: ['Back-bumper', 'Back-door', 'Back-wheel', 'Back-window', 'Back-windshield', 'Fender', 'Front-bumper', 'Front-door', 'Front-wheel', 'Front-window', 'Grille', 'Headlight', 'Hood', 'License-plate', 'Mirror', 'Quarter-panel', 'Rocker-panel', 'Roof', 'Tail-light', 'Trunk', 'Windshield']
+
+roboflow:
+  workspace: car-damaged-detection-e66m0
+  project: car-part-detection-with-damage-part
+  version: 2
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/car-damaged-detection-e66m0/car-part-detection-with-damage-part/dataset/2

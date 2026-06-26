@@ -823,6 +823,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   final _DetectVideoSession _detectVideoSession = _DetectVideoSession();
   Timer? _topMenuHideTimer;
   Timer? _databaseSaveTimer;
+  Timer? _labelResumeSaveTimer;
   Timer? _collaborationPollTimer;
 
   final List<_ImageItem> _images = [];
@@ -974,6 +975,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   }
 
   void _clearCurrentProjectState() {
+    _labelResumeSaveTimer?.cancel();
     _images.clear();
     _labelClasses.clear();
     _annotationsByImage.clear();
@@ -1452,6 +1454,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     _log('APP', 'Shutdown requested');
     _topMenuHideTimer?.cancel();
     _databaseSaveTimer?.cancel();
+    _labelResumeSaveTimer?.cancel();
     _collaborationPollTimer?.cancel();
     _collaborationReconnectTimer?.cancel();
     unawaited(
@@ -1467,6 +1470,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       }),
     );
     unawaited(_saveAnnotationDatabaseNow());
+    _saveLabelResumePositionNow();
     _logFlushTimer?.cancel();
     _flushLogs();
     _detectVideoSession.removeListener(_handleDetectVideoSessionChanged);
@@ -1650,6 +1654,80 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     setState(() => _zoomLocked = !_zoomLocked);
   }
 
+  void _scheduleLabelResumePositionSave() {
+    if (_images.isEmpty || _collaborationClientMode) {
+      return;
+    }
+    _labelResumeSaveTimer?.cancel();
+    _labelResumeSaveTimer = Timer(const Duration(milliseconds: 350), () {
+      _saveLabelResumePositionNow();
+    });
+  }
+
+  void _saveLabelResumePositionNow() {
+    if (_images.isEmpty || _collaborationClientMode) {
+      return;
+    }
+    final image = _selectedImage;
+    if (image == null) {
+      return;
+    }
+    try {
+      _ConfigStore.saveLabelResumePosition(
+        _LabelResumePosition(
+          projectKey: _databaseProjectKey(),
+          imagePath: image.path,
+          imageIndex: _selectedImageIndex,
+          updatedAt: DateTime.now(),
+        ),
+      );
+    } on Object catch (error) {
+      _log(
+        'LABEL',
+        'Save resume position failed: $error',
+        level: _LogLevel.debug,
+      );
+    }
+  }
+
+  void _restoreLabelResumePosition() {
+    if (_images.isEmpty || _collaborationClientMode) {
+      return;
+    }
+    try {
+      final position = _ConfigStore.loadLabelResumePosition(
+        _databaseProjectKey(),
+      );
+      if (position == null) {
+        return;
+      }
+      final pathIndex = _imageIndexOfPath(position.imagePath);
+      final nextIndex = pathIndex >= 0
+          ? pathIndex
+          : position.imageIndex.clamp(0, _images.length - 1).toInt();
+      if (nextIndex == _selectedImageIndex) {
+        return;
+      }
+      setState(() {
+        _selectedImageIndex = nextIndex;
+        _selectedAnnotationId = null;
+        _undoStack.clear();
+        _redoStack.clear();
+      });
+      _log(
+        'LABEL',
+        'Restored image position: ${nextIndex + 1}/${_images.length}',
+        level: _LogLevel.debug,
+      );
+    } on Object catch (error) {
+      _log(
+        'LABEL',
+        'Restore resume position failed: $error',
+        level: _LogLevel.debug,
+      );
+    }
+  }
+
   void _selectImage(int index) {
     if (index < 0 || index >= _images.length) {
       return;
@@ -1660,6 +1738,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       _undoStack.clear();
       _redoStack.clear();
     });
+    _scheduleLabelResumePositionSave();
   }
 
   bool _selectPreviousImage({int step = 1}) {
@@ -1749,6 +1828,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       _activeSection = 'label';
     });
     await _loadAnnotationDatabaseForCurrentImages();
+    _restoreLabelResumePosition();
   }
 
   Future<void> _openRecentFolder(String path) async {
@@ -1836,6 +1916,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       'Images inserted: count=${newPaths.length}, total=${_images.length}',
     );
     _broadcastCollaborationProjectSnapshot('images inserted');
+    _scheduleLabelResumePositionSave();
     _scheduleAnnotationDatabaseSave();
   }
 
@@ -1866,6 +1947,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     });
     _log('LABEL', 'Image removed: $removedPath, total=${_images.length}');
     _broadcastCollaborationProjectSnapshot('image deleted');
+    _scheduleLabelResumePositionSave();
     _scheduleAnnotationDatabaseSave();
   }
 
@@ -2080,6 +2162,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
         'IMPORT',
         'Dataset import completed: images=${uniqueEntries.length}, classes=${importedClasses.length}, annotations=$annotationCount, yaml=${file.path}',
       );
+      _restoreLabelResumePosition();
       unawaited(_saveAnnotationDatabaseNow());
       _showFloatingMessage('${t('import.done')} (${uniqueEntries.length})');
     } on Object catch (error) {
