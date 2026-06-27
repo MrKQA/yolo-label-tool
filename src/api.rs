@@ -1,9 +1,12 @@
 use flutter_rust_bridge::frb;
+use once_cell::sync::Lazy;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::slice;
+use std::sync::Mutex;
+use sysinfo::System;
 
 #[path = "training.rs"]
 pub mod training_mod;
@@ -21,6 +24,8 @@ pub mod database_mod;
 pub mod collaboration_mod;
 
 use training_mod::{TrainingConfig, TrainingProgress};
+
+static RESOURCE_MONITOR_SYSTEM: Lazy<Mutex<System>> = Lazy::new(|| Mutex::new(System::new()));
 
 /// Smoke-test function exposed to Flutter through flutter_rust_bridge.
 #[frb]
@@ -287,6 +292,17 @@ pub unsafe extern "C" fn rust_label_training_log_tail_json(
             })
         })
         .unwrap_or_else(error_json);
+    vec_into_ffi_buffer(result.into_bytes())
+}
+
+/// C ABI: return host/GPU resource usage for the training chart panel.
+#[frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn rust_label_training_resource_usage_json(
+    _request_ptr: *const u8,
+    _request_len: usize,
+) -> RustLabelByteBuffer {
+    let result = training_resource_usage_json().unwrap_or_else(error_json);
     vec_into_ffi_buffer(result.into_bytes())
 }
 
@@ -1058,6 +1074,110 @@ fn parse_positive_f64(value: &str) -> Option<f64> {
     (parsed.is_finite() && parsed > 0.0).then_some(parsed)
 }
 
+fn training_resource_usage_json() -> Result<String, String> {
+    let (cpu_percent, ram_percent) = {
+        let mut system = RESOURCE_MONITOR_SYSTEM
+            .lock()
+            .map_err(|_| "resource monitor lock failed".to_string())?;
+        system.refresh_cpu();
+        system.refresh_memory();
+        let cpu_percent = system.global_cpu_info().cpu_usage() as f64;
+        let total_memory = system.total_memory() as f64;
+        let used_memory = system.used_memory() as f64;
+        let ram_percent = if total_memory > 0.0 {
+            used_memory / total_memory * 100.0
+        } else {
+            0.0
+        };
+        (cpu_percent, ram_percent)
+    };
+
+    let gpu = query_nvidia_resource_usage();
+    Ok(format!(
+        concat!(
+            "{{\"ok\":true,",
+            "\"cpuPercent\":{},",
+            "\"ramPercent\":{},",
+            "\"gpuPercent\":{},",
+            "\"vramPercent\":{}",
+            "}}"
+        ),
+        finite_json_number(clamp_percent(cpu_percent)),
+        finite_json_number(clamp_percent(ram_percent)),
+        optional_json_number(gpu.and_then(|value| value.gpu_percent)),
+        optional_json_number(gpu.and_then(|value| value.vram_percent)),
+    ))
+}
+
+#[derive(Debug, Clone, Copy)]
+struct NvidiaResourceUsage {
+    gpu_percent: Option<f64>,
+    vram_percent: Option<f64>,
+}
+
+fn query_nvidia_resource_usage() -> Option<NvidiaResourceUsage> {
+    let output = Command::new("nvidia-smi")
+        .arg("--query-gpu=utilization.gpu,memory.used,memory.total")
+        .arg("--format=csv,noheader,nounits")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let mut gpu_percent: Option<f64> = None;
+    let mut used_vram = 0.0;
+    let mut total_vram = 0.0;
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let parts = line.split(',').map(str::trim).collect::<Vec<_>>();
+        if parts.len() < 3 {
+            continue;
+        }
+        if let Some(value) = parse_percent_number(parts[0]) {
+            gpu_percent = Some(gpu_percent.map_or(value, |current| current.max(value)));
+        }
+        let used = parse_positive_or_zero_f64(parts[1]).unwrap_or(0.0);
+        let total = parse_positive_or_zero_f64(parts[2]).unwrap_or(0.0);
+        if total > 0.0 {
+            used_vram += used;
+            total_vram += total;
+        }
+    }
+
+    let vram_percent = if total_vram > 0.0 {
+        Some(used_vram / total_vram * 100.0)
+    } else {
+        None
+    };
+    Some(NvidiaResourceUsage {
+        gpu_percent: gpu_percent.map(clamp_percent),
+        vram_percent: vram_percent.map(clamp_percent),
+    })
+}
+
+fn parse_percent_number(value: &str) -> Option<f64> {
+    let parsed = value
+        .trim()
+        .trim_end_matches('%')
+        .trim()
+        .parse::<f64>()
+        .ok()?;
+    parsed.is_finite().then_some(clamp_percent(parsed))
+}
+
+fn parse_positive_or_zero_f64(value: &str) -> Option<f64> {
+    let parsed = value.trim().parse::<f64>().ok()?;
+    (parsed.is_finite() && parsed >= 0.0).then_some(parsed)
+}
+
+fn clamp_percent(value: f64) -> f64 {
+    if value.is_finite() {
+        value.clamp(0.0, 100.0)
+    } else {
+        0.0
+    }
+}
+
 unsafe fn string_from_ffi(path_ptr: *const u8, path_len: usize) -> Result<String, String> {
     if path_ptr.is_null() && path_len > 0 {
         return Err("Path pointer is null".to_string());
@@ -1342,6 +1462,13 @@ fn finite_json_number(value: f64) -> String {
     }
 }
 
+fn optional_json_number(value: Option<f64>) -> String {
+    match value {
+        Some(value) if value.is_finite() => finite_json_number(value),
+        _ => "null".to_string(),
+    }
+}
+
 fn json_escape(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len());
     for ch in value.chars() {
@@ -1407,6 +1534,8 @@ pub fn start_yolo_training(
     device: String,
     lr0: f64,
     momentum: f64,
+    patience: u32,
+    hsv_h: f64,
     hsv_s: f64,
     hsv_v: f64,
     translate: f64,
@@ -1415,6 +1544,15 @@ pub fn start_yolo_training(
     flipud: f64,
     fliplr: f64,
     degrees: f64,
+    perspective: f64,
+    bgr: f64,
+    mosaic: f64,
+    mixup: f64,
+    cutmix: f64,
+    copy_paste: f64,
+    copy_paste_mode: String,
+    auto_augment: String,
+    erasing: f64,
     workers: u32,
     amp: bool,
     resume: bool,
@@ -1432,6 +1570,8 @@ pub fn start_yolo_training(
         device,
         lr0,
         momentum,
+        patience,
+        hsv_h,
         hsv_s,
         hsv_v,
         translate,
@@ -1440,6 +1580,15 @@ pub fn start_yolo_training(
         flipud,
         fliplr,
         degrees,
+        perspective,
+        bgr,
+        mosaic,
+        mixup,
+        cutmix,
+        copy_paste,
+        copy_paste_mode,
+        auto_augment,
+        erasing,
         workers,
         amp,
         resume,

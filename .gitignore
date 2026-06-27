@@ -21,6 +21,9 @@ FEATURES.md
 .claude/
 .agents/
 
+
+.gitignore
+
 # models
 models/
 

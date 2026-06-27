@@ -6,17 +6,46 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `build_training_script`, `compute_elapsed_seconds`, `read_last_csv_line`, `read_results_csv_columns`, `verify_python`
+// These functions are ignored because they are not marked as `pub`: `active_elapsed_seconds`, `append_log_line`, `append_running_heartbeat`, `civil_from_days`, `cleanup_finished_training`, `compute_elapsed_seconds`, `expected_run_dir`, `file_name_eq`, `finite_python_number`, `is_safe_log_date`, `json_escape`, `local_log_date_string`, `log_timestamp`, `preload_training_modules_opt`, `preload_training_modules`, `project_directory`, `python_bool`, `python_string_literal`, `read_last_csv_line`, `read_results_csv_columns`, `run_dir_from_checkpoint`, `run_training_thread`, `run_training_with_embedded_python`, `safe_log_date`, `set_status`, `string_array_json`, `training_code_with_locals`, `training_log_path`, `training_logs_directory`, `unix_millis_now`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `fmt`, `fmt`
 
 Future<String> startTraining({required TrainingConfig config}) =>
     RustLib.instance.api.crateApiTrainingModStartTraining(config: config);
+
+Future<String> preloadYoloPython({required String pythonPath}) => RustLib
+    .instance
+    .api
+    .crateApiTrainingModPreloadYoloPython(pythonPath: pythonPath);
 
 Future<TrainingProgress?> pollTrainingProgress() =>
     RustLib.instance.api.crateApiTrainingModPollTrainingProgress();
 
 Future<String> stopTraining() =>
     RustLib.instance.api.crateApiTrainingModStopTraining();
+
+Future<String> shutdownTraining({required BigInt timeoutMs}) => RustLib
+    .instance
+    .api
+    .crateApiTrainingModShutdownTraining(timeoutMs: timeoutMs);
+
+Future<(String, String)> trainingLogTail({required BigInt maxChars}) =>
+    RustLib.instance.api.crateApiTrainingModTrainingLogTail(maxChars: maxChars);
+
+Future<String> trainingLogDatesJson() =>
+    RustLib.instance.api.crateApiTrainingModTrainingLogDatesJson();
+
+Future<String> readTrainingLogForDateJson({required String date}) => RustLib
+    .instance
+    .api
+    .crateApiTrainingModReadTrainingLogForDateJson(date: date);
+
+Future<String> deleteTrainingLogsByDateRangeJson({
+  required String startDate,
+  required String endDate,
+}) => RustLib.instance.api.crateApiTrainingModDeleteTrainingLogsByDateRangeJson(
+  startDate: startDate,
+  endDate: endDate,
+);
 
 class TrainingConfig {
   final String pythonPath;
@@ -30,6 +59,8 @@ class TrainingConfig {
   final String device;
   final double lr0;
   final double momentum;
+  final int patience;
+  final double hsvH;
   final double hsvS;
   final double hsvV;
   final double translate;
@@ -38,6 +69,15 @@ class TrainingConfig {
   final double flipud;
   final double fliplr;
   final double degrees;
+  final double perspective;
+  final double bgr;
+  final double mosaic;
+  final double mixup;
+  final double cutmix;
+  final double copyPaste;
+  final String copyPasteMode;
+  final String autoAugment;
+  final double erasing;
   final int workers;
   final bool amp;
   final bool resume;
@@ -55,6 +95,8 @@ class TrainingConfig {
     required this.device,
     required this.lr0,
     required this.momentum,
+    required this.patience,
+    required this.hsvH,
     required this.hsvS,
     required this.hsvV,
     required this.translate,
@@ -63,6 +105,15 @@ class TrainingConfig {
     required this.flipud,
     required this.fliplr,
     required this.degrees,
+    required this.perspective,
+    required this.bgr,
+    required this.mosaic,
+    required this.mixup,
+    required this.cutmix,
+    required this.copyPaste,
+    required this.copyPasteMode,
+    required this.autoAugment,
+    required this.erasing,
     required this.workers,
     required this.amp,
     required this.resume,
@@ -82,6 +133,8 @@ class TrainingConfig {
       device.hashCode ^
       lr0.hashCode ^
       momentum.hashCode ^
+      patience.hashCode ^
+      hsvH.hashCode ^
       hsvS.hashCode ^
       hsvV.hashCode ^
       translate.hashCode ^
@@ -90,6 +143,15 @@ class TrainingConfig {
       flipud.hashCode ^
       fliplr.hashCode ^
       degrees.hashCode ^
+      perspective.hashCode ^
+      bgr.hashCode ^
+      mosaic.hashCode ^
+      mixup.hashCode ^
+      cutmix.hashCode ^
+      copyPaste.hashCode ^
+      copyPasteMode.hashCode ^
+      autoAugment.hashCode ^
+      erasing.hashCode ^
       workers.hashCode ^
       amp.hashCode ^
       resume.hashCode ^
@@ -111,6 +173,8 @@ class TrainingConfig {
           device == other.device &&
           lr0 == other.lr0 &&
           momentum == other.momentum &&
+          patience == other.patience &&
+          hsvH == other.hsvH &&
           hsvS == other.hsvS &&
           hsvV == other.hsvV &&
           translate == other.translate &&
@@ -119,6 +183,15 @@ class TrainingConfig {
           flipud == other.flipud &&
           fliplr == other.fliplr &&
           degrees == other.degrees &&
+          perspective == other.perspective &&
+          bgr == other.bgr &&
+          mosaic == other.mosaic &&
+          mixup == other.mixup &&
+          cutmix == other.cutmix &&
+          copyPaste == other.copyPaste &&
+          copyPasteMode == other.copyPasteMode &&
+          autoAugment == other.autoAugment &&
+          erasing == other.erasing &&
           workers == other.workers &&
           amp == other.amp &&
           resume == other.resume &&

@@ -23,6 +23,8 @@ class _RustVideoBackend {
     required String device,
     required double lr0,
     required double momentum,
+    required int patience,
+    required double hsvH,
     required double hsvS,
     required double hsvV,
     required double translate,
@@ -31,6 +33,15 @@ class _RustVideoBackend {
     required double flipud,
     required double fliplr,
     required double degrees,
+    required double perspective,
+    required double bgr,
+    required double mosaic,
+    required double mixup,
+    required double cutmix,
+    required double copyPaste,
+    required String copyPasteMode,
+    required String autoAugment,
+    required double erasing,
     required int workers,
     required bool amp,
     required bool resume,
@@ -47,6 +58,8 @@ class _RustVideoBackend {
     device: device,
     lr0: lr0,
     momentum: momentum,
+    patience: patience,
+    hsvH: hsvH,
     hsvS: hsvS,
     hsvV: hsvV,
     translate: translate,
@@ -55,6 +68,15 @@ class _RustVideoBackend {
     flipud: flipud,
     fliplr: fliplr,
     degrees: degrees,
+    perspective: perspective,
+    bgr: bgr,
+    mosaic: mosaic,
+    mixup: mixup,
+    cutmix: cutmix,
+    copyPaste: copyPaste,
+    copyPasteMode: copyPasteMode,
+    autoAugment: autoAugment,
+    erasing: erasing,
     workers: workers,
     amp: amp,
     resume: resume,
@@ -69,6 +91,10 @@ class _RustVideoBackend {
 
   static Future<String> trainingLogTail({int maxChars = 30 * 1024}) {
     return Isolate.run(() => _trainingLogTailSync(maxChars: maxChars));
+  }
+
+  static Future<_TrainingResourceUsage> trainingResourceUsage() {
+    return Isolate.run(_trainingResourceUsageSync);
   }
 
   static Future<void> shutdownPython() {
@@ -498,6 +524,26 @@ class _RustVideoBackend {
     }
   }
 
+  static _TrainingResourceUsage _trainingResourceUsageSync() {
+    final bindings = _RustVideoBindings.open();
+    final requestBytes = Uint8List(0);
+    final requestPtr = bindings.allocator.allocate(requestBytes);
+    try {
+      final buffer = bindings.trainingResourceUsageJson(
+        requestPtr,
+        requestBytes.length,
+      );
+      final jsonText = bindings.takeUtf8(buffer);
+      final decoded = jsonDecode(jsonText);
+      if (decoded is Map && decoded['ok'] == true) {
+        return _TrainingResourceUsage.fromJson(decoded);
+      }
+      throw StateError('${decoded is Map ? decoded['error'] : jsonText}');
+    } finally {
+      bindings.allocator.free(requestPtr);
+    }
+  }
+
   static void _shutdownPythonSync() {
     final bindings = _RustVideoBindings.open();
     final requestBytes = Uint8List(0);
@@ -658,7 +704,11 @@ class _RustVideoBackend {
         requestPtr,
         requestBytes.length,
       );
-      return _decodeDbResponse(bindings, buffer, 'collaboration command failed');
+      return _decodeDbResponse(
+        bindings,
+        buffer,
+        'collaboration command failed',
+      );
     } finally {
       bindings.allocator.free(requestPtr);
     }
@@ -685,9 +735,8 @@ class _RustVideoBackend {
       return events
           .whereType<Map>()
           .map(
-            (event) => event.map(
-              (key, value) => MapEntry(key.toString(), value),
-            ),
+            (event) =>
+                event.map((key, value) => MapEntry(key.toString(), value)),
           )
           .toList(growable: false);
     } finally {
@@ -711,17 +760,18 @@ class _RustVideoBackend {
     final requestPtr = bindings.allocator.allocate(requestBytes);
     try {
       final buffer = switch (mode) {
-        'read' => bindings.readTrainingLogJson(
-          requestPtr,
-          requestBytes.length,
-        ),
+        'read' => bindings.readTrainingLogJson(requestPtr, requestBytes.length),
         'delete' => bindings.deleteTrainingLogsJson(
           requestPtr,
           requestBytes.length,
         ),
         _ => bindings.trainingLogDatesJson(requestPtr, requestBytes.length),
       };
-      return _decodeDbResponse(bindings, buffer, 'training log database failed');
+      return _decodeDbResponse(
+        bindings,
+        buffer,
+        'training log database failed',
+      );
     } finally {
       bindings.allocator.free(requestPtr);
     }
@@ -1075,6 +1125,10 @@ typedef _TrainingLogTailJsonNative =
     _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
 typedef _TrainingLogTailJsonDart =
     _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+typedef _TrainingResourceUsageJsonNative =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef _TrainingResourceUsageJsonDart =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _ShutdownPythonJsonNative =
     _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
 typedef _ShutdownPythonJsonDart =
@@ -1191,6 +1245,11 @@ class _RustVideoBindings {
           .lookupFunction<_TrainingLogTailJsonNative, _TrainingLogTailJsonDart>(
             'rust_label_training_log_tail_json',
           ),
+      trainingResourceUsageJson = library
+          .lookupFunction<
+            _TrainingResourceUsageJsonNative,
+            _TrainingResourceUsageJsonDart
+          >('rust_label_training_resource_usage_json'),
       shutdownPythonJson = library
           .lookupFunction<_ShutdownPythonJsonNative, _ShutdownPythonJsonDart>(
             'rust_label_shutdown_python_json',
@@ -1235,9 +1294,10 @@ class _RustVideoBindings {
           .lookupFunction<_DbOverviewJsonNative, _DbOverviewJsonDart>(
             'rust_label_db_overview_json',
           ),
-      dbTableJson = library.lookupFunction<_DbTableJsonNative, _DbTableJsonDart>(
-        'rust_label_db_table_json',
-      ),
+      dbTableJson = library
+          .lookupFunction<_DbTableJsonNative, _DbTableJsonDart>(
+            'rust_label_db_table_json',
+          ),
       dbSqlQueryJson = library
           .lookupFunction<_DbSqlQueryJsonNative, _DbSqlQueryJsonDart>(
             'rust_label_db_sql_query_json',
@@ -1279,6 +1339,7 @@ class _RustVideoBindings {
   final _AiAnnotateImagesJsonDart aiAnnotateImagesJson;
   final _PreloadYoloPythonJsonDart preloadYoloPythonJson;
   final _TrainingLogTailJsonDart trainingLogTailJson;
+  final _TrainingResourceUsageJsonDart trainingResourceUsageJson;
   final _ShutdownPythonJsonDart shutdownPythonJson;
   final _DbSaveSnapshotJsonDart dbSaveSnapshotJson;
   final _DbLoadSnapshotJsonDart dbLoadSnapshotJson;

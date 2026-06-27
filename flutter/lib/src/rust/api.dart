@@ -3,14 +3,15 @@
 
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
+import 'api/detecting_mod.dart';
 import 'api/training_mod.dart';
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `count_images_with_prefix`, `decode_video_frame_with_args`, `detect_best_hardware_decoder`, `detect_best_nvidia_gpu`, `ensure_existing_video`, `error_json`, `ffmpeg_hwaccels`, `find_ffmpeg_near_project`, `find_ffmpeg_on_path`, `find_ffmpeg`, `find_ffprobe_near_project`, `find_ffprobe_next_to_ffmpeg`, `find_ffprobe_on_path`, `find_ffprobe`, `finite_json_number`, `has_intel_gpu`, `jpeg_quality_to_qscale`, `json_escape`, `parse_frame_rate`, `parse_nvidia_gpu_line`, `parse_positive_f64`, `probe_video_playback_info`, `sanitize_file_stem`, `sanitize_output_dir`, `string_from_ffi`, `vec_into_ffi_buffer`, `video_playback_info_json`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `HardwareDecoder`, `NvidiaGpuInfo`, `RustLabelByteBuffer`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
-// These functions are ignored (category: IgnoreBecauseExplicitAttribute): `rust_label_decode_video_frame_png`, `rust_label_free_byte_buffer`, `rust_label_video_info_json`
+// These functions are ignored because they are not marked as `pub`: `ai_annotate_image_from_json_request`, `ai_annotate_images_from_json_request`, `ai_model_classes_from_json_request`, `clamp_percent`, `count_images_with_prefix`, `decode_video_frame_with_args`, `detect_best_hardware_decoder`, `detect_best_nvidia_gpu`, `detect_from_json_request`, `detect_model_task_from_json_request`, `detect_model_task_result_json`, `detect_result_json`, `ensure_existing_video`, `error_json`, `ffmpeg_hwaccels`, `find_ffmpeg_near_project`, `find_ffmpeg_on_path`, `find_ffmpeg`, `find_ffprobe_near_project`, `find_ffprobe_next_to_ffmpeg`, `find_ffprobe_on_path`, `find_ffprobe`, `finite_json_number`, `has_intel_gpu`, `jpeg_quality_to_qscale`, `json_bool_field`, `json_escape`, `json_f64_field`, `json_raw_scalar`, `json_string_field`, `json_u32_field`, `json_value_start`, `optional_json_number`, `parse_frame_rate`, `parse_nvidia_gpu_line`, `parse_percent_number`, `parse_positive_f64`, `parse_positive_or_zero_f64`, `probe_video_playback_info`, `query_nvidia_resource_usage`, `required_json_string`, `sanitize_file_stem`, `sanitize_output_dir`, `string_from_ffi`, `training_resource_usage_json`, `vec_into_ffi_buffer`, `video_playback_info_json`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `HardwareDecoder`, `NvidiaGpuInfo`, `NvidiaResourceUsage`, `RustLabelByteBuffer`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These functions are ignored (category: IgnoreBecauseExplicitAttribute): `rust_label_ai_annotate_image_json`, `rust_label_ai_annotate_images_json`, `rust_label_ai_model_classes_json`, `rust_label_collab_command_json`, `rust_label_collab_poll_json`, `rust_label_db_append_logs_json`, `rust_label_db_delete_config_json`, `rust_label_db_delete_logs_json`, `rust_label_db_load_config_json`, `rust_label_db_load_snapshot_json`, `rust_label_db_log_dates_json`, `rust_label_db_overview_json`, `rust_label_db_read_logs_json`, `rust_label_db_save_config_json`, `rust_label_db_save_snapshot_json`, `rust_label_db_sql_query_json`, `rust_label_db_table_json`, `rust_label_decode_video_frame_png`, `rust_label_delete_training_logs_json`, `rust_label_detect_json`, `rust_label_detect_model_task_json`, `rust_label_free_byte_buffer`, `rust_label_preload_yolo_python_json`, `rust_label_read_training_log_json`, `rust_label_shutdown_python_json`, `rust_label_training_log_dates_json`, `rust_label_training_log_tail_json`, `rust_label_training_resource_usage_json`, `rust_label_video_info_json`
 
 /// Smoke-test function exposed to Flutter through flutter_rust_bridge.
 Future<String> rustGreeting({required String name}) =>
@@ -63,9 +64,9 @@ Future<FrameExtractionResult> extractVideoFrames({
   lossless: lossless,
 );
 
-/// Start a YOLO training run via Python/Ultralytics.
+/// Start a YOLO training run through the embedded PyO3 Python runtime.
 ///
-/// Spawns a Python subprocess that runs `model.train(...)`.
+/// Runs Ultralytics `model.train(...)` on a background Rust thread.
 /// Returns the experiment run directory path on success.
 Future<String> startYoloTraining({
   required String pythonPath,
@@ -79,6 +80,8 @@ Future<String> startYoloTraining({
   required String device,
   required double lr0,
   required double momentum,
+  required int patience,
+  required double hsvH,
   required double hsvS,
   required double hsvV,
   required double translate,
@@ -87,6 +90,15 @@ Future<String> startYoloTraining({
   required double flipud,
   required double fliplr,
   required double degrees,
+  required double perspective,
+  required double bgr,
+  required double mosaic,
+  required double mixup,
+  required double cutmix,
+  required double copyPaste,
+  required String copyPasteMode,
+  required String autoAugment,
+  required double erasing,
   required int workers,
   required bool amp,
   required bool resume,
@@ -103,6 +115,8 @@ Future<String> startYoloTraining({
   device: device,
   lr0: lr0,
   momentum: momentum,
+  patience: patience,
+  hsvH: hsvH,
   hsvS: hsvS,
   hsvV: hsvV,
   translate: translate,
@@ -111,6 +125,15 @@ Future<String> startYoloTraining({
   flipud: flipud,
   fliplr: fliplr,
   degrees: degrees,
+  perspective: perspective,
+  bgr: bgr,
+  mosaic: mosaic,
+  mixup: mixup,
+  cutmix: cutmix,
+  copyPaste: copyPaste,
+  copyPasteMode: copyPasteMode,
+  autoAugment: autoAugment,
+  erasing: erasing,
   workers: workers,
   amp: amp,
   resume: resume,
@@ -124,6 +147,54 @@ Future<TrainingProgress?> pollYoloTrainingProgress() =>
 /// Stop the active YOLO training process.
 Future<String> stopYoloTraining() =>
     RustLib.instance.api.crateApiStopYoloTraining();
+
+/// Run YOLO detection on a single image, save the annotated result.
+Future<DetectResult> detectImage({
+  required String pythonPath,
+  required String modelPath,
+  required String inputPath,
+  required String outputDir,
+  required String outputName,
+  required double confThreshold,
+  required double iouThreshold,
+  required int imgsz,
+  required String device,
+}) => RustLib.instance.api.crateApiDetectImage(
+  pythonPath: pythonPath,
+  modelPath: modelPath,
+  inputPath: inputPath,
+  outputDir: outputDir,
+  outputName: outputName,
+  confThreshold: confThreshold,
+  iouThreshold: iouThreshold,
+  imgsz: imgsz,
+  device: device,
+);
+
+/// Run YOLO detection on a video, encode output with FFmpeg h264.
+Future<DetectResult> detectVideo({
+  required String pythonPath,
+  required String modelPath,
+  required String inputPath,
+  required String outputDir,
+  required String outputName,
+  required double confThreshold,
+  required double iouThreshold,
+  required int imgsz,
+  required String device,
+  required String ffmpegPath,
+}) => RustLib.instance.api.crateApiDetectVideo(
+  pythonPath: pythonPath,
+  modelPath: modelPath,
+  inputPath: inputPath,
+  outputDir: outputDir,
+  outputName: outputName,
+  confThreshold: confThreshold,
+  iouThreshold: iouThreshold,
+  imgsz: imgsz,
+  device: device,
+  ffmpegPath: ffmpegPath,
+);
 
 /// One decoded video frame returned as PNG bytes.
 class DecodedVideoFrame {

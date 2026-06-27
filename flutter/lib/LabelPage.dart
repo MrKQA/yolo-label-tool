@@ -27,6 +27,7 @@ class _LabelPage extends StatelessWidget {
     required this.imageSplit,
     required this.activeClassId,
     required this.labelClasses,
+    required this.annotationsByImage,
     required this.annotations,
     required this.selectedAnnotationId,
     required this.showClassLabels,
@@ -71,6 +72,7 @@ class _LabelPage extends StatelessWidget {
   final String imageSplit;
   final int? activeClassId;
   final List<_LabelClass> labelClasses;
+  final Map<String, List<_AnnotationRegion>> annotationsByImage;
   final List<_AnnotationRegion> annotations;
   final String? selectedAnnotationId;
   final bool showClassLabels;
@@ -112,6 +114,8 @@ class _LabelPage extends StatelessWidget {
           _ImagePreviewPane(
             images: images,
             selectedIndex: selectedImageIndex,
+            labelClasses: labelClasses,
+            annotationsByImage: annotationsByImage,
             onImageSelected: onImageSelected,
             onContextMenu: onImageContextMenu,
           ),
@@ -179,30 +183,288 @@ class _LabelPage extends StatelessWidget {
 
 /// 左侧图片预览区，负责显示当前索引和缩略图列表。
 /// Left preview pane showing the current index and thumbnail list.
-class _ImagePreviewPane extends StatelessWidget {
+class _ImagePreviewPane extends StatefulWidget {
   const _ImagePreviewPane({
     required this.images,
     required this.selectedIndex,
+    required this.labelClasses,
+    required this.annotationsByImage,
     required this.onImageSelected,
     required this.onContextMenu,
   });
 
   final List<_ImageItem> images;
   final int selectedIndex;
+  final List<_LabelClass> labelClasses;
+  final Map<String, List<_AnnotationRegion>> annotationsByImage;
   final ValueChanged<int> onImageSelected;
   final Future<void> Function(TapDownDetails details, int? index) onContextMenu;
 
   @override
-  Widget build(BuildContext context) {
-    final current = images.isEmpty ? 0 : selectedIndex + 1;
-    final total = images.length;
+  State<_ImagePreviewPane> createState() => _ImagePreviewPaneState();
+}
+
+class _ImagePreviewPaneState extends State<_ImagePreviewPane> {
+  final ScrollController _scrollController = ScrollController();
+  final TextEditingController _indexController = TextEditingController();
+  final FocusNode _indexFocusNode = FocusNode(debugLabel: 'preview-index');
+  String _filterValue = _imagePreviewFilterAll;
+
+  static const _imagePreviewFilterAll = 'all';
+  static const _imagePreviewFilterUnlabeled = 'unlabeled';
+  static const _imagePreviewClassPrefix = 'class:';
+
+  @override
+  void initState() {
+    super.initState();
+    _syncIndexText();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _scrollSelectedIntoView(animate: false);
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _ImagePreviewPane oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _normalizeFilter();
+    _syncIndexText();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      if (_selectFirstVisibleEntryIfNeeded()) {
+        return;
+      }
+      _scrollSelectedIntoView(
+        animate: oldWidget.selectedIndex != widget.selectedIndex,
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    _indexController.dispose();
+    _indexFocusNode.dispose();
+    super.dispose();
+  }
+
+  List<_ImagePreviewEntry> _filteredEntries() {
+    final entries = <_ImagePreviewEntry>[];
+    for (var index = 0; index < widget.images.length; index += 1) {
+      final image = widget.images[index];
+      if (_matchesFilter(image)) {
+        entries.add(_ImagePreviewEntry(index: index, image: image));
+      }
+    }
+    return entries;
+  }
+
+  bool _matchesFilter(_ImageItem image) {
+    final annotations =
+        widget.annotationsByImage[_pathKey(image.path)] ?? const [];
+    if (_filterValue == _imagePreviewFilterAll) {
+      return true;
+    }
+    if (_filterValue == _imagePreviewFilterUnlabeled) {
+      return annotations.isEmpty;
+    }
+    if (_filterValue.startsWith(_imagePreviewClassPrefix)) {
+      final classId = int.tryParse(
+        _filterValue.substring(_imagePreviewClassPrefix.length),
+      );
+      return classId != null &&
+          annotations.any((annotation) => annotation.classId == classId);
+    }
+    return true;
+  }
+
+  List<DropdownMenuEntry<String>> _filterEntries() {
+    return [
+      DropdownMenuEntry<String>(
+        value: _imagePreviewFilterAll,
+        label: '${t('label.previewFilterAll')} (${widget.images.length})',
+      ),
+      DropdownMenuEntry<String>(
+        value: _imagePreviewFilterUnlabeled,
+        label:
+            '${t('label.previewFilterUnlabeled')} (${_countUnlabeledImages()})',
+      ),
+      for (final labelClass in widget.labelClasses)
+        DropdownMenuEntry<String>(
+          value: '$_imagePreviewClassPrefix${labelClass.id}',
+          label: '${labelClass.name} (${_countImagesForClass(labelClass.id)})',
+        ),
+    ];
+  }
+
+  int _countUnlabeledImages() {
+    var count = 0;
+    for (final image in widget.images) {
+      final annotations =
+          widget.annotationsByImage[_pathKey(image.path)] ?? const [];
+      if (annotations.isEmpty) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  int _countImagesForClass(int classId) {
+    var count = 0;
+    for (final image in widget.images) {
+      final annotations =
+          widget.annotationsByImage[_pathKey(image.path)] ?? const [];
+      if (annotations.any((annotation) => annotation.classId == classId)) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  int _filteredPosition(List<_ImagePreviewEntry> entries) {
+    final position = entries.indexWhere(
+      (entry) => entry.index == widget.selectedIndex,
+    );
+    return position < 0 ? 0 : position + 1;
+  }
+
+  void _normalizeFilter() {
+    if (!_filterValue.startsWith(_imagePreviewClassPrefix)) {
+      return;
+    }
+    final classId = int.tryParse(
+      _filterValue.substring(_imagePreviewClassPrefix.length),
+    );
+    final exists = widget.labelClasses.any((item) => item.id == classId);
+    if (!exists) {
+      _filterValue = _imagePreviewFilterAll;
+    }
+  }
+
+  void _syncIndexText() {
+    if (_indexFocusNode.hasFocus) {
+      return;
+    }
+    final entries = _filteredEntries();
+    _indexController.text = _filteredPosition(entries).toString();
+  }
+
+  void _commitIndex() {
+    final entries = _filteredEntries();
+    if (entries.isEmpty) {
+      _indexController.text = '0';
+      return;
+    }
+    final requested = int.tryParse(_indexController.text.trim());
+    if (requested == null) {
+      _syncIndexText();
+      return;
+    }
+    final nextPosition = requested.clamp(1, entries.length).toInt();
+    final nextIndex = entries[nextPosition - 1].index;
+    _indexController.text = nextPosition.toString();
+    widget.onImageSelected(nextIndex);
+  }
+
+  void _setFilter(String? value) {
+    if (value == null || value == _filterValue) {
+      return;
+    }
+    setState(() => _filterValue = value);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      final entries = _filteredEntries();
+      if (entries.isEmpty) {
+        _syncIndexText();
+        return;
+      }
+      if (!_selectFirstVisibleEntryIfNeeded()) {
+        _syncIndexText();
+        _scrollSelectedIntoView();
+      }
+    });
+  }
+
+  bool _selectFirstVisibleEntryIfNeeded() {
+    if (_filterValue == _imagePreviewFilterAll) {
+      return false;
+    }
+    final entries = _filteredEntries();
+    if (entries.isEmpty ||
+        entries.any((entry) => entry.index == widget.selectedIndex)) {
+      return false;
+    }
+    widget.onImageSelected(entries.first.index);
+    return true;
+  }
+
+  void _scrollSelectedIntoView({bool animate = true}) {
+    if (!_scrollController.hasClients || widget.images.isEmpty) {
+      return;
+    }
+    final entries = _filteredEntries();
+    final filteredIndex = entries.indexWhere(
+      (entry) => entry.index == widget.selectedIndex,
+    );
+    if (filteredIndex < 0) {
+      return;
+    }
+    final viewport = _scrollController.position.viewportDimension;
+    final tileExtent = _previewTileExtent(context);
+    final targetTop = filteredIndex * tileExtent;
+    final targetBottom = targetTop + tileExtent;
+    final currentTop = _scrollController.offset;
+    final currentBottom = currentTop + viewport;
+    double? target;
+    if (targetTop < currentTop) {
+      target = targetTop;
+    } else if (targetBottom > currentBottom) {
+      target = targetBottom - viewport;
+    }
+    if (target == null) {
+      return;
+    }
+    final clampedTarget = target
+        .clamp(0.0, _scrollController.position.maxScrollExtent)
+        .toDouble();
+    if (animate) {
+      _scrollController.animateTo(
+        clampedTarget,
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
+      );
+    } else {
+      _scrollController.jumpTo(clampedTarget);
+    }
+  }
+
+  double _previewTileExtent(BuildContext context) {
     final previewWidth = (MediaQuery.sizeOf(context).width * 0.22)
         .clamp(_previewPaneMinWidth, _previewPaneWidth)
         .toDouble();
+    final tileWidth = math.max(80.0, previewWidth - 20);
+    final imageHeight = math.max(72.0, (tileWidth - 12) * 0.75);
+    return imageHeight + 48;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final entries = _filteredEntries();
+    final total = entries.length;
+    final previewWidth = (MediaQuery.sizeOf(context).width * 0.22)
+        .clamp(_previewPaneMinWidth, _previewPaneWidth)
+        .toDouble();
+    final tileExtent = _previewTileExtent(context);
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onSecondaryTapDown: (details) => onContextMenu(details, null),
+      onSecondaryTapDown: (details) => widget.onContextMenu(details, null),
       child: Container(
         width: previewWidth,
         decoration: BoxDecoration(
@@ -211,31 +473,91 @@ class _ImagePreviewPane extends StatelessWidget {
         ),
         child: Column(
           children: [
-            SizedBox(
-              height: _paneHeaderHeight,
-              child: Center(
-                child: Text(
-                  '$current / $total',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 6, 10, 4),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      SizedBox(
+                        width: 48,
+                        child: TextField(
+                          controller: _indexController,
+                          focusNode: _indexFocusNode,
+                          textAlign: TextAlign.center,
+                          keyboardType: TextInputType.number,
+                          textInputAction: TextInputAction.go,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                          ],
+                          decoration: const InputDecoration(
+                            isDense: true,
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(
+                              horizontal: 4,
+                              vertical: 8,
+                            ),
+                          ),
+                          onSubmitted: (_) => _commitIndex(),
+                          onEditingComplete: _commitIndex,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      SizedBox(
+                        width: 36,
+                        child: Text(
+                          '/ $total',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.labelMedium,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  SizedBox(
+                    width: double.infinity,
+                    child: DropdownMenu<String>(
+                      key: ValueKey(_filterValue),
+                      width: previewWidth - 20,
+                      initialSelection: _filterValue,
+                      textStyle: Theme.of(context).textTheme.labelSmall,
+                      inputDecorationTheme: const InputDecorationTheme(
+                        isDense: true,
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 8,
+                        ),
+                      ),
+                      dropdownMenuEntries: _filterEntries(),
+                      onSelected: _setFilter,
+                    ),
+                  ),
+                ],
               ),
             ),
             const Divider(height: 1),
             Expanded(
-              child: images.isEmpty
+              child: entries.isEmpty
                   ? Center(child: Text(t('label.previewEmpty')))
                   : Scrollbar(
+                      controller: _scrollController,
                       thumbVisibility: true,
+                      interactive: true,
                       child: ListView.builder(
+                        controller: _scrollController,
                         padding: const EdgeInsets.all(10),
-                        itemCount: images.length,
+                        itemExtent: tileExtent,
+                        itemCount: entries.length,
                         itemBuilder: (context, index) {
+                          final entry = entries[index];
                           return _PreviewTile(
-                            image: images[index],
-                            selected: index == selectedIndex,
-                            onTap: () => onImageSelected(index),
+                            image: entry.image,
+                            selected: entry.index == widget.selectedIndex,
+                            onTap: () => widget.onImageSelected(entry.index),
                             onContextMenu: (details) =>
-                                onContextMenu(details, index),
+                                widget.onContextMenu(details, entry.index),
                           );
                         },
                       ),
@@ -246,6 +568,13 @@ class _ImagePreviewPane extends StatelessWidget {
       ),
     );
   }
+}
+
+class _ImagePreviewEntry {
+  const _ImagePreviewEntry({required this.index, required this.image});
+
+  final int index;
+  final _ImageItem image;
 }
 
 /// 单张图片缩略图条目，支持选中和右键菜单。
@@ -290,7 +619,7 @@ class _PreviewTile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _ImagePreview(image: image),
+                Expanded(child: _ImagePreview(image: image)),
                 const SizedBox(height: 6),
                 Text(
                   image.name,
@@ -316,10 +645,9 @@ class _ImagePreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AspectRatio(
-      aspectRatio: 4 / 3,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(4),
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(4),
+      child: SizedBox.expand(
         child: Image.file(
           File(image.path),
           fit: BoxFit.cover,
@@ -917,10 +1245,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     return Matrix4.identity()
       ..translate(center.dx, center.dy)
       ..scale(_scale, _scale)
-      ..translate(
-        _scrollOffset.dx - center.dx,
-        _scrollOffset.dy - center.dy,
-      );
+      ..translate(_scrollOffset.dx - center.dx, _scrollOffset.dy - center.dy);
   }
 
   Offset _maxScrollOffset() {
@@ -1104,24 +1429,21 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     _stopSegAutoPointTimer();
     _segAutoPoint = imagePoint;
     _segAutoClassId = classId;
-    _segAutoPointTimer = Timer.periodic(
-      const Duration(milliseconds: 50),
-      (_) {
-        if (!mounted ||
-            widget.activeTool != 'draw' ||
-            widget.activeMode != _AnnotationMode.seg ||
-            _segDraftPoints.isEmpty) {
-          _stopSegAutoPointTimer();
-          return;
-        }
-        final point = _segAutoPoint;
-        final classId = _segAutoClassId;
-        if (point == null || classId == null) {
-          return;
-        }
-        _addSegDraftPoint(point, classId, force: false);
-      },
-    );
+    _segAutoPointTimer = Timer.periodic(const Duration(milliseconds: 50), (_) {
+      if (!mounted ||
+          widget.activeTool != 'draw' ||
+          widget.activeMode != _AnnotationMode.seg ||
+          _segDraftPoints.isEmpty) {
+        _stopSegAutoPointTimer();
+        return;
+      }
+      final point = _segAutoPoint;
+      final classId = _segAutoClassId;
+      if (point == null || classId == null) {
+        return;
+      }
+      _addSegDraftPoint(point, classId, force: false);
+    });
   }
 
   void _updateSegAutoPoint(Offset imagePoint) {
@@ -1157,7 +1479,9 @@ class _ImageCanvasState extends State<_ImageCanvas> {
       return;
     }
     final last = _segDraftPoints.isEmpty ? null : _segDraftPoints.last;
-    if (!force && last != null && (point - last).distance <= _segCloseDistance) {
+    if (!force &&
+        last != null &&
+        (point - last).distance <= _segCloseDistance) {
       return;
     }
     setState(() {
@@ -1634,8 +1958,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     final segHandle = widget.image != null && widget.activeTool == 'select'
         ? _segVertexHandleAt(_toUnclampedContentPoint(event.localPosition))
         : null;
-    if (cornerIndex != _hoveredCornerIndex ||
-        segHandle != _hoveredSegVertex) {
+    if (cornerIndex != _hoveredCornerIndex || segHandle != _hoveredSegVertex) {
       setState(() {
         _hoveredCornerIndex = cornerIndex;
         _hoveredSegVertex = segHandle;
@@ -1810,14 +2133,13 @@ class _ImageCanvasState extends State<_ImageCanvas> {
                                                 scale: _scale,
                                                 showClassLabels:
                                                     widget.showClassLabels,
-                                                darkMode:
-                                                    _isDarkMode(context),
+                                                darkMode: _isDarkMode(context),
                                               ),
                                         ),
                                     ],
-                                    ),
                                   ),
                                 ),
+                              ),
                             ),
                         ],
                       ),
@@ -2147,12 +2469,7 @@ class _AnnotationPainter extends CustomPainter {
       if (draftMode == _AnnotationMode.seg &&
           previewEnd != null &&
           placedImageRect.contains(previewEnd)) {
-        _drawDraftSegPreviewLine(
-          canvas,
-          canvasPoints.last,
-          previewEnd,
-          color,
-        );
+        _drawDraftSegPreviewLine(canvas, canvasPoints.last, previewEnd, color);
       }
     }
 
@@ -2508,8 +2825,9 @@ class _SelectedAnnotationOverlayPainter extends CustomPainter {
     }
     final color = _classColorById(classes, annotation.classId);
     final outlineUnderlay = Paint()
-      ..color = (darkMode ? Colors.white : const Color(0xFF0F172A))
-          .withValues(alpha: 0.72)
+      ..color = (darkMode ? Colors.white : const Color(0xFF0F172A)).withValues(
+        alpha: 0.72,
+      )
       ..style = PaintingStyle.stroke
       ..strokeWidth = 4.4 / scale
       ..strokeJoin = StrokeJoin.round;
@@ -2651,7 +2969,11 @@ Path _annotationOutsideDisplayPath(
   Offset imageOffset,
 ) {
   final imagePath = Path()..addRect(imageRect.shift(imageOffset));
-  final selectedPath = _annotationDisplayPath(annotation, imageRect, imageOffset);
+  final selectedPath = _annotationDisplayPath(
+    annotation,
+    imageRect,
+    imageOffset,
+  );
   if (selectedPath.getBounds().isEmpty) {
     return imagePath;
   }
@@ -2683,10 +3005,7 @@ List<Offset> _annotationDisplayPoints(
 }
 
 Color _classColorById(List<_LabelClass> classes, int classId) {
-  return classes
-          .where((item) => item.id == classId)
-          .firstOrNullValue
-          ?.color ??
+  return classes.where((item) => item.id == classId).firstOrNullValue?.color ??
       const Color(0xFF2563EB);
 }
 

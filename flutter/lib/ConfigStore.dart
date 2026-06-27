@@ -352,10 +352,7 @@ class _CollaborationIdentityConfig {
   final String hostId;
   final String userId;
 
-  Map<String, Object> toJson() => {
-    'hostId': hostId,
-    'userId': userId,
-  };
+  Map<String, Object> toJson() => {'hostId': hostId, 'userId': userId};
 
   static _CollaborationIdentityConfig fromJson(Object? value) {
     if (value is! Map) {
@@ -386,6 +383,7 @@ class _TrainingPreferences {
     this.modelPath,
     this.datasetPath,
     required this.parameters,
+    required this.stringParameters,
     required this.batchModeIndex,
     required this.batchSize,
     required this.batchRatio,
@@ -398,6 +396,7 @@ class _TrainingPreferences {
   final String? modelPath;
   final String? datasetPath;
   final Map<String, double> parameters;
+  final Map<String, String> stringParameters;
   final int batchModeIndex;
   final double batchSize;
   final double batchRatio;
@@ -407,13 +406,12 @@ class _TrainingPreferences {
   final Map<String, int> chartColors;
 
   Map<String, Object> toJson() => {
-    ...modelPath == null
-        ? const <String, Object>{}
-        : {'modelPath': modelPath!},
+    ...modelPath == null ? const <String, Object>{} : {'modelPath': modelPath!},
     ...datasetPath == null
         ? const <String, Object>{}
         : {'datasetPath': datasetPath!},
     'parameters': parameters.map((k, v) => MapEntry(k, v)),
+    'stringParameters': stringParameters.map((k, v) => MapEntry(k, v)),
     'batchModeIndex': batchModeIndex,
     'batchSize': batchSize,
     'batchRatio': batchRatio,
@@ -427,6 +425,7 @@ class _TrainingPreferences {
     if (value is! Map) {
       return const _TrainingPreferences(
         parameters: {},
+        stringParameters: {},
         batchModeIndex: 0,
         batchSize: 16,
         batchRatio: 0.70,
@@ -444,6 +443,15 @@ class _TrainingPreferences {
         }
       }
     }
+    final stringParams = <String, String>{};
+    final rawStringParams = value['stringParameters'];
+    if (rawStringParams is Map) {
+      for (final entry in rawStringParams.entries) {
+        if (entry.key is String && entry.value is String) {
+          stringParams[entry.key as String] = entry.value as String;
+        }
+      }
+    }
     return _TrainingPreferences(
       modelPath: value['modelPath'] is String
           ? value['modelPath'] as String
@@ -452,6 +460,7 @@ class _TrainingPreferences {
           ? value['datasetPath'] as String
           : null,
       parameters: params,
+      stringParameters: stringParams,
       batchModeIndex: value['batchModeIndex'] is int
           ? value['batchModeIndex'] as int
           : 0,
@@ -528,6 +537,9 @@ class _ConfigStore {
   static Directory get defaultDatasetsDirectory =>
       Directory('${projectDirectory.path}\\datasets');
 
+  static Directory get defaultModelsDirectory =>
+      Directory('${projectDirectory.path}\\models');
+
   static File get databaseFile =>
       File('${projectDirectory.path}\\$databaseFileName');
 
@@ -535,6 +547,7 @@ class _ConfigStore {
       File('${projectDirectory.path}\\$collaborationIdentityFileName');
 
   static void ensureDefaultConfig() {
+    defaultModelsDirectory.createSync(recursive: true);
     final identity = loadStableCollaborationIdentity();
     _ensureDbConfig(
       _historyKey,
@@ -815,7 +828,10 @@ class _ConfigStore {
   static void _writeDbJson(String key, Object value) {
     const encoder = JsonEncoder.withIndent('  ');
     try {
-      _RustVideoBackend.saveConfigValue(key: key, value: encoder.convert(value));
+      _RustVideoBackend.saveConfigValue(
+        key: key,
+        value: encoder.convert(value),
+      );
     } on Object {
       // DB-only config: ignore write failures and keep current in-memory state.
     }

@@ -1,3 +1,4 @@
+use flutter_rust_bridge::frb;
 use rusqlite::{params, types::ValueRef, Connection, OptionalExtension, Params};
 use std::collections::HashSet;
 use std::env;
@@ -5,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 const DATABASE_FILE_NAME: &str = "AnnotationConfig.db";
 
+#[frb(ignore)]
 #[derive(Debug, Clone)]
 struct DbClass {
     id: i64,
@@ -12,6 +14,7 @@ struct DbClass {
     color: i64,
 }
 
+#[frb(ignore)]
 #[derive(Debug, Clone)]
 struct DbImage {
     path: String,
@@ -22,6 +25,7 @@ struct DbImage {
     sort_index: i64,
 }
 
+#[frb(ignore)]
 #[derive(Debug, Clone)]
 struct DbAnnotation {
     image_path: String,
@@ -41,6 +45,7 @@ struct DbAnnotation {
     author_color: i64,
 }
 
+#[frb(ignore)]
 #[derive(Debug, Clone)]
 struct DbCollaborationPermission {
     user_id: String,
@@ -53,6 +58,7 @@ struct DbCollaborationPermission {
     assignment_end: i64,
 }
 
+#[frb(ignore)]
 #[derive(Debug, Default)]
 struct SnapshotPayload {
     project_key: String,
@@ -62,6 +68,7 @@ struct SnapshotPayload {
     collaboration_permissions: Vec<DbCollaborationPermission>,
 }
 
+#[frb(ignore)]
 pub fn save_snapshot(payload: &str) -> Result<String, String> {
     let snapshot = parse_payload(payload);
     let db_path = database_path()?;
@@ -87,6 +94,7 @@ pub fn save_snapshot(payload: &str) -> Result<String, String> {
     ))
 }
 
+#[frb(ignore)]
 pub fn load_snapshot(payload: &str) -> Result<String, String> {
     let snapshot = parse_payload(payload);
     let db_path = database_path()?;
@@ -111,6 +119,7 @@ pub fn load_snapshot(payload: &str) -> Result<String, String> {
     Ok(snapshot_json(&db_path, &classes, &annotations))
 }
 
+#[frb(ignore)]
 pub fn save_config_value(key: &str, value: &str) -> Result<String, String> {
     let db_path = database_path()?;
     let connection = open_database(&db_path)?;
@@ -133,6 +142,7 @@ pub fn save_config_value(key: &str, value: &str) -> Result<String, String> {
     ))
 }
 
+#[frb(ignore)]
 pub fn load_config_value(key: &str) -> Result<String, String> {
     let db_path = database_path()?;
     let connection = open_database(&db_path)?;
@@ -151,6 +161,7 @@ pub fn load_config_value(key: &str) -> Result<String, String> {
     ))
 }
 
+#[frb(ignore)]
 pub fn delete_config_value(key: &str) -> Result<String, String> {
     let db_path = database_path()?;
     let connection = open_database(&db_path)?;
@@ -165,6 +176,7 @@ pub fn delete_config_value(key: &str) -> Result<String, String> {
     ))
 }
 
+#[frb(ignore)]
 pub fn append_log_lines(lines: &str) -> Result<String, String> {
     let db_path = database_path()?;
     let mut connection = open_database(&db_path)?;
@@ -201,6 +213,7 @@ pub fn append_log_lines(lines: &str) -> Result<String, String> {
     ))
 }
 
+#[frb(ignore)]
 pub fn log_dates() -> Result<String, String> {
     let db_path = database_path()?;
     let connection = open_database(&db_path)?;
@@ -218,6 +231,7 @@ pub fn log_dates() -> Result<String, String> {
     Ok(string_array_json(&db_path, "dates", &dates))
 }
 
+#[frb(ignore)]
 pub fn read_logs_for_date(date: &str) -> Result<String, String> {
     let db_path = database_path()?;
     let connection = open_database(&db_path)?;
@@ -240,6 +254,7 @@ pub fn read_logs_for_date(date: &str) -> Result<String, String> {
     ))
 }
 
+#[frb(ignore)]
 pub fn delete_logs_by_date_range(start_date: &str, end_date: &str) -> Result<String, String> {
     let db_path = database_path()?;
     let connection = open_database(&db_path)?;
@@ -262,6 +277,7 @@ pub fn delete_logs_by_date_range(start_date: &str, end_date: &str) -> Result<Str
     ))
 }
 
+#[frb(ignore)]
 pub fn database_overview() -> Result<String, String> {
     let db_path = database_path()?;
     let connection = open_database(&db_path)?;
@@ -320,6 +336,7 @@ pub fn database_overview() -> Result<String, String> {
     Ok(output)
 }
 
+#[frb(ignore)]
 pub fn database_table(
     table: &str,
     project_id: &str,
@@ -584,6 +601,7 @@ pub fn database_table(
     }
 }
 
+#[frb(ignore)]
 pub fn database_sql_query(sql: &str) -> Result<String, String> {
     let db_path = database_path()?;
     let connection = open_database(&db_path)?;

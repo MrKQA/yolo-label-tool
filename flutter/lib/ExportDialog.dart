@@ -26,6 +26,7 @@ class _ExportConfig {
     required this.valRatio,
     required this.testRatio,
     required this.folderName,
+    required this.trainAfterExport,
   });
 
   final bool skipEmpty;
@@ -34,6 +35,7 @@ class _ExportConfig {
   final double valRatio;
   final double testRatio;
   final String folderName;
+  final bool trainAfterExport;
 }
 
 class _ExportDialog extends StatefulWidget {
@@ -48,6 +50,7 @@ class _ExportDialog extends StatefulWidget {
 class _ExportDialogState extends State<_ExportDialog> {
   bool _skipEmpty = true;
   bool _exportImages = true;
+  bool _trainAfterExport = false;
   double _valPercent = 20;
   double _testPercent = 0;
   late final TextEditingController _folderNameController;
@@ -74,6 +77,7 @@ class _ExportDialogState extends State<_ExportDialog> {
         valRatio: _valPercent / 100,
         testRatio: _testPercent / 100,
         folderName: name.isEmpty ? 'dataset' : name,
+        trainAfterExport: _trainAfterExport,
       ),
     );
   }
@@ -126,6 +130,15 @@ class _ExportDialogState extends State<_ExportDialog> {
                 value: _exportImages,
                 onChanged: (v) => setState(() => _exportImages = v ?? true),
                 title: Text(t('export.copyImages')),
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                controlAffinity: ListTileControlAffinity.leading,
+              ),
+              CheckboxListTile(
+                value: _trainAfterExport,
+                onChanged: (v) =>
+                    setState(() => _trainAfterExport = v ?? false),
+                title: Text(t('export.trainAfterExport')),
                 contentPadding: EdgeInsets.zero,
                 dense: true,
                 controlAffinity: ListTileControlAffinity.leading,

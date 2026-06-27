@@ -13,6 +13,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+import 'package:percent_indicator/percent_indicator.dart';
 import 'package:video_player_win/video_player_win.dart' as video_player_win;
 
 import 'src/rust/api.dart';
@@ -55,6 +56,7 @@ const _topMenuCollapsedHeight = 6.0;
 const _topMenuAutoHideDelay = Duration(seconds: 3);
 const _bottomBarHeight = 80.0;
 const _paneHeaderHeight = 52.0;
+const _previewPaneHeaderHeight = 64.0;
 const _expandedSidebarWidth = 112.0;
 const _collapsedSidebarWidth = 56.0;
 const _aiAssistPanelMinWidth = 320.0;
@@ -175,11 +177,7 @@ void _flushLogs() {
 void _setLogLevel(_LogLevel level, {bool writeLog = false}) {
   _logLevel = level;
   if (writeLog) {
-    _log(
-      'LOG',
-      'Log level set to ${level.name}',
-      level: _LogLevel.info,
-    );
+    _log('LOG', 'Log level set to ${level.name}', level: _LogLevel.info);
   }
 }
 
@@ -359,6 +357,8 @@ class _LanguageStrings {
     'sidebar.expand': '展开侧边栏',
     'sidebar.collapse': '收起侧边栏',
     'label.previewEmpty': '右键或菜单添加图片',
+    'label.previewFilterAll': '全部',
+    'label.previewFilterUnlabeled': '未标注',
     'label.workspace': '标注工作区',
     'label.openPrompt': '请打开文件或文件夹',
     'label.imageError': '图片无法预览',
@@ -821,6 +821,7 @@ class _WorkspaceShell extends StatefulWidget {
 class _WorkspaceShellState extends State<_WorkspaceShell> {
   final FocusNode _keyboardFocusNode = FocusNode(debugLabel: 'workspace');
   final _DetectVideoSession _detectVideoSession = _DetectVideoSession();
+  final GlobalKey<_TrainPageState> _trainPageKey = GlobalKey<_TrainPageState>();
   Timer? _topMenuHideTimer;
   Timer? _databaseSaveTimer;
   Timer? _labelResumeSaveTimer;
@@ -1149,8 +1150,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     }
     final directories = {
       for (final image in _images) _pathKey(_directoryName(image.path)),
-    }.toList()
-      ..sort();
+    }.toList()..sort();
     if (directories.length == 1) {
       return 'folder:${directories.first}';
     }
@@ -1277,9 +1277,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
         ),
       );
       final loadedClasses = _labelClassesFromDatabase(result['classes']);
-      final loadedAnnotations = _annotationsFromDatabase(
-        result['annotations'],
-      );
+      final loadedAnnotations = _annotationsFromDatabase(result['annotations']);
       if (!mounted) {
         return;
       }
@@ -1360,9 +1358,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     if (raw is! List) {
       return result;
     }
-    final openImageKeys = {
-      for (final image in _images) _pathKey(image.path),
-    };
+    final openImageKeys = {for (final image in _images) _pathKey(image.path)};
     for (final item in raw) {
       if (item is! Map) {
         continue;
@@ -1387,19 +1383,21 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       final points = mode == _AnnotationMode.seg
           ? _annotationPointsFromDatabase('${item['points'] ?? ''}')
           : const <Offset>[];
-      result.putIfAbsent(imageKey, () => []).add(
-        _AnnotationRegion(
-          id: id,
-          mode: mode,
-          rect: _normalizeRect(rect),
-          classId: classId,
-          rotationDegrees: ((item['rotation'] as num?) ?? 0).toDouble(),
-          points: points,
-          authorId: '${item['authorId'] ?? ''}',
-          authorName: '${item['authorName'] ?? ''}',
-          authorColorValue: (item['authorColor'] as num?)?.toInt() ?? 0,
-        ),
-      );
+      result
+          .putIfAbsent(imageKey, () => [])
+          .add(
+            _AnnotationRegion(
+              id: id,
+              mode: mode,
+              rect: _normalizeRect(rect),
+              classId: classId,
+              rotationDegrees: ((item['rotation'] as num?) ?? 0).toDouble(),
+              points: points,
+              authorId: '${item['authorId'] ?? ''}',
+              authorName: '${item['authorName'] ?? ''}',
+              authorColorValue: (item['authorColor'] as num?)?.toInt() ?? 0,
+            ),
+          );
     }
     return result;
   }
@@ -1436,16 +1434,16 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
 
   void _resetCollaborationRuntimeForStartup() {
     unawaited(
-      _RustVideoBackend.collaborationCommand(
-        request: const {'action': 'stop'},
-      ).catchError((Object error) {
-        _log(
-          'COLLAB',
-          'Startup collaboration reset failed: $error',
-          level: _LogLevel.debug,
-        );
-        return <String, dynamic>{};
-      }).whenComplete(_restartCollaborationDiscovery),
+      _RustVideoBackend.collaborationCommand(request: const {'action': 'stop'})
+          .catchError((Object error) {
+            _log(
+              'COLLAB',
+              'Startup collaboration reset failed: $error',
+              level: _LogLevel.debug,
+            );
+            return <String, dynamic>{};
+          })
+          .whenComplete(_restartCollaborationDiscovery),
     );
   }
 
@@ -3008,17 +3006,42 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     );
     if (config == null || !mounted) return;
     final importedDataset = _importedDataset;
+    String? dataYamlPath;
     if (importedDataset != null) {
       final overwrite = await _confirmOverwriteImportedDataset();
       if (overwrite == null || !mounted) {
         return;
       }
       if (overwrite) {
-        await _exportImportedDataset(config, importedDataset);
-        return;
+        dataYamlPath = await _exportImportedDataset(config, importedDataset);
+      } else {
+        dataYamlPath = await _exportAnnotations(config);
       }
+    } else {
+      dataYamlPath = await _exportAnnotations(config);
     }
-    await _exportAnnotations(config);
+    if (config.trainAfterExport && dataYamlPath != null && mounted) {
+      await _trainFromExportedDataset(dataYamlPath);
+    }
+  }
+
+  Future<void> _trainFromExportedDataset(String dataYamlPath) async {
+    _log('EXPORT', 'Export auto training requested: data_yaml=$dataYamlPath');
+    setState(() => _activeSection = 'train');
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) {
+      return;
+    }
+    final trainPage = _trainPageKey.currentState;
+    if (trainPage == null) {
+      _log(
+        'EXPORT',
+        'Export auto training skipped: training page is not ready',
+        level: _LogLevel.warning,
+      );
+      return;
+    }
+    await trainPage._loadExportedDatasetAndStartTraining(dataYamlPath);
   }
 
   Future<bool?> _confirmOverwriteImportedDataset() async {
@@ -3074,7 +3097,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     }
   }
 
-  Future<void> _exportAnnotations(_ExportConfig config) async {
+  Future<String?> _exportAnnotations(_ExportConfig config) async {
     _log(
       'EXPORT',
       'Export started: ${config.folderName} (train=${config.trainRatio.toStringAsFixed(0)}% val=${config.valRatio.toStringAsFixed(0)}% test=${config.testRatio.toStringAsFixed(0)}%)',
@@ -3101,7 +3124,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
         level: _LogLevel.warning,
       );
       _showFloatingMessage(t('export.noData'));
-      return;
+      return null;
     }
 
     // Class-balanced split: track which classes each image belongs to
@@ -3200,6 +3223,8 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
           labelFile.writeAsStringSync(
             lines.isEmpty ? '' : '${lines.join('\n')}\n',
           );
+        } else if (labelFile.existsSync()) {
+          labelFile.deleteSync();
         }
       }
     }
@@ -3223,9 +3248,8 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       'names:',
       for (final entry in names.entries) '  ${entry.key}: ${entry.value}',
     ];
-    File(
-      '${baseDir.path}\\data.yaml',
-    ).writeAsStringSync('${yamlLines.join('\n')}\n');
+    final dataYamlPath = '${baseDir.path}\\data.yaml';
+    File(dataYamlPath).writeAsStringSync('${yamlLines.join('\n')}\n');
 
     // Copy images if enabled
     if (config.exportImages) {
@@ -3233,7 +3257,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
         for (final path in paths) {
           final name = _fileName(path);
           final imgDir = splitDirs['${split}_images']!;
-          File(path).copySync('${imgDir.path}\\$name');
+          _copyFileOverwrite(path, '${imgDir.path}\\$name');
         }
       }
 
@@ -3253,9 +3277,10 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     _showFloatingMessage(
       '${t('export.done')} (${t('export.folderName')}: ${config.folderName})',
     );
+    return dataYamlPath;
   }
 
-  Future<void> _exportImportedDataset(
+  Future<String?> _exportImportedDataset(
     _ExportConfig config,
     _ImportedDataset dataset,
   ) async {
@@ -3274,7 +3299,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
         level: _LogLevel.warning,
       );
       _showFloatingMessage(t('export.noData'));
-      return;
+      return null;
     }
 
     for (final entry in entries) {
@@ -3322,6 +3347,8 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
           labelFile.writeAsStringSync(
             lines.isEmpty ? '' : '${lines.join('\n')}\n',
           );
+        } else if (labelFile.existsSync()) {
+          labelFile.deleteSync();
         }
       }
     }
@@ -3337,7 +3364,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
         for (final path in grouped[split]!) {
           final target = '${imageDir.path}\\${_fileName(path)}';
           if (_pathKey(path) != _pathKey(target)) {
-            File(path).copySync(target);
+            _copyFileOverwrite(path, target);
           }
         }
       }
@@ -3355,6 +3382,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       'Overwrite imported dataset completed: yaml=${dataset.dataYamlPath}, images=${entries.length}, annotations=$annotationCount, train=${grouped['train']?.length ?? 0}, val=${grouped['val']?.length ?? 0}, test=${grouped['test']?.length ?? 0}, exportImages=${config.exportImages}, skipEmpty=${config.skipEmpty}',
     );
     _showFloatingMessage(t('export.done'));
+    return dataset.dataYamlPath;
   }
 
   void _pasteAnnotation() {
@@ -3364,11 +3392,13 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       return;
     }
     _pushAnnotationSnapshot();
-    final pasted = copied.duplicate('ann_${_annotationSerial++}').copyWith(
-      authorId: _collaborationAuthorId,
-      authorName: _currentAnnotatorName,
-      authorColorValue: _currentAnnotatorColorValue,
-    );
+    final pasted = copied
+        .duplicate('ann_${_annotationSerial++}')
+        .copyWith(
+          authorId: _collaborationAuthorId,
+          authorName: _currentAnnotatorName,
+          authorColorValue: _currentAnnotatorColorValue,
+        );
     setState(() {
       _annotationsByImage.putIfAbsent(imageKey, () => []).add(pasted);
       _selectedAnnotationId = pasted.id;
@@ -3883,11 +3913,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
         _handleCollaborationEvent(event);
       }
     } on Object catch (error) {
-      _log(
-        'COLLAB',
-        'Event poll failed: $error',
-        level: _LogLevel.debug,
-      );
+      _log('COLLAB', 'Event poll failed: $error', level: _LogLevel.debug);
     } finally {
       _collaborationPollInFlight = false;
     }
@@ -3928,15 +3954,17 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
           _showFloatingMessage(t('collab.networkError'));
           unawaited(
             _RustVideoBackend.collaborationCommand(
-              request: const {'action': 'stop'},
-            ).catchError((Object error) {
-              _log(
-                'COLLAB',
-                'Stop after host TCP error failed: $error',
-                level: _LogLevel.debug,
-              );
-              return <String, dynamic>{};
-            }).whenComplete(_restartCollaborationDiscovery),
+                  request: const {'action': 'stop'},
+                )
+                .catchError((Object error) {
+                  _log(
+                    'COLLAB',
+                    'Stop after host TCP error failed: $error',
+                    level: _LogLevel.debug,
+                  );
+                  return <String, dynamic>{};
+                })
+                .whenComplete(_restartCollaborationDiscovery),
           );
         }
         break;
@@ -4031,10 +4059,9 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     }
     if (allow == true) {
       final permissions = const _CollaborationPermissions();
-      final assignmentStart = _collaborationStartIndex.clamp(
-        1,
-        math.max(1, _images.length),
-      ).toInt();
+      final assignmentStart = _collaborationStartIndex
+          .clamp(1, math.max(1, _images.length))
+          .toInt();
       final assignmentEnd = _collaborationEndIndex
           .clamp(assignmentStart, math.max(1, _images.length))
           .toInt();
@@ -4112,14 +4139,8 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
           final permissions = _collaborationMap(message['permissions']);
           _collaborationSelfPermissions = _CollaborationPermissions(
             canEditOthers: _collaborationBool(permissions, 'canEditOthers'),
-            canDeleteOthers: _collaborationBool(
-              permissions,
-              'canDeleteOthers',
-            ),
-            canChangeClass: _collaborationBool(
-              permissions,
-              'canChangeClass',
-            ),
+            canDeleteOthers: _collaborationBool(permissions, 'canDeleteOthers'),
+            canChangeClass: _collaborationBool(permissions, 'canChangeClass'),
           );
           final host = _connectedCollaborationHost;
           if (host != null) {
@@ -4134,9 +4155,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
             );
           }
         });
-        unawaited(
-          _saveCollaborationAnnotationDatabaseNow('join accepted'),
-        );
+        unawaited(_saveCollaborationAnnotationDatabaseNow('join accepted'));
         _showFloatingMessage(t('collab.joined'));
         _log('COLLAB', 'Join accepted by host');
         break;
@@ -4150,14 +4169,8 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
         setState(() {
           _collaborationSelfPermissions = _CollaborationPermissions(
             canEditOthers: _collaborationBool(permissions, 'canEditOthers'),
-            canDeleteOthers: _collaborationBool(
-              permissions,
-              'canDeleteOthers',
-            ),
-            canChangeClass: _collaborationBool(
-              permissions,
-              'canChangeClass',
-            ),
+            canDeleteOthers: _collaborationBool(permissions, 'canDeleteOthers'),
+            canChangeClass: _collaborationBool(permissions, 'canChangeClass'),
           );
           _collaborationStartIndex = _collaborationInt(
             message,
@@ -4212,9 +4225,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
               ),
             );
           });
-          unawaited(
-            _saveCollaborationAnnotationDatabaseNow('peer joined'),
-          );
+          unawaited(_saveCollaborationAnnotationDatabaseNow('peer joined'));
         }
         break;
       case 'annotation_snapshot':
@@ -4254,12 +4265,12 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
         !_collaborationSelfPermissions.canChangeClass;
     final annotations = limitedToOwnAnnotations
         ? _currentAnnotations
-            .where(
-              (annotation) =>
-                  annotation.authorId.isEmpty ||
-                  annotation.authorId == _collaborationAuthorId,
-            )
-            .toList(growable: false)
+              .where(
+                (annotation) =>
+                    annotation.authorId.isEmpty ||
+                    annotation.authorId == _collaborationAuthorId,
+              )
+              .toList(growable: false)
         : _currentAnnotations;
     final message = <String, Object?>{
       'type': 'annotation_snapshot',
@@ -4276,10 +4287,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       ],
     };
     if (_collaborationMode == _CollaborationMode.host) {
-      _sendCollaborationMessageToAuthorizedPeers(
-        message,
-        _selectedImageIndex,
-      );
+      _sendCollaborationMessageToAuthorizedPeers(message, _selectedImageIndex);
     } else {
       unawaited(
         _sendCollaborationCommand({
@@ -4307,8 +4315,9 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
             'path': _images[index].path,
             'name': _images[index].name,
             'split': _imageSplits[_pathKey(_images[index].path)] ?? 'train',
-            'width': (_displaySizeForImagePath(_images[index].path) ?? Size.zero)
-                .width,
+            'width':
+                (_displaySizeForImagePath(_images[index].path) ?? Size.zero)
+                    .width,
             'height':
                 (_displaySizeForImagePath(_images[index].path) ?? Size.zero)
                     .height,
@@ -4327,8 +4336,9 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
               'imageIndex': index + 1,
               'imagePath': _images[index].path,
               'annotations': [
-                for (final annotation
-                    in _annotationsForImagePath(_images[index].path))
+                for (final annotation in _annotationsForImagePath(
+                  _images[index].path,
+                ))
                   _collaborationAnnotationToJson(annotation),
               ],
             },
@@ -4460,9 +4470,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
 
   String _collaborationCacheFileName(String remotePath, String name) {
     final rawName = name.trim().isEmpty ? _fileName(remotePath) : name.trim();
-    final safeName = rawName
-        .replaceAll(RegExp(r'[<>:"/\\|?*]'), '_')
-        .trim();
+    final safeName = rawName.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_').trim();
     final displayName = safeName.isEmpty ? 'image' : safeName;
     return '${_stableCollaborationHash(remotePath)}_$displayName';
   }
@@ -4503,8 +4511,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       final imageKey = _pathKey(localPath);
       remoteToLocalImagePath[_pathKey(path)] = localPath;
       nextImages.add(_ImageItem(path: localPath, name: name));
-      nextSplits[imageKey] =
-          _collaborationString(image, 'split').trim().isEmpty
+      nextSplits[imageKey] = _collaborationString(image, 'split').trim().isEmpty
           ? 'train'
           : _collaborationString(image, 'split');
       nextSizes[imageKey] = Size(
@@ -4528,8 +4535,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
         final imagePath = _collaborationString(entry, 'imagePath');
         final imageIndex =
             _collaborationInt(entry, 'imageIndex', fallback: 0) - 1;
-        final localImagePath =
-            imageIndex >= 0 && imageIndex < nextImages.length
+        final localImagePath = imageIndex >= 0 && imageIndex < nextImages.length
             ? nextImages[imageIndex].path
             : remoteToLocalImagePath[_pathKey(imagePath)] ?? imagePath;
         if (localImagePath.isEmpty) {
@@ -4566,8 +4572,9 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       'assignmentEnd',
       fallback: _collaborationEndIndex,
     );
-    final firstAuthorizedIndex =
-        (snapshotStart - 1).clamp(0, nextImages.length - 1).toInt();
+    final firstAuthorizedIndex = (snapshotStart - 1)
+        .clamp(0, nextImages.length - 1)
+        .toInt();
     setState(() {
       _collaborationStartIndex = snapshotStart;
       _collaborationEndIndex = snapshotEnd;
@@ -4595,9 +4602,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       _moveToFirstAuthorizedCollaborationImage();
       _activeSection = 'label';
     });
-    unawaited(
-      _saveCollaborationAnnotationDatabaseNow('project snapshot'),
-    );
+    unawaited(_saveCollaborationAnnotationDatabaseNow('project snapshot'));
   }
 
   void _applyCollaborationClassSnapshot(Map<String, dynamic> message) {
@@ -4608,9 +4613,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     setState(() {
       _replaceLabelClassesFromCollaboration(nextClasses);
     });
-    unawaited(
-      _saveCollaborationAnnotationDatabaseNow('class snapshot'),
-    );
+    unawaited(_saveCollaborationAnnotationDatabaseNow('class snapshot'));
   }
 
   Map<String, Object?> _collaborationAnnotationToJson(
@@ -4650,7 +4653,9 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     if (id.isEmpty) {
       return null;
     }
-    final mode = _annotationModeFromDatabase(_collaborationString(data, 'mode'));
+    final mode = _annotationModeFromDatabase(
+      _collaborationString(data, 'mode'),
+    );
     final points = <Offset>[];
     final rawPoints = data['points'];
     if (rawPoints is List) {
@@ -4721,7 +4726,8 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     if (_collaborationMode == _CollaborationMode.off) {
       return;
     }
-    final imageIndex = _collaborationInt(message, 'imageIndex', fallback: 0) - 1;
+    final imageIndex =
+        _collaborationInt(message, 'imageIndex', fallback: 0) - 1;
     if (imageIndex < 0 || imageIndex >= _images.length) {
       return;
     }
@@ -4754,10 +4760,10 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     final incoming = rawAnnotations
         .map(_collaborationAnnotationFromJson)
         .whereType<_AnnotationRegion>()
-        .map((annotation) => _withCollaborationAuthorFallback(
-              annotation,
-              sourceUserId,
-            ))
+        .map(
+          (annotation) =>
+              _withCollaborationAuthorFallback(annotation, sourceUserId),
+        )
         .toList(growable: false);
     final imageKey = _pathKey(_images[imageIndex].path);
     final incomingIds = {for (final item in incoming) item.id};
@@ -4785,7 +4791,9 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
         );
       }
       for (final annotation in incoming) {
-        final index = annotations.indexWhere((item) => item.id == annotation.id);
+        final index = annotations.indexWhere(
+          (item) => item.id == annotation.id,
+        );
         if (index >= 0) {
           annotations[index] = annotation;
         } else {
@@ -4793,9 +4801,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
         }
       }
     });
-    unawaited(
-      _saveCollaborationAnnotationDatabaseNow('annotation snapshot'),
-    );
+    unawaited(_saveCollaborationAnnotationDatabaseNow('annotation snapshot'));
     if (_collaborationMode == _CollaborationMode.host) {
       _sendCollaborationMessageToAuthorizedPeers(
         {
@@ -4844,9 +4850,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     });
   }
 
-  Future<void> _sendCollaborationCommand(
-    Map<String, Object?> request,
-  ) async {
+  Future<void> _sendCollaborationCommand(Map<String, Object?> request) async {
     try {
       await _RustVideoBackend.collaborationCommand(request: request);
     } on Object catch (error) {
@@ -4929,21 +4933,18 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     }
     for (var index = 0; index < _images.length; index++) {
       final image = _images[index];
-      _sendCollaborationMessageToAuthorizedPeers(
-        {
-          'type': 'annotation_snapshot',
-          'imagePath': image.path,
-          'imageIndex': index + 1,
-          'sourceUserId': _collaborationAuthorId,
-          'authoritative': true,
-          'classes': _collaborationClassesPayload(),
-          'annotations': [
-            for (final annotation in _annotationsForImagePath(image.path))
-              _collaborationAnnotationToJson(annotation),
-          ],
-        },
-        index,
-      );
+      _sendCollaborationMessageToAuthorizedPeers({
+        'type': 'annotation_snapshot',
+        'imagePath': image.path,
+        'imageIndex': index + 1,
+        'sourceUserId': _collaborationAuthorId,
+        'authoritative': true,
+        'classes': _collaborationClassesPayload(),
+        'annotations': [
+          for (final annotation in _annotationsForImagePath(image.path))
+            _collaborationAnnotationToJson(annotation),
+        ],
+      }, index);
     }
     _log(
       'COLLAB',
@@ -5231,16 +5232,16 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       }
     });
     unawaited(
-      _RustVideoBackend.collaborationCommand(
-        request: const {'action': 'stop'},
-      ).catchError((Object error) {
-        _log(
-          'COLLAB',
-          'Client disconnect stop failed: $error',
-          level: _LogLevel.debug,
-        );
-        return <String, dynamic>{};
-      }).whenComplete(_restartCollaborationDiscovery),
+      _RustVideoBackend.collaborationCommand(request: const {'action': 'stop'})
+          .catchError((Object error) {
+            _log(
+              'COLLAB',
+              'Client disconnect stop failed: $error',
+              level: _LogLevel.debug,
+            );
+            return <String, dynamic>{};
+          })
+          .whenComplete(_restartCollaborationDiscovery),
     );
   }
 
@@ -5266,16 +5267,12 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     });
     _collaborationReconnectTimer?.cancel();
     unawaited(
-      _RustVideoBackend.collaborationCommand(
-        request: const {'action': 'stop'},
-      ).catchError((Object error) {
-        _log(
-          'COLLAB',
-          'Stop failed: $error',
-          level: _LogLevel.warning,
-        );
-        return <String, dynamic>{};
-      }).whenComplete(_restartCollaborationDiscovery),
+      _RustVideoBackend.collaborationCommand(request: const {'action': 'stop'})
+          .catchError((Object error) {
+            _log('COLLAB', 'Stop failed: $error', level: _LogLevel.warning);
+            return <String, dynamic>{};
+          })
+          .whenComplete(_restartCollaborationDiscovery),
     );
     _log('COLLAB', 'Collaboration stopped');
   }
@@ -5419,6 +5416,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                               imageSplit: _selectedImageSplit,
                               activeClassId: _activeClassId,
                               labelClasses: _labelClasses,
+                              annotationsByImage: _annotationsByImage,
                               annotations: _currentAnnotationsForLabel,
                               selectedAnnotationId: _selectedAnnotationId,
                               showClassLabels: _showClassLabels,
@@ -5426,8 +5424,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                               onImageSelected: _selectImage,
                               onImageContextMenu: _showImageContextMenu,
                               onPointerSignal: _handlePointerSignal,
-                              onViewportOffsetChanged:
-                                  _setLabelViewportOffset,
+                              onViewportOffsetChanged: _setLabelViewportOffset,
                               onToolSelected: _selectTool,
                               onSelectMode: () => _selectTool('select'),
                               onModeSelected: _activateAnnotationMode,
@@ -5464,15 +5461,17 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                                 }
                               },
                             ),
-                            _TrainPage(settings: _appSettings),
+                            _TrainPage(
+                              key: _trainPageKey,
+                              settings: _appSettings,
+                            ),
                             _CropPage(exportPath: _appSettings.exportPath),
                             _CollaborationPage(
                               mode: _collaborationMode,
                               hostId: _collaborationHostId,
                               userId: _collaborationUserId,
                               userName: _collaborationUserName,
-                              userColor:
-                                  Color(_currentAnnotatorColorValue),
+                              userColor: Color(_currentAnnotatorColorValue),
                               port: _collaborationPort,
                               imageCount: _images.length,
                               assignmentStart: _collaborationStartIndex,
@@ -5481,8 +5480,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                               selectedHostId: _selectedCollaborationHostId,
                               joining: _collaborationJoining,
                               peers: _collaborationPeers,
-                              onUserNameChanged:
-                                  _setCollaborationUserName,
+                              onUserNameChanged: _setCollaborationUserName,
                               onPortChanged: _setCollaborationPort,
                               onHostSelected: (hostId) => setState(
                                 () => _selectedCollaborationHostId = hostId,
@@ -7514,6 +7512,18 @@ String _baseNameWithoutExtension(String path) {
   final name = _fileName(path);
   final dotIndex = name.lastIndexOf('.');
   return dotIndex < 0 ? name : name.substring(0, dotIndex);
+}
+
+void _copyFileOverwrite(String sourcePath, String targetPath) {
+  if (_pathKey(sourcePath) == _pathKey(targetPath)) {
+    return;
+  }
+  final target = File(targetPath);
+  target.parent.createSync(recursive: true);
+  if (target.existsSync()) {
+    target.deleteSync();
+  }
+  File(sourcePath).copySync(targetPath);
 }
 
 String _replaceExtension(String path, String extension) {

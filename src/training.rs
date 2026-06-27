@@ -81,13 +81,16 @@ print(f"[rustlabel] experiment_name={experiment_name}")
 print(f"[rustlabel] epochs={epochs}, imgsz={imgsz}, batch={batch}, device={device}, resume={resume}")
 print(
     "[rustlabel] train params: "
-    f"workers={workers}, amp={amp}, cls_pw={cls_pw}, "
+    f"workers={workers}, amp={amp}, cls_pw={cls_pw}, patience={patience}, "
     f"lr0={lr0}, momentum={momentum}"
 )
 print(
     "[rustlabel] augment params: "
-    f"hsv_s={hsv_s}, hsv_v={hsv_v}, translate={translate}, "
-    f"scale={scale}, shear={shear}, flipud={flipud}, fliplr={fliplr}, degrees={degrees}"
+    f"hsv_h={hsv_h}, hsv_s={hsv_s}, hsv_v={hsv_v}, translate={translate}, "
+    f"scale={scale}, shear={shear}, flipud={flipud}, fliplr={fliplr}, "
+    f"degrees={degrees}, perspective={perspective}, bgr={bgr}, mosaic={mosaic}, "
+    f"mixup={mixup}, cutmix={cutmix}, copy_paste={copy_paste}, "
+    f"copy_paste_mode={copy_paste_mode}, auto_augment={auto_augment}, erasing={erasing}"
 )
 print("[rustlabel] loss names: detect/obb => box, cls, dfl; seg => box, seg, cls, dfl; pose => box, pose, kobj, cls, dfl")
 print("[rustlabel] progress format: epoch=... gpu=... box=..., cls=..., dfl=... batch=... size=... progress step=... speed=... elapsed=... eta=...")
@@ -565,6 +568,8 @@ else:
         device=device,
         lr0=lr0,
         momentum=momentum,
+        patience=patience,
+        hsv_h=hsv_h,
         hsv_s=hsv_s,
         hsv_v=hsv_v,
         translate=translate,
@@ -573,6 +578,15 @@ else:
         flipud=flipud,
         fliplr=fliplr,
         degrees=degrees,
+        perspective=perspective,
+        bgr=bgr,
+        mosaic=mosaic,
+        mixup=mixup,
+        cutmix=cutmix,
+        copy_paste=copy_paste,
+        copy_paste_mode=copy_paste_mode,
+        auto_augment=auto_augment,
+        erasing=erasing,
         workers=workers,
         amp=amp,
         project=project_dir,
@@ -595,6 +609,8 @@ pub struct TrainingConfig {
     pub device: String,
     pub lr0: f64,
     pub momentum: f64,
+    pub patience: u32,
+    pub hsv_h: f64,
     pub hsv_s: f64,
     pub hsv_v: f64,
     pub translate: f64,
@@ -603,6 +619,15 @@ pub struct TrainingConfig {
     pub flipud: f64,
     pub fliplr: f64,
     pub degrees: f64,
+    pub perspective: f64,
+    pub bgr: f64,
+    pub mosaic: f64,
+    pub mixup: f64,
+    pub cutmix: f64,
+    pub copy_paste: f64,
+    pub copy_paste_mode: String,
+    pub auto_augment: String,
+    pub erasing: f64,
     pub workers: u32,
     pub amp: bool,
     pub resume: bool,
@@ -923,7 +948,10 @@ fn run_training_thread(
 ) -> Result<(), String> {
     append_log_line(log_path, "python runtime configure starting");
     if let Err(error) = ini_python::configure_python_runtime(&config.python_path) {
-        append_log_line(log_path, &format!("python runtime configure failed: {error}"));
+        append_log_line(
+            log_path,
+            &format!("python runtime configure failed: {error}"),
+        );
         return Err(error);
     }
     append_log_line(log_path, "python runtime configured");
@@ -959,6 +987,8 @@ fn training_code_with_locals(config: &TrainingConfig, stop_file: &Path, log_path
             "device = {}\n",
             "lr0 = {}\n",
             "momentum = {}\n",
+            "patience = {}\n",
+            "hsv_h = {}\n",
             "hsv_s = {}\n",
             "hsv_v = {}\n",
             "translate = {}\n",
@@ -967,6 +997,15 @@ fn training_code_with_locals(config: &TrainingConfig, stop_file: &Path, log_path
             "flipud = {}\n",
             "fliplr = {}\n",
             "degrees = {}\n",
+            "perspective = {}\n",
+            "bgr = {}\n",
+            "mosaic = {}\n",
+            "mixup = {}\n",
+            "cutmix = {}\n",
+            "copy_paste = {}\n",
+            "copy_paste_mode = {}\n",
+            "auto_augment = {}\n",
+            "erasing = {}\n",
             "workers = {}\n",
             "amp = {}\n",
             "resume = {}\n",
@@ -986,6 +1025,8 @@ fn training_code_with_locals(config: &TrainingConfig, stop_file: &Path, log_path
         python_string_literal(&config.device),
         finite_python_number(config.lr0),
         finite_python_number(config.momentum),
+        config.patience,
+        finite_python_number(config.hsv_h),
         finite_python_number(config.hsv_s),
         finite_python_number(config.hsv_v),
         finite_python_number(config.translate),
@@ -994,6 +1035,15 @@ fn training_code_with_locals(config: &TrainingConfig, stop_file: &Path, log_path
         finite_python_number(config.flipud),
         finite_python_number(config.fliplr),
         finite_python_number(config.degrees),
+        finite_python_number(config.perspective),
+        finite_python_number(config.bgr),
+        finite_python_number(config.mosaic),
+        finite_python_number(config.mixup),
+        finite_python_number(config.cutmix),
+        finite_python_number(config.copy_paste),
+        python_string_literal(&config.copy_paste_mode),
+        python_string_literal(&config.auto_augment),
+        finite_python_number(config.erasing),
         config.workers,
         python_bool(config.amp),
         python_bool(config.resume),

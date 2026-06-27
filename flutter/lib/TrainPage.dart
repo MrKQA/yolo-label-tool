@@ -5,7 +5,7 @@ part of 'main.dart';
 /// 训练页面，提供 models 文件夹 YOLO PT 选择、data.yaml 概览和超参数编辑。
 /// Training page with YOLO PT selection from models/, data.yaml summary, and parameters.
 class _TrainPage extends StatefulWidget {
-  const _TrainPage({required this.settings});
+  const _TrainPage({super.key, required this.settings});
 
   final _AppSettings settings;
 
@@ -17,6 +17,40 @@ enum _BatchMode { fixed, autoGpu60, autoGpuRatio }
 
 const _imageSizeOptions = [320, 416, 640, 800, 960, 1280];
 const _trainingChartPointLimit = 2000;
+const _parameterNameWidth = 112.0;
+const Map<String, double> _defaultTrainingParameters = {
+  'epochs': 300,
+  'imgsz': 640,
+  'cls_pw': 0,
+  'workers': 4,
+  'patience': 100,
+  'lr0': 0.01,
+  'momentum': 0.937,
+  'hsv_h': 0.015,
+  'hsv_s': 0.25,
+  'hsv_v': 0.5,
+  'translate': 0.1,
+  'scale': 0.25,
+  'shear': 5,
+  'flipud': 0,
+  'fliplr': 0,
+  'degrees': 0,
+  'perspective': 0,
+  'bgr': 0,
+  'mosaic': 1,
+  'mixup': 0,
+  'cutmix': 0,
+  'copy_paste': 0,
+  'erasing': 0.4,
+};
+const Map<String, String> _defaultTrainingStringParameters = {
+  'copy_paste_mode': 'flip',
+  'auto_augment': 'randaugment',
+};
+const Map<String, List<String>> _trainingStringParameterOptions = {
+  'copy_paste_mode': ['flip', 'mixup'],
+  'auto_augment': ['randaugment', 'autoaugment', 'augmix'],
+};
 
 class _TrainingDeviceOption {
   const _TrainingDeviceOption({required this.id, required this.label});
@@ -27,22 +61,12 @@ class _TrainingDeviceOption {
 
 class _TrainPageState extends State<_TrainPage> {
   final TextEditingController _datasetPathController = TextEditingController();
-  final Map<String, double> _parameters = {
-    'epochs': 300,
-    'imgsz': 640,
-    'cls_pw': 0,
-    'workers': 4,
-    'lr0': 0.01,
-    'momentum': 0.937,
-    'hsv_s': 0.25,
-    'hsv_v': 0.5,
-    'translate': 0.1,
-    'scale': 0.25,
-    'shear': 5,
-    'flipud': 0,
-    'fliplr': 0,
-    'degrees': 0,
-  };
+  final Map<String, double> _parameters = Map<String, double>.from(
+    _defaultTrainingParameters,
+  );
+  final Map<String, String> _stringParameters = Map<String, String>.from(
+    _defaultTrainingStringParameters,
+  );
 
   Timer? _hideTimer;
   Timer? _trainingTimer;
@@ -53,6 +77,7 @@ class _TrainPageState extends State<_TrainPage> {
   int _currentEpoch = 0;
   String? _activeRunDir;
   _TrainingMetrics? _trainingMetrics;
+  _TrainingResourceUsage _resourceUsage = const _TrainingResourceUsage();
   final Map<String, int> _chartColors = {
     'Train Loss': 0xFF2563EB,
     'Val Loss': 0xFFDC2626,
@@ -226,11 +251,11 @@ class _TrainPageState extends State<_TrainPage> {
       if (prefs.parameters.isNotEmpty) {
         _parameters.addAll(prefs.parameters);
       }
-      _batchMode =
-          _BatchMode.values[prefs.batchModeIndex.clamp(
-            0,
-            _BatchMode.values.length - 1,
-          )];
+      if (prefs.stringParameters.isNotEmpty) {
+        _stringParameters.addAll(prefs.stringParameters);
+      }
+      _batchMode = _BatchMode
+          .values[prefs.batchModeIndex.clamp(0, _BatchMode.values.length - 1)];
       _batchSize = prefs.batchSize;
       _batchRatio = prefs.batchRatio;
       _ampEnabled = prefs.ampEnabled;
@@ -258,6 +283,7 @@ class _TrainPageState extends State<_TrainPage> {
       modelPath: _modelPath,
       datasetPath: _datasetPath,
       parameters: Map<String, double>.from(_parameters),
+      stringParameters: Map<String, String>.from(_stringParameters),
       batchModeIndex: _batchMode.index,
       batchSize: _batchSize,
       batchRatio: _batchRatio,
@@ -273,22 +299,10 @@ class _TrainPageState extends State<_TrainPage> {
     setState(() {
       _parameters
         ..clear()
-        ..addAll(const {
-          'epochs': 300,
-          'imgsz': 640,
-          'cls_pw': 0,
-          'workers': 4,
-          'lr0': 0.01,
-          'momentum': 0.937,
-          'hsv_s': 0.25,
-          'hsv_v': 0.5,
-          'translate': 0.1,
-          'scale': 0.25,
-          'shear': 5,
-          'flipud': 0,
-          'fliplr': 0,
-          'degrees': 0,
-        });
+        ..addAll(_defaultTrainingParameters);
+      _stringParameters
+        ..clear()
+        ..addAll(_defaultTrainingStringParameters);
       _batchMode = _BatchMode.fixed;
       _batchSize = 16;
       _batchRatio = 0.70;
@@ -320,7 +334,9 @@ class _TrainPageState extends State<_TrainPage> {
     if (_resolvePythonExecutable(widget.settings.pythonPath.trim()) == null) {
       if (mounted) {
         setState(() {
-          _deviceOptions = const [_TrainingDeviceOption(id: 'cpu', label: 'CPU')];
+          _deviceOptions = const [
+            _TrainingDeviceOption(id: 'cpu', label: 'CPU'),
+          ];
           _selectedDeviceIds = const {'cpu'};
         });
       }
@@ -369,6 +385,7 @@ class _TrainPageState extends State<_TrainPage> {
   List<Directory> _modelsDirectoryCandidates() {
     final current = Directory.current;
     return [
+      _ConfigStore.defaultModelsDirectory,
       Directory('${current.path}\\models'),
       Directory('${current.parent.path}\\models'),
     ];
@@ -548,6 +565,148 @@ class _TrainPageState extends State<_TrainPage> {
     }
   }
 
+  Future<void> _loadExportedDatasetAndStartTraining(String dataYamlPath) async {
+    if (_trainingRunning) {
+      _log(
+        'TRAIN',
+        'Export auto training skipped: training is already running',
+        level: _LogLevel.warning,
+      );
+      return;
+    }
+    await _loadDatasetPath(dataYamlPath);
+    if (!mounted) {
+      return;
+    }
+    final selectedDataset = _datasetPath;
+    if (selectedDataset == null ||
+        _pathKey(selectedDataset) != _pathKey(dataYamlPath)) {
+      _log(
+        'TRAIN',
+        'Export auto training skipped: exported dataset was not loaded: $dataYamlPath',
+        level: _LogLevel.warning,
+      );
+      return;
+    }
+    final modelPath = await _showExportTrainingModelDialog();
+    if (!mounted || modelPath == null) {
+      _log(
+        'TRAIN',
+        'Export auto training cancelled before model confirmation',
+        level: _LogLevel.info,
+      );
+      return;
+    }
+    setState(() {
+      _modelOptions = _dedupeModelOptions(
+        _modelOptions,
+        preferredPath: modelPath,
+      );
+      _modelPath = _matchingModelOption(modelPath) ?? modelPath;
+    });
+    _refreshResumeInfo();
+    _savePreferences();
+    await _startTraining();
+  }
+
+  Future<String?> _showExportTrainingModelDialog() async {
+    _loadModelOptions();
+    var options = _dedupeModelOptions(_modelOptions, preferredPath: _modelPath);
+    var selected = _modelDropdownValue(options) ?? options.firstOrNullValue;
+
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            Future<void> chooseModelFile() async {
+              final file = await openFile(
+                initialDirectory: _initialModelDirectory(),
+                acceptedTypeGroups: const [
+                  XTypeGroup(label: 'PyTorch model', extensions: ['pt']),
+                ],
+              );
+              if (file == null) {
+                return;
+              }
+              final nextOptions = _dedupeModelOptions(
+                options,
+                preferredPath: file.path,
+              );
+              setDialogState(() {
+                options = nextOptions;
+                selected =
+                    _matchingModelOption(file.path, options) ?? file.path;
+              });
+            }
+
+            return AlertDialog(
+              title: Text(t('train.exportModelTitle')),
+              content: SizedBox(
+                width: 460,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(t('train.exportModelMessage')),
+                    const SizedBox(height: 12),
+                    if (options.isEmpty)
+                      Text(
+                        t('train.noModels'),
+                        style: Theme.of(context).textTheme.bodySmall,
+                      )
+                    else
+                      DropdownButtonFormField<String>(
+                        initialValue: selected,
+                        isExpanded: true,
+                        decoration: InputDecoration(
+                          labelText: t('path.model'),
+                          isDense: true,
+                          border: const OutlineInputBorder(),
+                        ),
+                        items: [
+                          for (final path in options)
+                            DropdownMenuItem<String>(
+                              value: path,
+                              child: Text(_fileName(path)),
+                            ),
+                        ],
+                        onChanged: (value) {
+                          if (value == null) {
+                            return;
+                          }
+                          setDialogState(() => selected = value);
+                        },
+                      ),
+                    const SizedBox(height: 8),
+                    TextButton.icon(
+                      onPressed: chooseModelFile,
+                      icon: const Icon(Icons.folder_open_outlined),
+                      label: Text(t('train.chooseModel')),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: Text(t('action.cancel')),
+                ),
+                FilledButton(
+                  onPressed: selected == null
+                      ? null
+                      : () => Navigator.of(dialogContext).pop(selected),
+                  child: Text(t('train.confirmStart')),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   void _toggleTrainingDevice(String id, bool selected) {
     setState(() {
       final next = {..._selectedDeviceIds};
@@ -617,6 +776,7 @@ class _TrainPageState extends State<_TrainPage> {
       _trainingInterrupted = false;
       _currentEpoch = nextEpoch;
       _trainingMetrics = initialMetrics;
+      _resourceUsage = const _TrainingResourceUsage();
       _trainingMetricPoints = initialMetricPoints;
       _trainingLogText = '';
     });
@@ -639,6 +799,8 @@ class _TrainPageState extends State<_TrainPage> {
         device: _deviceArgument,
         lr0: _parameters['lr0'] ?? 0.01,
         momentum: _parameters['momentum'] ?? 0.937,
+        patience: _parameters['patience']?.round() ?? 100,
+        hsvH: _parameters['hsv_h'] ?? 0.015,
         hsvS: _parameters['hsv_s'] ?? 0.25,
         hsvV: _parameters['hsv_v'] ?? 0.5,
         translate: _parameters['translate'] ?? 0.1,
@@ -647,6 +809,15 @@ class _TrainPageState extends State<_TrainPage> {
         flipud: _parameters['flipud'] ?? 0,
         fliplr: _parameters['fliplr'] ?? 0,
         degrees: _parameters['degrees'] ?? 0,
+        perspective: _parameters['perspective'] ?? 0,
+        bgr: _parameters['bgr'] ?? 0,
+        mosaic: _parameters['mosaic'] ?? 1,
+        mixup: _parameters['mixup'] ?? 0,
+        cutmix: _parameters['cutmix'] ?? 0,
+        copyPaste: _parameters['copy_paste'] ?? 0,
+        copyPasteMode: _stringParameters['copy_paste_mode'] ?? 'flip',
+        autoAugment: _stringParameters['auto_augment'] ?? 'randaugment',
+        erasing: _parameters['erasing'] ?? 0.4,
         workers: _parameters['workers']?.round() ?? 4,
         amp: _ampEnabled,
         resume: _useResumeTraining,
@@ -701,13 +872,18 @@ class _TrainPageState extends State<_TrainPage> {
     try {
       final progress = await _RustVideoBackend.pollYoloTrainingProgress();
       final logText = await _readTrainingLogTail();
+      final resourceUsage = await _readTrainingResourceUsage();
       if (!mounted || !_trainingRunning) return;
       if (progress == null) {
-        setState(() => _trainingLogText = logText);
+        setState(() {
+          _trainingLogText = logText;
+          _resourceUsage = resourceUsage;
+        });
         return;
       }
       setState(() {
         _trainingLogText = logText;
+        _resourceUsage = resourceUsage;
         _currentEpoch = progress.currentEpoch;
         _trainingMetrics = _TrainingMetrics(
           trainLoss: progress.trainLoss,
@@ -846,6 +1022,11 @@ class _TrainPageState extends State<_TrainPage> {
     if (key == 'epochs') {
       _refreshResumeInfo();
     }
+    _savePreferences();
+  }
+
+  void _setStringParameter(String key, String value) {
+    setState(() => _stringParameters[key] = value);
     _savePreferences();
   }
 
@@ -1197,14 +1378,21 @@ class _TrainPageState extends State<_TrainPage> {
                                     ? _TrainingTerminalPanel(
                                         text: _trainingLogText,
                                       )
-                                    : _trainingMetricPoints.isNotEmpty
+                                    : (_trainingMetricPoints.isNotEmpty ||
+                                          _trainingRunning ||
+                                          _resourceUsage.hasAny)
                                     ? _TrainingProgressPanel(
                                         metrics:
                                             _trainingMetrics ??
-                                            _trainingMetricPoints.last.metrics,
+                                            (_trainingMetricPoints.isNotEmpty
+                                                ? _trainingMetricPoints
+                                                      .last
+                                                      .metrics
+                                                : const _TrainingMetrics()),
                                         colors: _chartColors,
                                         onColorChanged: _setChartColor,
                                         points: _trainingMetricPoints,
+                                        resourceUsage: _resourceUsage,
                                       )
                                     : Center(
                                         child: Text(
@@ -1237,6 +1425,7 @@ class _TrainPageState extends State<_TrainPage> {
                     child: _parameterPanelVisible
                         ? _TrainingParameterPanel(
                             parameters: _parameters,
+                            stringParameters: _stringParameters,
                             batchMode: _batchMode,
                             batchSize: _batchSize,
                             batchRatio: _batchRatio,
@@ -1246,6 +1435,7 @@ class _TrainPageState extends State<_TrainPage> {
                             batchArgument: _batchArgument,
                             deviceArgument: _deviceArgument,
                             onChanged: _setParameter,
+                            onStringChanged: _setStringParameter,
                             onBatchModeChanged: (value) {
                               setState(() => _batchMode = value);
                               _savePreferences();
@@ -1310,6 +1500,54 @@ Future<String> _readTrainingLogTail() async {
   } on Object catch (error) {
     return '${t('logs.readFailed')}: $error';
   }
+}
+
+Future<_TrainingResourceUsage> _readTrainingResourceUsage() async {
+  try {
+    return await _RustVideoBackend.trainingResourceUsage();
+  } on Object {
+    return const _TrainingResourceUsage();
+  }
+}
+
+class _TrainingResourceUsage {
+  const _TrainingResourceUsage({
+    this.cpuPercent,
+    this.ramPercent,
+    this.gpuPercent,
+    this.vramPercent,
+  });
+
+  factory _TrainingResourceUsage.fromJson(Map<dynamic, dynamic> value) {
+    return _TrainingResourceUsage(
+      cpuPercent: _jsonPercent(value['cpuPercent']),
+      ramPercent: _jsonPercent(value['ramPercent']),
+      gpuPercent: _jsonPercent(value['gpuPercent']),
+      vramPercent: _jsonPercent(value['vramPercent']),
+    );
+  }
+
+  final double? cpuPercent;
+  final double? ramPercent;
+  final double? gpuPercent;
+  final double? vramPercent;
+
+  bool get hasAny =>
+      cpuPercent != null ||
+      ramPercent != null ||
+      gpuPercent != null ||
+      vramPercent != null;
+}
+
+double? _jsonPercent(Object? value) {
+  if (value is! num) {
+    return null;
+  }
+  final parsed = value.toDouble();
+  if (!parsed.isFinite) {
+    return null;
+  }
+  return parsed.clamp(0, 100).toDouble();
 }
 
 class _TrainingMetricPoint {
@@ -1379,6 +1617,7 @@ class _DatasetSummaryPanel extends StatelessWidget {
 class _TrainingParameterPanel extends StatelessWidget {
   const _TrainingParameterPanel({
     required this.parameters,
+    required this.stringParameters,
     required this.batchMode,
     required this.batchSize,
     required this.batchRatio,
@@ -1388,6 +1627,7 @@ class _TrainingParameterPanel extends StatelessWidget {
     required this.batchArgument,
     required this.deviceArgument,
     required this.onChanged,
+    required this.onStringChanged,
     required this.onBatchModeChanged,
     required this.onBatchSizeChanged,
     required this.onBatchRatioChanged,
@@ -1399,6 +1639,7 @@ class _TrainingParameterPanel extends StatelessWidget {
   final VoidCallback onReset;
 
   final Map<String, double> parameters;
+  final Map<String, String> stringParameters;
   final _BatchMode batchMode;
   final double batchSize;
   final double batchRatio;
@@ -1408,6 +1649,7 @@ class _TrainingParameterPanel extends StatelessWidget {
   final String batchArgument;
   final String deviceArgument;
   final void Function(String key, double value) onChanged;
+  final void Function(String key, String value) onStringChanged;
   final ValueChanged<_BatchMode> onBatchModeChanged;
   final ValueChanged<double> onBatchSizeChanged;
   final ValueChanged<double> onBatchRatioChanged;
@@ -1451,6 +1693,15 @@ class _TrainingParameterPanel extends StatelessWidget {
                     name: entry.key,
                     value: entry.value,
                     onChanged: (value) => onChanged(entry.key, value),
+                  ),
+                for (final entry in stringParameters.entries)
+                  _StringParameterEditor(
+                    name: entry.key,
+                    value: entry.value,
+                    options:
+                        _trainingStringParameterOptions[entry.key] ??
+                        const <String>[],
+                    onChanged: (value) => onStringChanged(entry.key, value),
                   ),
                 const SizedBox(height: 10),
                 SizedBox(
@@ -1658,7 +1909,7 @@ class _ParameterHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        SizedBox(width: 72, child: Text(name)),
+        SizedBox(width: _parameterNameWidth, child: Text(name)),
         Expanded(
           child: Text(
             value,
@@ -1807,9 +2058,7 @@ class _NumericParameterFieldState extends State<_NumericParameterField> {
         focusNode: _focusNode,
         enabled: widget.enabled,
         textAlign: TextAlign.right,
-        keyboardType: TextInputType.numberWithOptions(
-          decimal: !widget.integer,
-        ),
+        keyboardType: TextInputType.numberWithOptions(decimal: !widget.integer),
         inputFormatters: [
           FilteringTextInputFormatter.allow(
             widget.integer ? RegExp(r'[0-9]') : RegExp(r'[0-9.]'),
@@ -1868,7 +2117,7 @@ class _ImageSizeParameterEditor extends StatelessWidget {
         padding: const EdgeInsets.only(bottom: 12),
         child: Row(
           children: [
-            const SizedBox(width: 72, child: Text('imgsz')),
+            const SizedBox(width: _parameterNameWidth, child: Text('imgsz')),
             Expanded(
               child: Slider(
                 value: index.toDouble(),
@@ -1921,7 +2170,12 @@ class _ParameterEditor extends StatelessWidget {
       return _ImageSizeParameterEditor(value: value, onChanged: onChanged);
     }
 
-    final integerLike = {'epochs', 'imgsz', 'workers'}.contains(name);
+    final integerLike = {
+      'epochs',
+      'imgsz',
+      'workers',
+      'patience',
+    }.contains(name);
     final min = _minForParameter(name);
     final max = _maxForParameter(name);
     final divisions = integerLike ? (max - min).round() : 100;
@@ -1933,7 +2187,7 @@ class _ParameterEditor extends StatelessWidget {
         padding: const EdgeInsets.only(bottom: 12),
         child: Row(
           children: [
-            SizedBox(width: 72, child: Text(name)),
+            SizedBox(width: _parameterNameWidth, child: Text(name)),
             Expanded(
               child: Slider(
                 value: value,
@@ -1952,6 +2206,63 @@ class _ParameterEditor extends StatelessWidget {
               integer: integerLike,
               normalize: (input) => _normalizeParameterValue(name, input),
               onSubmitted: onChanged,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StringParameterEditor extends StatelessWidget {
+  const _StringParameterEditor({
+    required this.name,
+    required this.value,
+    required this.options,
+    required this.onChanged,
+  });
+
+  final String name;
+  final String value;
+  final List<String> options;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final choices = options.contains(value) ? options : [value, ...options];
+    return Tooltip(
+      waitDuration: const Duration(milliseconds: 500),
+      message: _parameterHelp(name),
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Row(
+          children: [
+            SizedBox(width: _parameterNameWidth, child: Text(name)),
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                initialValue: value,
+                isDense: true,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  border: OutlineInputBorder(),
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
+                ),
+                items: [
+                  for (final choice in choices)
+                    DropdownMenuItem<String>(
+                      value: choice,
+                      child: Text(choice, overflow: TextOverflow.ellipsis),
+                    ),
+                ],
+                onChanged: (next) {
+                  if (next != null) {
+                    onChanged(next);
+                  }
+                },
+              ),
             ),
           ],
         ),
@@ -2329,13 +2640,14 @@ List<_TrainingMetricPoint> _trimTrainingMetricPoints(
 
 Future<List<_TrainingDeviceOption>> _detectNvidiaDevices() async {
   try {
-    final result = await Process.run('nvidia-smi', [
-      '--query-gpu=index,name',
-      '--format=csv,noheader',
-    ]).timeout(
-      const Duration(seconds: 2),
-      onTimeout: () => ProcessResult(0, 124, '', 'nvidia-smi timeout'),
-    );
+    final result =
+        await Process.run('nvidia-smi', [
+          '--query-gpu=index,name',
+          '--format=csv,noheader',
+        ]).timeout(
+          const Duration(seconds: 2),
+          onTimeout: () => ProcessResult(0, 124, '', 'nvidia-smi timeout'),
+        );
     if (result.exitCode != 0) {
       return const [];
     }
@@ -2370,6 +2682,7 @@ double _minForParameter(String name) {
   return switch (name) {
     'epochs' => 1,
     'imgsz' => 320,
+    'patience' => 0,
     'momentum' => 0.5,
     'workers' => 0,
     _ => 0,
@@ -2380,12 +2693,14 @@ double _maxForParameter(String name) {
   return switch (name) {
     'epochs' => 500,
     'imgsz' => 1280,
+    'patience' => 500,
     'lr0' => 0.1,
     'cls_pw' => 1,
     'momentum' => 0.99,
     'workers' => 16,
     'shear' => 20,
     'degrees' => 180,
+    'perspective' => 0.001,
     _ => 1,
   };
 }
@@ -2411,7 +2726,7 @@ double _normalizeParameterValue(String name, double value) {
   if (name == 'imgsz') {
     return _nearestImageSizeValue(value);
   }
-  if ({'epochs', 'workers'}.contains(name)) {
+  if ({'epochs', 'workers', 'patience'}.contains(name)) {
     return value.roundToDouble();
   }
   return value;
@@ -2419,8 +2734,10 @@ double _normalizeParameterValue(String name, double value) {
 
 String _formatParameterValue(String name, double value) {
   return switch (name) {
-    'epochs' || 'imgsz' || 'workers' => value.round().toString(),
+    'epochs' || 'imgsz' || 'workers' || 'patience' => value.round().toString(),
     'lr0' => value.toStringAsFixed(4),
+    'hsv_h' => value.toStringAsFixed(3),
+    'perspective' => value.toStringAsFixed(6),
     'cls_pw' => value.toStringAsFixed(2),
     'momentum' => value.toStringAsFixed(3),
     _ => value.toStringAsFixed(2),
@@ -2438,18 +2755,30 @@ class _TrainingProgressPanel extends StatelessWidget {
     required this.points,
     required this.colors,
     required this.onColorChanged,
+    required this.resourceUsage,
   });
 
   final _TrainingMetrics metrics;
   final List<_TrainingMetricPoint> points;
   final Map<String, int> colors;
   final void Function(String key) onColorChanged;
+  final _TrainingResourceUsage resourceUsage;
 
   @override
   Widget build(BuildContext context) {
     final seriesList = _buildTrainingSeries(points, colors);
     if (seriesList.isEmpty) {
-      return Center(child: Text(t('train.chartPlaceholder')));
+      return Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _TrainingResourcePanel(usage: resourceUsage),
+            const SizedBox(height: 12),
+            Expanded(child: Center(child: Text(t('train.chartPlaceholder')))),
+          ],
+        ),
+      );
     }
 
     final minX = seriesList
@@ -2560,70 +2889,184 @@ class _TrainingProgressPanel extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.all(16),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(child: ListView(children: chartPanels)),
-          if (legendItems.isNotEmpty) ...[
-            const SizedBox(width: 12),
-            SizedBox(
-              width: 160,
-              child: ListView(
-                children: [
-                  for (final (label, value, color) in legendItems)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: Row(
-                        children: [
-                          GestureDetector(
-                            onTap: () => onColorChanged(label),
-                            child: Tooltip(
-                              message: t('label.classColor'),
-                              child: Container(
-                                width: 16,
-                                height: 16,
-                                decoration: BoxDecoration(
-                                  color: color,
-                                  borderRadius: BorderRadius.circular(2),
-                                  border: Border.all(
+          _TrainingResourcePanel(usage: resourceUsage),
+          const SizedBox(height: 12),
+          Expanded(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(child: ListView(children: chartPanels)),
+                if (legendItems.isNotEmpty) ...[
+                  const SizedBox(width: 12),
+                  SizedBox(
+                    width: 160,
+                    child: ListView(
+                      children: [
+                        for (final (label, value, color) in legendItems)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 6),
+                            child: Row(
+                              children: [
+                                GestureDetector(
+                                  onTap: () => onColorChanged(label),
+                                  child: Tooltip(
+                                    message: t('label.classColor'),
+                                    child: Container(
+                                      width: 16,
+                                      height: 16,
+                                      decoration: BoxDecoration(
+                                        color: color,
+                                        borderRadius: BorderRadius.circular(2),
+                                        border: Border.all(
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.onSurfaceVariant,
+                                          width: 1,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    label,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurface,
+                                    ),
+                                  ),
+                                ),
+                                Text(
+                                  value!.toStringAsFixed(4),
+                                  style: TextStyle(
+                                    fontFamily: 'monospace',
+                                    fontSize: 11,
                                     color: Theme.of(
                                       context,
                                     ).colorScheme.onSurfaceVariant,
-                                    width: 1,
                                   ),
                                 ),
-                              ),
+                              ],
                             ),
                           ),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              label,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Theme.of(context).colorScheme.onSurface,
-                              ),
-                            ),
-                          ),
-                          Text(
-                            value!.toStringAsFixed(4),
-                            style: TextStyle(
-                              fontFamily: 'monospace',
-                              fontSize: 11,
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ),
+                      ],
                     ),
+                  ),
                 ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TrainingResourcePanel extends StatelessWidget {
+  const _TrainingResourcePanel({required this.usage});
+
+  final _TrainingResourceUsage usage;
+
+  @override
+  Widget build(BuildContext context) {
+    final items = [
+      _ResourcePercentItem(
+        label: t('train.resourceCpu'),
+        percent: usage.cpuPercent,
+        color: const Color(0xFF2563EB),
+      ),
+      _ResourcePercentItem(
+        label: t('train.resourceRam'),
+        percent: usage.ramPercent,
+        color: const Color(0xFF16A34A),
+      ),
+      _ResourcePercentItem(
+        label: t('train.resourceGpu'),
+        percent: usage.gpuPercent,
+        color: const Color(0xFFEA580C),
+      ),
+      _ResourcePercentItem(
+        label: t('train.resourceVram'),
+        percent: usage.vramPercent,
+        color: const Color(0xFF9333EA),
+      ),
+    ];
+    return Wrap(
+      spacing: 12,
+      runSpacing: 10,
+      children: [
+        for (final item in items) _ResourcePercentIndicator(item: item),
+      ],
+    );
+  }
+}
+
+class _ResourcePercentItem {
+  const _ResourcePercentItem({
+    required this.label,
+    required this.percent,
+    required this.color,
+  });
+
+  final String label;
+  final double? percent;
+  final Color color;
+}
+
+class _ResourcePercentIndicator extends StatelessWidget {
+  const _ResourcePercentIndicator({required this.item});
+
+  final _ResourcePercentItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    final percent = item.percent;
+    final available = percent != null;
+    final normalized = ((percent ?? 0) / 100).clamp(0.0, 1.0).toDouble();
+    final color = available
+        ? item.color
+        : Theme.of(context).colorScheme.outline;
+    final label = available ? '${percent.round()}%' : '--';
+    return SizedBox(
+      width: 112,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CircularPercentIndicator(
+            radius: 30,
+            lineWidth: 6,
+            percent: normalized,
+            animation: true,
+            animateFromLastPercent: true,
+            circularStrokeCap: CircularStrokeCap.round,
+            progressColor: color,
+            backgroundColor: Theme.of(
+              context,
+            ).colorScheme.surfaceContainerHighest,
+            center: Text(
+              label,
+              style: const TextStyle(
+                fontFamily: 'Consolas',
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
               ),
             ),
-          ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            item.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.labelSmall,
+          ),
         ],
       ),
     );
