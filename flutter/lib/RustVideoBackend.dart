@@ -299,6 +299,7 @@ class _RustVideoBackend {
   }
 
   static Future<_AiAnnotationResult> aiAnnotateImage({
+    required String backend,
     required String pythonPath,
     required String modelPath,
     required String inputPath,
@@ -307,9 +308,22 @@ class _RustVideoBackend {
     required double iouThreshold,
     required int imgsz,
     required String device,
+    String samMode = 'seg',
+    String samPromptMode = 'text',
+    String promptsText = '',
+    String samClickPointsText = '',
+    String samPrecision = 'fp16',
+    String samEncoder = 'vit_b',
+    int samImageBatchSize = 1,
+    int samVideoBatchSize = 1,
+    int samInteractiveBatchSize = 1,
+    int samMaxImageWidth = 1024,
+    int samMaxImageHeight = 768,
+    String samResizeMethod = 'shorter_side',
   }) {
     return Isolate.run(
       () => _aiAnnotateImageSync(
+        backend: backend,
         pythonPath: pythonPath,
         modelPath: modelPath,
         inputPath: inputPath,
@@ -318,11 +332,24 @@ class _RustVideoBackend {
         iouThreshold: iouThreshold,
         imgsz: imgsz,
         device: device,
+        samMode: samMode,
+        samPromptMode: samPromptMode,
+        promptsText: promptsText,
+        samClickPointsText: samClickPointsText,
+        samPrecision: samPrecision,
+        samEncoder: samEncoder,
+        samImageBatchSize: samImageBatchSize,
+        samVideoBatchSize: samVideoBatchSize,
+        samInteractiveBatchSize: samInteractiveBatchSize,
+        samMaxImageWidth: samMaxImageWidth,
+        samMaxImageHeight: samMaxImageHeight,
+        samResizeMethod: samResizeMethod,
       ),
     );
   }
 
   static Future<List<_AiAnnotationResult>> aiAnnotateImages({
+    required String backend,
     required String pythonPath,
     required String modelPath,
     required List<String> inputPaths,
@@ -331,9 +358,22 @@ class _RustVideoBackend {
     required double iouThreshold,
     required int imgsz,
     required String device,
+    String samMode = 'seg',
+    String samPromptMode = 'text',
+    String promptsText = '',
+    String samClickPointsText = '',
+    String samPrecision = 'fp16',
+    String samEncoder = 'vit_b',
+    int samImageBatchSize = 1,
+    int samVideoBatchSize = 1,
+    int samInteractiveBatchSize = 1,
+    int samMaxImageWidth = 1024,
+    int samMaxImageHeight = 768,
+    String samResizeMethod = 'shorter_side',
   }) {
     return Isolate.run(
       () => _aiAnnotateImagesSync(
+        backend: backend,
         pythonPath: pythonPath,
         modelPath: modelPath,
         inputPaths: inputPaths,
@@ -342,6 +382,18 @@ class _RustVideoBackend {
         iouThreshold: iouThreshold,
         imgsz: imgsz,
         device: device,
+        samMode: samMode,
+        samPromptMode: samPromptMode,
+        promptsText: promptsText,
+        samClickPointsText: samClickPointsText,
+        samPrecision: samPrecision,
+        samEncoder: samEncoder,
+        samImageBatchSize: samImageBatchSize,
+        samVideoBatchSize: samVideoBatchSize,
+        samInteractiveBatchSize: samInteractiveBatchSize,
+        samMaxImageWidth: samMaxImageWidth,
+        samMaxImageHeight: samMaxImageHeight,
+        samResizeMethod: samResizeMethod,
       ),
     );
   }
@@ -841,6 +893,7 @@ class _RustVideoBackend {
   }
 
   static _AiAnnotationResult _aiAnnotateImageSync({
+    required String backend,
     required String pythonPath,
     required String modelPath,
     required String inputPath,
@@ -849,9 +902,22 @@ class _RustVideoBackend {
     required double iouThreshold,
     required int imgsz,
     required String device,
+    required String samMode,
+    required String samPromptMode,
+    required String promptsText,
+    required String samClickPointsText,
+    required String samPrecision,
+    required String samEncoder,
+    required int samImageBatchSize,
+    required int samVideoBatchSize,
+    required int samInteractiveBatchSize,
+    required int samMaxImageWidth,
+    required int samMaxImageHeight,
+    required String samResizeMethod,
   }) {
     final bindings = _RustVideoBindings.open();
     final request = jsonEncode({
+      'backend': backend,
       'pythonPath': pythonPath,
       'modelPath': modelPath,
       'inputPath': inputPath,
@@ -860,6 +926,18 @@ class _RustVideoBackend {
       'iouThreshold': iouThreshold,
       'imgsz': imgsz,
       'device': device,
+      'samMode': samMode,
+      'samPromptMode': samPromptMode,
+      'promptsText': promptsText,
+      'samClickPointsText': samClickPointsText,
+      'samPrecision': samPrecision,
+      'samEncoder': samEncoder,
+      'samImageBatchSize': samImageBatchSize,
+      'samVideoBatchSize': samVideoBatchSize,
+      'samInteractiveBatchSize': samInteractiveBatchSize,
+      'samMaxImageWidth': samMaxImageWidth,
+      'samMaxImageHeight': samMaxImageHeight,
+      'samResizeMethod': samResizeMethod,
     });
     final requestBytes = Uint8List.fromList(utf8.encode(request));
     final requestPtr = bindings.allocator.allocate(requestBytes);
@@ -881,6 +959,7 @@ class _RustVideoBackend {
         width: (decoded['width'] as num?)?.toDouble() ?? 0,
         height: (decoded['height'] as num?)?.toDouble() ?? 0,
         boxes: _parseAiPredictionBoxes(decoded['boxes']),
+        masks: _parseAiPredictionMasks(decoded['masks']),
       );
     } finally {
       bindings.allocator.free(requestPtr);
@@ -888,6 +967,7 @@ class _RustVideoBackend {
   }
 
   static List<_AiAnnotationResult> _aiAnnotateImagesSync({
+    required String backend,
     required String pythonPath,
     required String modelPath,
     required List<String> inputPaths,
@@ -896,9 +976,22 @@ class _RustVideoBackend {
     required double iouThreshold,
     required int imgsz,
     required String device,
+    required String samMode,
+    required String samPromptMode,
+    required String promptsText,
+    required String samClickPointsText,
+    required String samPrecision,
+    required String samEncoder,
+    required int samImageBatchSize,
+    required int samVideoBatchSize,
+    required int samInteractiveBatchSize,
+    required int samMaxImageWidth,
+    required int samMaxImageHeight,
+    required String samResizeMethod,
   }) {
     final bindings = _RustVideoBindings.open();
     final request = jsonEncode({
+      'backend': backend,
       'pythonPath': pythonPath,
       'modelPath': modelPath,
       'inputPathsText': inputPaths.join('\n'),
@@ -907,6 +1000,18 @@ class _RustVideoBackend {
       'iouThreshold': iouThreshold,
       'imgsz': imgsz,
       'device': device,
+      'samMode': samMode,
+      'samPromptMode': samPromptMode,
+      'promptsText': promptsText,
+      'samClickPointsText': samClickPointsText,
+      'samPrecision': samPrecision,
+      'samEncoder': samEncoder,
+      'samImageBatchSize': samImageBatchSize,
+      'samVideoBatchSize': samVideoBatchSize,
+      'samInteractiveBatchSize': samInteractiveBatchSize,
+      'samMaxImageWidth': samMaxImageWidth,
+      'samMaxImageHeight': samMaxImageHeight,
+      'samResizeMethod': samResizeMethod,
     });
     final requestBytes = Uint8List.fromList(utf8.encode(request));
     final requestPtr = bindings.allocator.allocate(requestBytes);
@@ -936,6 +1041,7 @@ class _RustVideoBackend {
                 width: (item['width'] as num?)?.toDouble() ?? 0,
                 height: (item['height'] as num?)?.toDouble() ?? 0,
                 boxes: _parseAiPredictionBoxes(item['boxes']),
+                masks: _parseAiPredictionMasks(item['masks']),
               ),
             );
           }
@@ -969,6 +1075,47 @@ class _RustVideoBackend {
       }
     }
     return boxes;
+  }
+
+  static List<_AiPredictionMask> _parseAiPredictionMasks(Object? rawMasks) {
+    final masks = <_AiPredictionMask>[];
+    if (rawMasks is List) {
+      for (final item in rawMasks) {
+        if (item is! Map) {
+          continue;
+        }
+        final points = <Offset>[];
+        final rawPoints = item['points'];
+        if (rawPoints is List) {
+          for (final rawPoint in rawPoints) {
+            if (rawPoint is List && rawPoint.length >= 2) {
+              points.add(
+                Offset(
+                  (rawPoint[0] as num?)?.toDouble() ?? 0,
+                  (rawPoint[1] as num?)?.toDouble() ?? 0,
+                ),
+              );
+            } else if (rawPoint is Map) {
+              points.add(
+                Offset(
+                  (rawPoint['x'] as num?)?.toDouble() ?? 0,
+                  (rawPoint['y'] as num?)?.toDouble() ?? 0,
+                ),
+              );
+            }
+          }
+        }
+        masks.add(
+          _AiPredictionMask(
+            classId: (item['classId'] as num?)?.toInt() ?? 0,
+            className: '${item['className'] ?? 'class'}',
+            confidence: (item['confidence'] as num?)?.toDouble() ?? 0,
+            points: points,
+          ),
+        );
+      }
+    }
+    return masks;
   }
 }
 
@@ -1028,18 +1175,34 @@ class _AiPredictionBox {
   final Rect rect;
 }
 
+class _AiPredictionMask {
+  const _AiPredictionMask({
+    required this.classId,
+    required this.className,
+    required this.confidence,
+    required this.points,
+  });
+
+  final int classId;
+  final String className;
+  final double confidence;
+  final List<Offset> points;
+}
+
 class _AiAnnotationResult {
   const _AiAnnotationResult({
     required this.inputPath,
     required this.width,
     required this.height,
     required this.boxes,
+    this.masks = const [],
   });
 
   final String inputPath;
   final double width;
   final double height;
   final List<_AiPredictionBox> boxes;
+  final List<_AiPredictionMask> masks;
 }
 
 class _RustVideoInfo {

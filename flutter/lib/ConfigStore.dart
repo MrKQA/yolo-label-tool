@@ -805,6 +805,32 @@ class _ConfigStore {
     );
   }
 
+  static String loadLastSam3ModelPath() {
+    try {
+      final value = _RustVideoBackend.loadConfigValue(
+        key: 'ai.sam3.modelPath',
+      );
+      return value.trim();
+    } on Object {
+      return '';
+    }
+  }
+
+  static void saveLastSam3ModelPath(String path) {
+    final normalized = path.trim();
+    if (normalized.isEmpty) {
+      return;
+    }
+    try {
+      _RustVideoBackend.saveConfigValue(
+        key: 'ai.sam3.modelPath',
+        value: normalized,
+      );
+    } on Object {
+      // Keep the current in-memory selection if DB persistence fails.
+    }
+  }
+
   static void appendLogLines(String lines) {
     try {
       _RustVideoBackend.appendLogLines(lines: lines);

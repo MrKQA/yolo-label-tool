@@ -152,6 +152,20 @@ void _log(String tag, String message, {_LogLevel level = _LogLevel.info}) {
   _appendLogLine(tag, message, level: level);
 }
 
+void _logMultiline(
+  String tag,
+  String message, {
+  _LogLevel level = _LogLevel.info,
+  String prefix = '',
+}) {
+  if (level.index < _logLevel.index) return;
+  final normalized = message.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+  final lines = normalized.split('\n');
+  for (final line in lines) {
+    _appendLogLine(tag, '$prefix$line', level: level);
+  }
+}
+
 void _appendLogLine(String tag, String message, {required _LogLevel level}) {
   final ts = DateTime.now()
       .toIso8601String()
@@ -411,11 +425,21 @@ class _LanguageStrings {
     'shortcut.rotateObbLeft1': 'OBB 逆时针 1°',
     'shortcut.rotateObbRight1': 'OBB 顺时针 1°',
     'shortcut.rotateObbRight5': 'OBB 顺时针 5°',
+    'shortcut.browsePreviousMedia': '浏览上一媒体',
+    'shortcut.browseNextMedia': '浏览下一媒体',
+    'shortcut.browseFullscreen': '浏览全屏',
+    'shortcut.browseVolumeUp': '浏览音量增加',
+    'shortcut.browseVolumeDown': '浏览音量降低',
     'shortcut.videoPlayPause': '视频播放 / 暂停',
     'shortcut.videoRewind': '视频回退',
     'shortcut.videoFastForward': '视频三倍速快进',
     'shortcut.aiAnnotateCurrent': '当前 AI 标注',
     'shortcut.aiAnnotateAll': '所有 AI 标注',
+    'shortcut.scopeGlobal': '全局',
+    'shortcut.scopeLabel': '标注页面',
+    'shortcut.scopeBrowse': '浏览页面',
+    'shortcut.scopeTrain': '训练页面',
+    'shortcut.noItems': '暂无可配置快捷键',
     'shortcut.normalGroup': '普通功能',
     'shortcut.aiGroup': 'AI 功能',
     'shortcut.note': '鼠标滚轮缩放、右键图片添加/删除保持固定。',
@@ -434,6 +458,22 @@ class _LanguageStrings {
     'ai.annotateCurrent': '当前图片单次标注',
     'ai.annotateAll': '按索引全部标注',
     'ai.noSelectedClasses': '请至少选择一个类别',
+    'ai.sam3PromptText': '文本提示词',
+    'ai.sam3PromptClick': '点击',
+    'ai.sam3PromptLabel': '文本提示词',
+    'ai.sam3PromptHint': '每行一个目标，例如 mask 或 person',
+    'ai.sam3ClickHint': '点击模式仅用于标注页面交互：左键添加目标点，右键添加排除点。',
+    'ai.sam3PromptRequired': '请先输入 SAM3 文本提示词',
+    'ai.sam3RuntimeConfig': 'SAM3 低显存配置',
+    'ai.sam3Precision': '精度',
+    'ai.sam3Encoder': '编码器',
+    'ai.sam3BatchImage': '图片 batch',
+    'ai.sam3BatchVideo': '视频 batch',
+    'ai.sam3BatchInteractive': '交互 batch',
+    'ai.sam3MaxWidth': '预缩放宽度',
+    'ai.sam3MaxHeight': '预缩放高度',
+    'ai.sam3ResizeMethod': '缩放方式',
+    'ai.sam3ResizeShorterSide': 'shorter_side',
     'ai.annotating': 'AI 辅助标注中...',
     'ai.done': 'AI 标注完成',
     'ai.failed': 'AI 标注失败',
@@ -870,6 +910,8 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   _ImportedDataset? _importedDataset;
   _AiAssistConfig? _aiAssistConfig;
   bool _aiAnnotating = false;
+  final Map<String, List<_Sam3ClickPromptPoint>> _sam3ClickPromptsByImage = {};
+  final Map<String, Set<String>> _sam3ClickAnnotationIdsByImage = {};
   Offset? _aiAssistPanelOffset;
   Size _aiAssistPanelSize = const Size(320, 360);
   _CollaborationMode _collaborationMode = _CollaborationMode.off;
@@ -1575,7 +1617,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     if (pythonPath == null) {
       _log(
         'PYTHON',
-        'Python preload skipped: configured path does not exist: $configuredPath',
+        'YOLO Python preload skipped: configured path does not exist: $configuredPath',
         level: _LogLevel.warning,
       );
       return;
@@ -1587,7 +1629,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     if (_pythonPreloadInFlightPath.isNotEmpty) {
       _log(
         'PYTHON',
-        'Python preload already running for $_pythonPreloadInFlightPath',
+        'YOLO Python preload already running for $_pythonPreloadInFlightPath',
         level: _LogLevel.debug,
       );
       return;
@@ -1596,7 +1638,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     _pythonPreloadInFlightPath = pythonPath;
     _log(
       'PYTHON',
-      'Python preload started from saved settings: $pythonPath',
+      'YOLO Python preload started from saved settings: $pythonPath',
       level: _LogLevel.info,
     );
     unawaited(
@@ -1605,15 +1647,22 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
             _preloadedPythonPath = pythonPath;
             _log(
               'PYTHON',
-              'Python preload completed: $pythonPath',
+              'YOLO Python preload completed: $pythonPath',
               level: _LogLevel.info,
             );
           })
           .catchError((Object error) {
+            final errorText = error.toString();
             _log(
               'PYTHON',
-              'Python preload failed: $error',
+              'YOLO Python preload failed; SAM3 uses the configured Python executable separately.',
               level: _LogLevel.warning,
+            );
+            _logMultiline(
+              'PYTHON',
+              errorText,
+              level: _LogLevel.warning,
+              prefix: 'detail: ',
             );
           })
           .whenComplete(() {
@@ -2770,9 +2819,15 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
 
   void _saveAiAssistConfig(_AiAssistConfig config) {
     setState(() => _aiAssistConfig = config);
+    if (config.backend == _AiAssistBackend.sam3) {
+      _ConfigStore.saveLastSam3ModelPath(config.modelPath);
+    }
+    final sam3Detail = config.backend == _AiAssistBackend.sam3
+        ? ', sam3Mode=${config.sam3OutputMode.wireName}, prompt=${config.sam3PromptMode.wireName}, ${config.sam3Runtime.logSummary}'
+        : '';
     _log(
       'AI',
-      'AI assist config saved: model=${_fileName(config.modelPath)}, classes=${config.selectedClassIds.length}, conf=${config.confThreshold.toStringAsFixed(2)}, imgsz=${config.imageSize}, range=${config.startIndex}-${config.endIndex}',
+      'AI assist config saved: backend=${config.backend.wireName}, model=${_fileName(config.modelPath)}, classes=${config.selectedClassIds.length}, conf=${config.confThreshold.toStringAsFixed(2)}, imgsz=${config.imageSize}, range=${config.startIndex}-${config.endIndex}$sam3Detail',
     );
   }
 
@@ -2823,6 +2878,50 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     ], config);
   }
 
+  String _sam3ClickPointsTextForImage(String imagePath) {
+    final points = _sam3ClickPromptsByImage[_pathKey(imagePath)] ?? const [];
+    return points.map((point) => point.wireLine).join('\n');
+  }
+
+  Future<bool> _handleSam3ClickPrompt(
+    Offset imagePoint,
+    Size imageDisplaySize,
+    bool positive,
+  ) async {
+    final config = _aiAssistConfig;
+    final image = _selectedImage;
+    final imageKey = _selectedImageKey;
+    if (!_aiPanelVisible ||
+        config == null ||
+        config.backend != _AiAssistBackend.sam3 ||
+        config.sam3PromptMode != _AiSam3PromptMode.click ||
+        image == null ||
+        imageKey == null ||
+        !_selectedImageAuthorized ||
+        imageDisplaySize.width <= 0 ||
+        imageDisplaySize.height <= 0) {
+      return false;
+    }
+    if (_aiAnnotating) {
+      _showFloatingMessage(t('ai.annotating'));
+      return true;
+    }
+    final point = _Sam3ClickPromptPoint(
+      x: (imagePoint.dx / imageDisplaySize.width).clamp(0.0, 1.0).toDouble(),
+      y: (imagePoint.dy / imageDisplaySize.height).clamp(0.0, 1.0).toDouble(),
+      positive: positive,
+    );
+    final points = _sam3ClickPromptsByImage.putIfAbsent(imageKey, () => []);
+    points.add(point);
+    _log(
+      'AI',
+      'SAM3 click prompt added: image=${image.name}, point=${point.x.toStringAsFixed(4)},${point.y.toStringAsFixed(4)}, positive=$positive, total=${points.length}',
+      level: _LogLevel.debug,
+    );
+    await _runAiAnnotateCurrentWithConfig(config);
+    return true;
+  }
+
   Future<void> _runAiAnnotateForIndices(
     List<int> indices,
     _AiAssistConfig config,
@@ -2839,13 +2938,25 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       _showFloatingMessage(t('detect.pythonNotConfigured'));
       return;
     }
-    if (config.selectedClassIds.isEmpty) {
+    if (config.backend == _AiAssistBackend.yolo &&
+        config.selectedClassIds.isEmpty) {
       _log(
         'AI',
         'AI annotation blocked: no classes selected',
         level: _LogLevel.warning,
       );
       _showFloatingMessage(t('ai.noSelectedClasses'));
+      return;
+    }
+    if (config.backend == _AiAssistBackend.sam3 &&
+        config.sam3PromptMode == _AiSam3PromptMode.text &&
+        config.sam3PromptText.trim().isEmpty) {
+      _log(
+        'AI',
+        'SAM3 annotation blocked: text prompt is empty',
+        level: _LogLevel.warning,
+      );
+      _showFloatingMessage(t('ai.sam3PromptRequired'));
       return;
     }
     final targetIndices = [
@@ -2860,9 +2971,37 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       );
       return;
     }
+    var samClickPointsText = '';
+    final isSam3ClickMode =
+        config.backend == _AiAssistBackend.sam3 &&
+        config.sam3PromptMode == _AiSam3PromptMode.click;
+    if (isSam3ClickMode) {
+      if (targetIndices.length != 1 ||
+          targetIndices.first != _selectedImageIndex) {
+        _log(
+          'AI',
+          'SAM3 click annotation blocked: click mode only supports the current image',
+          level: _LogLevel.warning,
+        );
+        _showFloatingMessage(t('ai.sam3ClickCurrentOnly'));
+        return;
+      }
+      samClickPointsText = _sam3ClickPointsTextForImage(
+        _images[targetIndices.first].path,
+      );
+      if (samClickPointsText.trim().isEmpty) {
+        _log(
+          'AI',
+          'SAM3 click annotation blocked: no click prompt points',
+          level: _LogLevel.warning,
+        );
+        _showFloatingMessage(t('ai.sam3ClickRequired'));
+        return;
+      }
+    }
     _log(
       'AI',
-      'AI annotation started: targets=${targetIndices.length}, model=${_fileName(config.modelPath)}, classes=${config.selectedClassIds.length}, conf=${config.confThreshold.toStringAsFixed(2)}, imgsz=${config.imageSize}',
+      'AI annotation started: backend=${config.backend.wireName}, targets=${targetIndices.length}, model=${_fileName(config.modelPath)}, classes=${config.selectedClassIds.length}, conf=${config.confThreshold.toStringAsFixed(2)}, imgsz=${config.imageSize}, sam3Mode=${config.sam3OutputMode.wireName}, prompt=${config.sam3PromptMode.wireName}, clickPoints=${samClickPointsText.trim().isEmpty ? 0 : samClickPointsText.trim().split('\n').length}, ${config.sam3Runtime.logSummary}',
     );
 
     setState(() => _aiAnnotating = true);
@@ -2877,6 +3016,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       if (targetIndices.length == 1) {
         final image = _images[targetIndices.first];
         final result = await _RustVideoBackend.aiAnnotateImage(
+          backend: config.backend.wireName,
           pythonPath: _appSettings.pythonPath.trim(),
           modelPath: config.modelPath,
           inputPath: image.path,
@@ -2885,18 +3025,32 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
           iouThreshold: 0.45,
           imgsz: config.imageSize,
           device: 'auto',
+          samMode: config.sam3OutputMode.wireName,
+          samPromptMode: config.sam3PromptMode.wireName,
+          promptsText: config.sam3PromptText,
+          samClickPointsText: samClickPointsText,
+          samPrecision: config.sam3Runtime.precision,
+          samEncoder: config.sam3Runtime.encoder,
+          samImageBatchSize: config.sam3Runtime.imageBatchSize,
+          samVideoBatchSize: config.sam3Runtime.videoBatchSize,
+          samInteractiveBatchSize: config.sam3Runtime.interactiveBatchSize,
+          samMaxImageWidth: config.sam3Runtime.maxImageWidth,
+          samMaxImageHeight: config.sam3Runtime.maxImageHeight,
+          samResizeMethod: config.sam3Runtime.resizeMethod,
         );
         final displaySize = await _computeImageDisplaySize(image.path);
         added += _applyAiAnnotationResult(
           imagePath: image.path,
           displaySize: displaySize,
           result: result,
+          config: config,
         );
       } else if (targetIndices.isNotEmpty) {
         final targetImages = [
           for (final index in targetIndices) _images[index],
         ];
         final results = await _RustVideoBackend.aiAnnotateImages(
+          backend: config.backend.wireName,
           pythonPath: _appSettings.pythonPath.trim(),
           modelPath: config.modelPath,
           inputPaths: [for (final image in targetImages) image.path],
@@ -2905,6 +3059,18 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
           iouThreshold: 0.45,
           imgsz: config.imageSize,
           device: 'auto',
+          samMode: config.sam3OutputMode.wireName,
+          samPromptMode: config.sam3PromptMode.wireName,
+          promptsText: config.sam3PromptText,
+          samClickPointsText: '',
+          samPrecision: config.sam3Runtime.precision,
+          samEncoder: config.sam3Runtime.encoder,
+          samImageBatchSize: config.sam3Runtime.imageBatchSize,
+          samVideoBatchSize: config.sam3Runtime.videoBatchSize,
+          samInteractiveBatchSize: config.sam3Runtime.interactiveBatchSize,
+          samMaxImageWidth: config.sam3Runtime.maxImageWidth,
+          samMaxImageHeight: config.sam3Runtime.maxImageHeight,
+          samResizeMethod: config.sam3Runtime.resizeMethod,
         );
         for (final result in results) {
           final imagePath = result.inputPath.isEmpty ? null : result.inputPath;
@@ -2916,6 +3082,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
             imagePath: imagePath,
             displaySize: displaySize,
             result: result,
+            config: config,
           );
         }
       }
@@ -2930,13 +3097,24 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       if (classesChanged) {
         _broadcastCollaborationClassSnapshot('ai classes changed');
       }
-      if (added > 0 || classesChanged) {
+      if (added > 0 || classesChanged || isSam3ClickMode) {
         _scheduleAnnotationDatabaseSave();
       }
       _showFloatingMessage('${t('ai.done')} ($added)');
     } on Object catch (error) {
-      _log('AI', 'AI annotation failed: $error', level: _LogLevel.error);
-      _showFloatingMessage('${t('ai.failed')}: $error');
+      final failure = _classifyAiFailure(error);
+      _log(
+        'AI',
+        'AI annotation failed: backend=${config.backend.wireName}, failure=$failure',
+        level: _LogLevel.error,
+      );
+      _logMultiline(
+        'AI',
+        error.toString(),
+        level: _LogLevel.error,
+        prefix: 'detail: ',
+      );
+      _showFloatingMessage('${t('ai.failed')}: ${_shortAiError(error)}');
     } finally {
       if (mounted) {
         setState(() => _aiAnnotating = false);
@@ -2948,38 +3126,135 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     required String imagePath,
     required Size displaySize,
     required _AiAnnotationResult result,
+    required _AiAssistConfig config,
   }) {
-    if (result.boxes.isEmpty || result.width <= 0 || result.height <= 0) {
+    if (result.width <= 0 || result.height <= 0) {
       return 0;
     }
     final imageKey = _pathKey(imagePath);
     final annotations = _annotationsByImage.putIfAbsent(imageKey, () => []);
     var count = 0;
+    if (config.backend == _AiAssistBackend.sam3) {
+      final replaceSam3ClickAnnotations =
+          config.sam3PromptMode == _AiSam3PromptMode.click;
+      final generatedClickIds = <String>{};
+      if (replaceSam3ClickAnnotations) {
+        final previousIds = _sam3ClickAnnotationIdsByImage.remove(imageKey);
+        if (previousIds != null && previousIds.isNotEmpty) {
+          annotations.removeWhere((annotation) => previousIds.contains(annotation.id));
+        }
+      }
+      for (final mask in result.masks) {
+        final points = _scaleAiPoints(
+          mask.points,
+          sourceSize: Size(result.width, result.height),
+          displaySize: displaySize,
+        );
+        if (points.length < 3) {
+          continue;
+        }
+        final classId = _ensureLabelClassByName(mask.className);
+        final bounds = _pointsBounds(
+          points,
+        ).intersect(Offset.zero & displaySize);
+        if (bounds.width < 2 || bounds.height < 2) {
+          continue;
+        }
+        final mode = config.sam3OutputMode.annotationMode;
+        final id = 'ann_${_annotationSerial++}';
+        if (mode == _AnnotationMode.seg) {
+          annotations.add(
+            _AnnotationRegion(
+              id: id,
+              mode: _AnnotationMode.seg,
+              rect: bounds,
+              classId: classId,
+              points: points,
+              authorId: _collaborationAuthorId,
+              authorName: _currentAnnotatorName,
+              authorColorValue: _currentAnnotatorColorValue,
+            ),
+          );
+        } else if (mode == _AnnotationMode.obb) {
+          final oriented = _minimumAreaRect(points);
+          annotations.add(
+            _AnnotationRegion.fromRect(
+              id: id,
+              mode: _AnnotationMode.obb,
+              rect: oriented.rect.intersect(Offset.zero & displaySize),
+              classId: classId,
+              authorId: _collaborationAuthorId,
+              authorName: _currentAnnotatorName,
+              authorColorValue: _currentAnnotatorColorValue,
+            ).copyWith(rotationDegrees: oriented.rotationDegrees),
+          );
+        } else {
+          annotations.add(
+            _AnnotationRegion.fromRect(
+              id: id,
+              mode: _AnnotationMode.hbb,
+              rect: bounds,
+              classId: classId,
+              authorId: _collaborationAuthorId,
+              authorName: _currentAnnotatorName,
+              authorColorValue: _currentAnnotatorColorValue,
+            ),
+          );
+        }
+        if (replaceSam3ClickAnnotations) {
+          generatedClickIds.add(id);
+        }
+        count += 1;
+      }
+      if (replaceSam3ClickAnnotations) {
+        _sam3ClickAnnotationIdsByImage[imageKey] = generatedClickIds;
+      }
+      _log(
+        'AI',
+        'SAM3 annotations applied: image=${_fileName(imagePath)}, mode=${config.sam3OutputMode.wireName}, prompt=${config.sam3PromptMode.wireName}, masks=${result.masks.length}, added=$count',
+        level: _LogLevel.debug,
+      );
+      return count;
+    }
     for (final box in result.boxes) {
-      final classId = _ensureLabelClassByName(box.className);
-      final rect = Rect.fromLTRB(
-        box.rect.left / result.width * displaySize.width,
-        box.rect.top / result.height * displaySize.height,
-        box.rect.right / result.width * displaySize.width,
-        box.rect.bottom / result.height * displaySize.height,
-      ).intersect(Offset.zero & displaySize);
-      if (rect.width < 2 || rect.height < 2) {
+      final annotation = _annotationFromAiBox(
+        box: box,
+        sourceSize: Size(result.width, result.height),
+        displaySize: displaySize,
+      );
+      if (annotation == null) {
         continue;
       }
-      annotations.add(
-        _AnnotationRegion.fromRect(
-          id: 'ann_${_annotationSerial++}',
-          mode: _AnnotationMode.hbb,
-          rect: rect,
-          classId: classId,
-          authorId: _collaborationAuthorId,
-          authorName: _currentAnnotatorName,
-          authorColorValue: _currentAnnotatorColorValue,
-        ),
-      );
+      annotations.add(annotation);
       count += 1;
     }
     return count;
+  }
+
+  _AnnotationRegion? _annotationFromAiBox({
+    required _AiPredictionBox box,
+    required Size sourceSize,
+    required Size displaySize,
+  }) {
+    final classId = _ensureLabelClassByName(box.className);
+    final rect = Rect.fromLTRB(
+      box.rect.left / sourceSize.width * displaySize.width,
+      box.rect.top / sourceSize.height * displaySize.height,
+      box.rect.right / sourceSize.width * displaySize.width,
+      box.rect.bottom / sourceSize.height * displaySize.height,
+    ).intersect(Offset.zero & displaySize);
+    if (rect.width < 2 || rect.height < 2) {
+      return null;
+    }
+    return _AnnotationRegion.fromRect(
+      id: 'ann_${_annotationSerial++}',
+      mode: _AnnotationMode.hbb,
+      rect: rect,
+      classId: classId,
+      authorId: _collaborationAuthorId,
+      authorName: _currentAnnotatorName,
+      authorColorValue: _currentAnnotatorColorValue,
+    );
   }
 
   int _ensureLabelClassByName(String rawName) {
@@ -2997,6 +3272,160 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     );
     _activeClassId ??= id;
     return id;
+  }
+
+  String _classifyAiFailure(Object error) {
+    final text = error.toString().toLowerCase();
+    if (text.contains('out of memory') ||
+        text.contains('cuda oom') ||
+        text.contains('cublas_status_alloc_failed') ||
+        text.contains('memoryerror')) {
+      return 'oom';
+    }
+    if (text.contains('assertionerror') &&
+        (text.contains('reshape_for_broadcast') ||
+            text.contains('apply_rotary_enc'))) {
+      return 'sam3-resolution';
+    }
+    if (text.contains('modulenotfounderror') ||
+        text.contains('no module named') ||
+        text.contains('dependency import failed')) {
+      return 'dependency';
+    }
+    if (text.contains('sam3') && text.contains('click')) {
+      return 'sam3-click-prompt';
+    }
+    if (text.contains('python start') || text.contains('python path')) {
+      return 'python';
+    }
+    return 'runtime';
+  }
+
+  String _shortAiError(Object error) {
+    final normalized = error
+        .toString()
+        .replaceAll('\r\n', '\n')
+        .replaceAll('\r', '\n')
+        .split('\n')
+        .map((line) => line.trim())
+        .firstWhere((line) => line.isNotEmpty, orElse: () => 'unknown error');
+    return normalized.length > 180
+        ? '${normalized.substring(0, 180)}...'
+        : normalized;
+  }
+
+  List<Offset> _scaleAiPoints(
+    List<Offset> points, {
+    required Size sourceSize,
+    required Size displaySize,
+  }) {
+    if (sourceSize.width <= 0 || sourceSize.height <= 0) {
+      return const [];
+    }
+    return [
+      for (final point in points)
+        Offset(
+          point.dx / sourceSize.width * displaySize.width,
+          point.dy / sourceSize.height * displaySize.height,
+        ),
+    ];
+  }
+
+  Rect _pointsBounds(List<Offset> points) {
+    if (points.isEmpty) {
+      return Rect.zero;
+    }
+    var minX = points.first.dx;
+    var minY = points.first.dy;
+    var maxX = points.first.dx;
+    var maxY = points.first.dy;
+    for (final point in points.skip(1)) {
+      minX = math.min(minX, point.dx);
+      minY = math.min(minY, point.dy);
+      maxX = math.max(maxX, point.dx);
+      maxY = math.max(maxY, point.dy);
+    }
+    return Rect.fromLTRB(minX, minY, maxX, maxY);
+  }
+
+  _AiOrientedRect _minimumAreaRect(List<Offset> points) {
+    if (points.length < 3) {
+      return _AiOrientedRect(rect: _pointsBounds(points), rotationDegrees: 0);
+    }
+    final hull = _convexHull(points);
+    if (hull.length < 3) {
+      return _AiOrientedRect(rect: _pointsBounds(points), rotationDegrees: 0);
+    }
+    var bestArea = double.infinity;
+    Rect bestRect = _pointsBounds(points);
+    var bestAngle = 0.0;
+    for (var i = 0; i < hull.length; i++) {
+      final current = hull[i];
+      final next = hull[(i + 1) % hull.length];
+      final angle = math.atan2(next.dy - current.dy, next.dx - current.dx);
+      final rotated = [for (final point in hull) _rotateOffset(point, -angle)];
+      final rect = _pointsBounds(rotated);
+      final area = rect.width * rect.height;
+      if (area >= bestArea) {
+        continue;
+      }
+      bestArea = area;
+      bestAngle = angle;
+      final center = _rotateOffset(rect.center, angle);
+      bestRect = Rect.fromCenter(
+        center: center,
+        width: rect.width,
+        height: rect.height,
+      );
+    }
+    return _AiOrientedRect(
+      rect: bestRect,
+      rotationDegrees: bestAngle * 180 / math.pi,
+    );
+  }
+
+  List<Offset> _convexHull(List<Offset> points) {
+    final sorted = List<Offset>.of(points)
+      ..sort((a, b) {
+        final x = a.dx.compareTo(b.dx);
+        return x != 0 ? x : a.dy.compareTo(b.dy);
+      });
+    if (sorted.length <= 1) {
+      return sorted;
+    }
+    final lower = <Offset>[];
+    for (final point in sorted) {
+      while (lower.length >= 2 &&
+          _cross(lower[lower.length - 2], lower.last, point) <= 0) {
+        lower.removeLast();
+      }
+      lower.add(point);
+    }
+    final upper = <Offset>[];
+    for (final point in sorted.reversed) {
+      while (upper.length >= 2 &&
+          _cross(upper[upper.length - 2], upper.last, point) <= 0) {
+        upper.removeLast();
+      }
+      upper.add(point);
+    }
+    lower.removeLast();
+    upper.removeLast();
+    return [...lower, ...upper];
+  }
+
+  double _cross(Offset origin, Offset a, Offset b) {
+    return (a.dx - origin.dx) * (b.dy - origin.dy) -
+        (a.dy - origin.dy) * (b.dx - origin.dx);
+  }
+
+  Offset _rotateOffset(Offset point, double radians) {
+    final cos = math.cos(radians);
+    final sin = math.sin(radians);
+    return Offset(
+      point.dx * cos - point.dy * sin,
+      point.dx * sin + point.dy * cos,
+    );
   }
 
   Future<void> _showExportDialog() async {
@@ -3458,6 +3887,10 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
           : KeyEventResult.ignored;
     }
 
+    if (_isEditableTextFocused()) {
+      return KeyEventResult.ignored;
+    }
+
     if (_activeSection == 'browse' && !_shortcutDialogOpen) {
       final result = _detectVideoSession.handleShortcutKey(
         event,
@@ -3715,13 +4148,37 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     String logText = selectedDate == null
         ? t('logs.noLogs')
         : _ConfigStore.readLogsForDate(selectedDate);
+    final logScrollController = ScrollController();
 
     if (!mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
+    try {
+      await showDialog<void>(
+        context: context,
+        builder: (context) {
+          return StatefulBuilder(
           builder: (context, setDialogState) {
+            void scrollLogToTop() {
+              if (!logScrollController.hasClients) {
+                return;
+              }
+              logScrollController.animateTo(
+                0,
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOut,
+              );
+            }
+
+            void scrollLogToBottom() {
+              if (!logScrollController.hasClients) {
+                return;
+              }
+              logScrollController.animateTo(
+                logScrollController.position.maxScrollExtent,
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOut,
+              );
+            }
+
             Future<void> deleteLogRange() async {
               final now = DateTime.now();
               final parsedDates = dates
@@ -3800,10 +4257,30 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                                         value,
                                       );
                                     });
+                                    WidgetsBinding.instance
+                                        .addPostFrameCallback((_) {
+                                          if (logScrollController.hasClients) {
+                                            logScrollController.jumpTo(0);
+                                          }
+                                        });
                                   },
                           ),
                         ),
                         const SizedBox(width: 12),
+                        OutlinedButton.icon(
+                          onPressed: logText.isEmpty ? null : scrollLogToTop,
+                          icon: const Icon(Icons.vertical_align_top),
+                          label: Text(t('logs.top')),
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
+                          onPressed: logText.isEmpty
+                              ? null
+                              : scrollLogToBottom,
+                          icon: const Icon(Icons.vertical_align_bottom),
+                          label: Text(t('logs.bottom')),
+                        ),
+                        const SizedBox(width: 8),
                         OutlinedButton.icon(
                           onPressed: dates.isEmpty ? null : deleteLogRange,
                           icon: const Icon(Icons.delete_outline),
@@ -3820,7 +4297,10 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                             ? const Color(0xFF090515)
                             : Colors.black,
                         child: Scrollbar(
+                          controller: logScrollController,
+                          thumbVisibility: true,
                           child: SingleChildScrollView(
+                            controller: logScrollController,
                             child: SelectableText(
                               logText,
                               style: const TextStyle(
@@ -3845,9 +4325,12 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
               ],
             );
           },
-        );
-      },
-    );
+          );
+        },
+      );
+    } finally {
+      logScrollController.dispose();
+    }
     if (mounted) {
       _keyboardFocusNode.requestFocus();
     }
@@ -5446,6 +5929,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                                 () => _showClassLabels = !_showClassLabels,
                               ),
                               onAnnotationClassChanged: _changeAnnotationClass,
+                              onSam3ClickPrompt: _handleSam3ClickPrompt,
                               aiPanelVisible: _aiPanelVisible,
                               onAiConfigPressed: () {
                                 setState(
@@ -5710,8 +6194,90 @@ class _CollaborationReconnectOverlay extends StatelessWidget {
   }
 }
 
+enum _AiAssistBackend { yolo, sam3 }
+
+enum _AiSam3OutputMode { hbb, obb, seg }
+
+enum _AiSam3PromptMode { text, click }
+
+extension _AiAssistBackendMeta on _AiAssistBackend {
+  String get wireName => switch (this) {
+    _AiAssistBackend.yolo => 'yolo',
+    _AiAssistBackend.sam3 => 'sam3',
+  };
+}
+
+extension _AiSam3OutputModeMeta on _AiSam3OutputMode {
+  String get wireName => switch (this) {
+    _AiSam3OutputMode.hbb => 'hbb',
+    _AiSam3OutputMode.obb => 'obb',
+    _AiSam3OutputMode.seg => 'seg',
+  };
+
+  _AnnotationMode get annotationMode => switch (this) {
+    _AiSam3OutputMode.hbb => _AnnotationMode.hbb,
+    _AiSam3OutputMode.obb => _AnnotationMode.obb,
+    _AiSam3OutputMode.seg => _AnnotationMode.seg,
+  };
+}
+
+extension _AiSam3PromptModeMeta on _AiSam3PromptMode {
+  String get wireName => switch (this) {
+    _AiSam3PromptMode.text => 'text',
+    _AiSam3PromptMode.click => 'click',
+  };
+}
+
+class _AiSam3RuntimeConfig {
+  const _AiSam3RuntimeConfig({
+    this.precision = 'fp16',
+    this.encoder = 'vit_b',
+    this.imageBatchSize = 1,
+    this.videoBatchSize = 1,
+    this.interactiveBatchSize = 1,
+    this.maxImageWidth = 1024,
+    this.maxImageHeight = 768,
+    this.resizeMethod = 'shorter_side',
+  });
+
+  final String precision;
+  final String encoder;
+  final int imageBatchSize;
+  final int videoBatchSize;
+  final int interactiveBatchSize;
+  final int maxImageWidth;
+  final int maxImageHeight;
+  final String resizeMethod;
+
+  _AiSam3RuntimeConfig copyWith({
+    String? precision,
+    String? encoder,
+    int? imageBatchSize,
+    int? videoBatchSize,
+    int? interactiveBatchSize,
+    int? maxImageWidth,
+    int? maxImageHeight,
+    String? resizeMethod,
+  }) {
+    return _AiSam3RuntimeConfig(
+      precision: precision ?? this.precision,
+      encoder: encoder ?? this.encoder,
+      imageBatchSize: imageBatchSize ?? this.imageBatchSize,
+      videoBatchSize: videoBatchSize ?? this.videoBatchSize,
+      interactiveBatchSize: interactiveBatchSize ?? this.interactiveBatchSize,
+      maxImageWidth: maxImageWidth ?? this.maxImageWidth,
+      maxImageHeight: maxImageHeight ?? this.maxImageHeight,
+      resizeMethod: resizeMethod ?? this.resizeMethod,
+    );
+  }
+
+  String get logSummary =>
+      'precision=$precision, encoder=$encoder, batch=image:$imageBatchSize/video:$videoBatchSize/interactive:$interactiveBatchSize, preResize=${maxImageWidth}x$maxImageHeight, resize=$resizeMethod, processor=1008';
+}
+
 class _AiAssistConfig {
   const _AiAssistConfig({
+    this.backend = _AiAssistBackend.yolo,
     required this.modelPath,
     required this.classes,
     required this.selectedClassIds,
@@ -5719,8 +6285,13 @@ class _AiAssistConfig {
     required this.endIndex,
     this.confThreshold = 0.25,
     this.imageSize = 640,
+    this.sam3OutputMode = _AiSam3OutputMode.seg,
+    this.sam3PromptMode = _AiSam3PromptMode.text,
+    this.sam3PromptText = '',
+    this.sam3Runtime = const _AiSam3RuntimeConfig(),
   });
 
+  final _AiAssistBackend backend;
   final String modelPath;
   final List<_AiModelClass> classes;
   final Set<int> selectedClassIds;
@@ -5728,6 +6299,25 @@ class _AiAssistConfig {
   final int endIndex;
   final double confThreshold;
   final int imageSize;
+  final _AiSam3OutputMode sam3OutputMode;
+  final _AiSam3PromptMode sam3PromptMode;
+  final String sam3PromptText;
+  final _AiSam3RuntimeConfig sam3Runtime;
+}
+
+class _Sam3ClickPromptPoint {
+  const _Sam3ClickPromptPoint({
+    required this.x,
+    required this.y,
+    required this.positive,
+  });
+
+  final double x;
+  final double y;
+  final bool positive;
+
+  String get wireLine =>
+      '${x.toStringAsFixed(6)},${y.toStringAsFixed(6)},${positive ? 1 : 0}';
 }
 
 double _normalizeAiConfidence(double value) {
@@ -5771,26 +6361,58 @@ class _AiAssistFloatingPanel extends StatefulWidget {
 class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
   late final TextEditingController _startController;
   late final TextEditingController _endController;
-  String? _modelPath;
+  late final TextEditingController _sam3PromptController;
+  _AiAssistBackend _backend = _AiAssistBackend.yolo;
+  String? _yoloModelPath;
+  String? _sam3ModelPath;
   List<_AiModelClass> _classes = const [];
   Set<int> _selectedClassIds = <int>{};
   double _confThreshold = 0.25;
+  _AiSam3OutputMode _sam3OutputMode = _AiSam3OutputMode.seg;
+  _AiSam3PromptMode _sam3PromptMode = _AiSam3PromptMode.text;
+  _AiSam3RuntimeConfig _sam3Runtime = const _AiSam3RuntimeConfig();
   bool _loadingClasses = false;
   String? _error;
+
+  String? get _modelPath =>
+      _backend == _AiAssistBackend.sam3 ? _sam3ModelPath : _yoloModelPath;
+
+  set _modelPath(String? value) {
+    if (_backend == _AiAssistBackend.sam3) {
+      _sam3ModelPath = value;
+    } else {
+      _yoloModelPath = value;
+    }
+  }
 
   @override
   void initState() {
     super.initState();
     final initial = widget.initialConfig;
-    _modelPath = initial?.modelPath;
+    _backend = initial?.backend ?? _AiAssistBackend.yolo;
+    if (initial?.backend == _AiAssistBackend.sam3) {
+      _sam3ModelPath = initial?.modelPath;
+    } else {
+      _yoloModelPath = initial?.modelPath;
+    }
+    final savedSam3ModelPath = _ConfigStore.loadLastSam3ModelPath();
+    if (savedSam3ModelPath.isNotEmpty) {
+      _sam3ModelPath = savedSam3ModelPath;
+    }
     _classes = initial?.classes ?? const [];
     _selectedClassIds = initial?.selectedClassIds.toSet() ?? <int>{};
     _confThreshold = _normalizeAiConfidence(initial?.confThreshold ?? 0.25);
+    _sam3OutputMode = initial?.sam3OutputMode ?? _AiSam3OutputMode.seg;
+    _sam3PromptMode = initial?.sam3PromptMode ?? _AiSam3PromptMode.text;
+    _sam3Runtime = initial?.sam3Runtime ?? const _AiSam3RuntimeConfig();
     _startController = TextEditingController(
       text: (initial?.startIndex ?? 1).toString(),
     );
     _endController = TextEditingController(
       text: (initial?.endIndex ?? math.max(1, widget.imageCount)).toString(),
+    );
+    _sam3PromptController = TextEditingController(
+      text: initial?.sam3PromptText ?? '',
     );
   }
 
@@ -5798,26 +6420,44 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
   void dispose() {
     _startController.dispose();
     _endController.dispose();
+    _sam3PromptController.dispose();
     super.dispose();
   }
 
   Future<void> _chooseModel() async {
     final file = await openFile(
-      acceptedTypeGroups: const [
-        XTypeGroup(label: 'YOLO AI model', extensions: ['pt', 'onnx']),
+      acceptedTypeGroups: [
+        XTypeGroup(
+          label: _backend == _AiAssistBackend.sam3
+              ? 'SAM3 checkpoint'
+              : 'YOLO AI model',
+          extensions: _backend == _AiAssistBackend.sam3
+              ? const ['pt', 'pth', 'safetensors']
+              : const ['pt', 'onnx'],
+        ),
       ],
     );
     if (file == null) {
       return;
     }
     final path = file.path;
-    if (!path.toLowerCase().endsWith('.pt')) {
+    if (_backend == _AiAssistBackend.yolo &&
+        !path.toLowerCase().endsWith('.pt')) {
       setState(() {
         _modelPath = path;
         _classes = const [];
         _selectedClassIds = <int>{};
         _error = t('ai.onnxNotSupported');
       });
+      return;
+    }
+    if (_backend == _AiAssistBackend.sam3) {
+      setState(() {
+        _modelPath = path;
+        _error = null;
+      });
+      _ConfigStore.saveLastSam3ModelPath(path);
+      _saveDraftIfValid();
       return;
     }
     final pythonPath = widget.pythonPath.trim();
@@ -5856,14 +6496,26 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
     }
   }
 
-  _AiAssistConfig? _configFromFields() {
+  _AiAssistConfig? _configFromFields({bool showErrors = true}) {
     final modelPath = _modelPath;
     if (modelPath == null || modelPath.trim().isEmpty) {
-      setState(() => _error = t('ai.chooseModelFirst'));
+      if (showErrors) {
+        setState(() => _error = t('ai.chooseModelFirst'));
+      }
       return null;
     }
-    if (_selectedClassIds.isEmpty) {
-      setState(() => _error = t('ai.noSelectedClasses'));
+    if (_backend == _AiAssistBackend.yolo && _selectedClassIds.isEmpty) {
+      if (showErrors) {
+        setState(() => _error = t('ai.noSelectedClasses'));
+      }
+      return null;
+    }
+    if (_backend == _AiAssistBackend.sam3 &&
+        _sam3PromptMode == _AiSam3PromptMode.text &&
+        _sam3PromptController.text.trim().isEmpty) {
+      if (showErrors) {
+        setState(() => _error = t('ai.sam3PromptRequired'));
+      }
       return null;
     }
     final start = int.tryParse(_startController.text.trim()) ?? 1;
@@ -5872,14 +6524,28 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
     final normalizedStart = start.clamp(1, maxIndex).toInt();
     final normalizedEnd = end.clamp(normalizedStart, maxIndex).toInt();
     return _AiAssistConfig(
+      backend: _backend,
       modelPath: modelPath,
       classes: _classes,
       selectedClassIds: _selectedClassIds.toSet(),
       startIndex: normalizedStart,
       endIndex: normalizedEnd,
       confThreshold: _normalizeAiConfidence(_confThreshold),
-      imageSize: 640,
+      imageSize: _backend == _AiAssistBackend.sam3
+          ? math.max(_sam3Runtime.maxImageWidth, _sam3Runtime.maxImageHeight)
+          : 640,
+      sam3OutputMode: _sam3OutputMode,
+      sam3PromptMode: _sam3PromptMode,
+      sam3PromptText: _sam3PromptController.text,
+      sam3Runtime: _sam3Runtime,
     );
+  }
+
+  void _saveDraftIfValid() {
+    final config = _configFromFields(showErrors: false);
+    if (config != null) {
+      widget.onConfigSaved(config);
+    }
   }
 
   void _save() {
@@ -5911,9 +6577,262 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
     await widget.onAnnotateAll(config);
   }
 
+  Future<void> _editSam3Runtime() async {
+    final next = await showDialog<_AiSam3RuntimeConfig>(
+      context: context,
+      builder: (context) => _Sam3RuntimeDialog(initial: _sam3Runtime),
+    );
+    if (next == null || !mounted) {
+      return;
+    }
+    setState(() {
+      _sam3Runtime = next;
+      _error = null;
+    });
+    _saveDraftIfValid();
+  }
+
+  Widget _rangeFields() {
+    return Row(
+      children: [
+        Expanded(
+          child: TextField(
+            controller: _startController,
+            keyboardType: TextInputType.number,
+            decoration: InputDecoration(
+              labelText: t('ai.startImageIndex'),
+              isDense: true,
+            ),
+          ),
+        ),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 8),
+          child: Text('-'),
+        ),
+        Expanded(
+          child: TextField(
+            controller: _endController,
+            keyboardType: TextInputType.number,
+            decoration: InputDecoration(
+              labelText: t('ai.endImageIndex'),
+              isDense: true,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _confidenceSlider({required bool disabled}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '${t('ai.confidence')} ${_confThreshold.toStringAsFixed(2)}',
+          style: Theme.of(context).textTheme.bodyMedium,
+        ),
+        Slider(
+          min: 0.05,
+          max: 0.95,
+          divisions: 18,
+          value: _normalizeAiConfidence(_confThreshold),
+          label: _normalizeAiConfidence(_confThreshold).toStringAsFixed(2),
+          onChanged: disabled
+              ? null
+              : (value) {
+                  setState(() {
+                    _confThreshold = _normalizeAiConfidence(value);
+                  });
+                },
+        ),
+      ],
+    );
+  }
+
+  Widget _modelRow({required bool disabled}) {
+    final modelPath = _modelPath;
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            modelPath ?? t('ai.noModel'),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        const SizedBox(width: 8),
+        OutlinedButton.icon(
+          onPressed: disabled ? null : _chooseModel,
+          icon: const Icon(Icons.folder_open, size: 16),
+          label: Text(t('ai.chooseModel')),
+        ),
+      ],
+    );
+  }
+
+  Widget _yoloTab({required bool disabled}) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _modelRow(disabled: disabled),
+        const SizedBox(height: 14),
+        _rangeFields(),
+        const SizedBox(height: 14),
+        _confidenceSlider(disabled: disabled),
+        const SizedBox(height: 8),
+        if (_loadingClasses)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.all(18),
+              child: CircularProgressIndicator(),
+            ),
+          )
+        else
+          DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border.all(color: _borderColor(context)),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: ExpansionTile(
+              initiallyExpanded: true,
+              title: Text(t('ai.classes')),
+              subtitle: Text(
+                '${_selectedClassIds.length} / ${_classes.length}',
+              ),
+              children: [
+                CheckboxListTile(
+                  dense: true,
+                  value:
+                      _classes.isNotEmpty &&
+                      _selectedClassIds.length == _classes.length,
+                  onChanged: _classes.isEmpty
+                      ? null
+                      : (value) {
+                          setState(() {
+                            _selectedClassIds = value == true
+                                ? _classes.map((item) => item.id).toSet()
+                                : <int>{};
+                          });
+                        },
+                  title: Text(t('ai.selectAllClasses')),
+                ),
+                for (final item in _classes)
+                  CheckboxListTile(
+                    dense: true,
+                    value: _selectedClassIds.contains(item.id),
+                    onChanged: (value) {
+                      setState(() {
+                        if (value == true) {
+                          _selectedClassIds.add(item.id);
+                        } else {
+                          _selectedClassIds.remove(item.id);
+                        }
+                      });
+                    },
+                    title: Text('${item.id}: ${item.name}'),
+                  ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _sam3Tab({required bool disabled}) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _modelRow(disabled: disabled),
+        const SizedBox(height: 14),
+        _rangeFields(),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            Expanded(
+              child: SegmentedButton<_AiSam3OutputMode>(
+                segments: const [
+                  ButtonSegment(
+                    value: _AiSam3OutputMode.hbb,
+                    label: Text('HBB'),
+                  ),
+                  ButtonSegment(
+                    value: _AiSam3OutputMode.obb,
+                    label: Text('OBB'),
+                  ),
+                  ButtonSegment(
+                    value: _AiSam3OutputMode.seg,
+                    label: Text('SEG'),
+                  ),
+                ],
+                selected: {_sam3OutputMode},
+                onSelectionChanged: disabled
+                    ? null
+                    : (value) {
+                        setState(() => _sam3OutputMode = value.first);
+                        _saveDraftIfValid();
+                      },
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        SegmentedButton<_AiSam3PromptMode>(
+          segments: [
+            ButtonSegment(
+              value: _AiSam3PromptMode.text,
+              label: Text(t('ai.sam3PromptText')),
+            ),
+            ButtonSegment(
+              value: _AiSam3PromptMode.click,
+              label: Text(t('ai.sam3PromptClick')),
+            ),
+          ],
+          selected: {_sam3PromptMode},
+          onSelectionChanged: disabled
+              ? null
+              : (value) {
+                  setState(() => _sam3PromptMode = value.first);
+                  _saveDraftIfValid();
+                },
+        ),
+        const SizedBox(height: 12),
+        if (_sam3PromptMode == _AiSam3PromptMode.text)
+          TextField(
+            controller: _sam3PromptController,
+            minLines: 3,
+            maxLines: 5,
+            decoration: InputDecoration(
+              labelText: t('ai.sam3PromptLabel'),
+              hintText: t('ai.sam3PromptHint'),
+              alignLabelWithHint: true,
+            ),
+          )
+        else
+          Text(
+            t('ai.sam3ClickHint'),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        const SizedBox(height: 12),
+        _confidenceSlider(disabled: disabled),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: disabled ? null : _editSam3Runtime,
+          icon: const Icon(Icons.tune, size: 16),
+          label: Text(t('ai.sam3RuntimeConfig')),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          _sam3Runtime.logSummary,
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final modelPath = _modelPath;
     final textTheme = Theme.of(context).textTheme;
     final disabled = _loadingClasses;
 
@@ -5933,248 +6852,140 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
                   border: Border.all(color: _borderColor(context)),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Column(
-                  children: [
-                    MouseRegion(
-                      cursor: SystemMouseCursors.move,
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onPanUpdate: (details) => widget.onDrag(details.delta),
-                        child: Container(
-                          height: 46,
-                          padding: const EdgeInsets.symmetric(horizontal: 14),
-                          decoration: BoxDecoration(
-                            color: _controlColor(context),
-                            border: Border(
-                              bottom: BorderSide(color: _borderColor(context)),
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.auto_awesome, size: 18),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  t('ai.configTitle'),
-                                  style: textTheme.titleMedium,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
+                child: DefaultTabController(
+                  length: 2,
+                  initialIndex: _backend.index,
+                  child: Column(
+                    children: [
+                      MouseRegion(
+                        cursor: SystemMouseCursors.move,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onPanUpdate: (details) =>
+                              widget.onDrag(details.delta),
+                          child: Container(
+                            height: 46,
+                            padding: const EdgeInsets.symmetric(horizontal: 14),
+                            decoration: BoxDecoration(
+                              color: _controlColor(context),
+                              border: Border(
+                                bottom: BorderSide(
+                                  color: _borderColor(context),
                                 ),
                               ),
-                              IconButton(
-                                tooltip: t('action.close'),
-                                onPressed: widget.onClose,
-                                icon: const Icon(Icons.close, size: 18),
-                                visualDensity: VisualDensity.compact,
-                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.auto_awesome, size: 18),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    t('ai.configTitle'),
+                                    style: textTheme.titleMedium,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                IconButton(
+                                  tooltip: t('action.close'),
+                                  onPressed: widget.onClose,
+                                  icon: const Icon(Icons.close, size: 18),
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      TabBar(
+                        onTap: (index) {
+                          setState(() {
+                            _backend = _AiAssistBackend.values[index];
+                            _error = null;
+                          });
+                          _saveDraftIfValid();
+                        },
+                        tabs: const [
+                          Tab(text: 'YOLO'),
+                          Tab(text: 'SAM3'),
+                        ],
+                      ),
+                      Expanded(
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (_backend == _AiAssistBackend.yolo)
+                                _yoloTab(disabled: disabled)
+                              else
+                                _sam3Tab(disabled: disabled),
+                              if (_error != null) ...[
+                                const SizedBox(height: 10),
+                                Text(
+                                  _error!,
+                                  style: TextStyle(
+                                    color: Theme.of(context).colorScheme.error,
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                         ),
                       ),
-                    ),
-                    Expanded(
-                      child: SingleChildScrollView(
-                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
                         child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             Row(
                               children: [
                                 Expanded(
-                                  child: Text(
-                                    modelPath ?? t('ai.noModel'),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
+                                  child: FilledButton.tonalIcon(
+                                    onPressed: disabled
+                                        ? null
+                                        : _annotateCurrent,
+                                    icon: const Icon(
+                                      Icons.image_search_outlined,
+                                      size: 17,
+                                    ),
+                                    label: Text(t('ai.annotateCurrent')),
                                   ),
                                 ),
-                                const SizedBox(width: 8),
-                                OutlinedButton.icon(
-                                  onPressed: disabled ? null : _chooseModel,
-                                  icon: const Icon(Icons.folder_open, size: 16),
-                                  label: Text(t('ai.chooseModel')),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 14),
-                            Row(
-                              children: [
+                                const SizedBox(width: 10),
                                 Expanded(
-                                  child: TextField(
-                                    controller: _startController,
-                                    keyboardType: TextInputType.number,
-                                    decoration: InputDecoration(
-                                      labelText: t('ai.startImageIndex'),
-                                      isDense: true,
+                                  child: FilledButton.icon(
+                                    onPressed: disabled ? null : _annotateAll,
+                                    icon: const Icon(
+                                      Icons.auto_awesome_motion,
+                                      size: 17,
                                     ),
-                                  ),
-                                ),
-                                const Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 8),
-                                  child: Text('-'),
-                                ),
-                                Expanded(
-                                  child: TextField(
-                                    controller: _endController,
-                                    keyboardType: TextInputType.number,
-                                    decoration: InputDecoration(
-                                      labelText: t('ai.endImageIndex'),
-                                      isDense: true,
-                                    ),
+                                    label: Text(t('ai.annotateAll')),
                                   ),
                                 ),
                               ],
-                            ),
-                            const SizedBox(height: 14),
-                            Text(
-                              '${t('ai.confidence')} ${_confThreshold.toStringAsFixed(2)}',
-                              style: textTheme.bodyMedium,
-                            ),
-                            Slider(
-                              min: 0.05,
-                              max: 0.95,
-                              divisions: 18,
-                              value: _normalizeAiConfidence(_confThreshold),
-                              label: _normalizeAiConfidence(
-                                _confThreshold,
-                              ).toStringAsFixed(2),
-                              onChanged: disabled
-                                  ? null
-                                  : (value) {
-                                      setState(() {
-                                        _confThreshold = _normalizeAiConfidence(
-                                          value,
-                                        );
-                                      });
-                                    },
                             ),
                             const SizedBox(height: 8),
-                            if (_loadingClasses)
-                              const Center(
-                                child: Padding(
-                                  padding: EdgeInsets.all(18),
-                                  child: CircularProgressIndicator(),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                TextButton(
+                                  onPressed: widget.onClose,
+                                  child: Text(t('action.cancel')),
                                 ),
-                              )
-                            else
-                              DecoratedBox(
-                                decoration: BoxDecoration(
-                                  border: Border.all(
-                                    color: _borderColor(context),
-                                  ),
-                                  borderRadius: BorderRadius.circular(6),
+                                const SizedBox(width: 10),
+                                OutlinedButton(
+                                  onPressed: disabled ? null : _save,
+                                  child: Text(t('action.save')),
                                 ),
-                                child: ExpansionTile(
-                                  initiallyExpanded: true,
-                                  title: Text(t('ai.classes')),
-                                  subtitle: Text(
-                                    '${_selectedClassIds.length} / ${_classes.length}',
-                                  ),
-                                  children: [
-                                    CheckboxListTile(
-                                      dense: true,
-                                      value:
-                                          _classes.isNotEmpty &&
-                                          _selectedClassIds.length ==
-                                              _classes.length,
-                                      onChanged: _classes.isEmpty
-                                          ? null
-                                          : (value) {
-                                              setState(() {
-                                                _selectedClassIds =
-                                                    value == true
-                                                    ? _classes
-                                                          .map(
-                                                            (item) => item.id,
-                                                          )
-                                                          .toSet()
-                                                    : <int>{};
-                                              });
-                                            },
-                                      title: Text(t('ai.selectAllClasses')),
-                                    ),
-                                    for (final item in _classes)
-                                      CheckboxListTile(
-                                        dense: true,
-                                        value: _selectedClassIds.contains(
-                                          item.id,
-                                        ),
-                                        onChanged: (value) {
-                                          setState(() {
-                                            if (value == true) {
-                                              _selectedClassIds.add(item.id);
-                                            } else {
-                                              _selectedClassIds.remove(item.id);
-                                            }
-                                          });
-                                        },
-                                        title: Text('${item.id}: ${item.name}'),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                            if (_error != null) ...[
-                              const SizedBox(height: 10),
-                              Text(
-                                _error!,
-                                style: TextStyle(
-                                  color: Theme.of(context).colorScheme.error,
-                                ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ],
                         ),
                       ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: FilledButton.tonalIcon(
-                                  onPressed: disabled ? null : _annotateCurrent,
-                                  icon: const Icon(
-                                    Icons.image_search_outlined,
-                                    size: 17,
-                                  ),
-                                  label: Text(t('ai.annotateCurrent')),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: FilledButton.icon(
-                                  onPressed: disabled ? null : _annotateAll,
-                                  icon: const Icon(
-                                    Icons.auto_awesome_motion,
-                                    size: 17,
-                                  ),
-                                  label: Text(t('ai.annotateAll')),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.end,
-                            children: [
-                              TextButton(
-                                onPressed: widget.onClose,
-                                child: Text(t('action.cancel')),
-                              ),
-                              const SizedBox(width: 10),
-                              OutlinedButton(
-                                onPressed: disabled ? null : _save,
-                                child: Text(t('action.save')),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -6211,6 +7022,214 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
       ),
     );
   }
+}
+
+class _Sam3RuntimeDialog extends StatefulWidget {
+  const _Sam3RuntimeDialog({required this.initial});
+
+  final _AiSam3RuntimeConfig initial;
+
+  @override
+  State<_Sam3RuntimeDialog> createState() => _Sam3RuntimeDialogState();
+}
+
+class _Sam3RuntimeDialogState extends State<_Sam3RuntimeDialog> {
+  late String _precision;
+  late String _encoder;
+  late String _resizeMethod;
+  late final TextEditingController _imageBatchController;
+  late final TextEditingController _videoBatchController;
+  late final TextEditingController _interactiveBatchController;
+  late final TextEditingController _maxWidthController;
+  late final TextEditingController _maxHeightController;
+
+  @override
+  void initState() {
+    super.initState();
+    final initial = widget.initial;
+    _precision = initial.precision;
+    _encoder = initial.encoder;
+    _resizeMethod = initial.resizeMethod == 'shorter_side'
+        ? initial.resizeMethod
+        : 'shorter_side';
+    _imageBatchController = TextEditingController(
+      text: initial.imageBatchSize.toString(),
+    );
+    _videoBatchController = TextEditingController(
+      text: initial.videoBatchSize.toString(),
+    );
+    _interactiveBatchController = TextEditingController(
+      text: initial.interactiveBatchSize.toString(),
+    );
+    _maxWidthController = TextEditingController(
+      text: initial.maxImageWidth.toString(),
+    );
+    _maxHeightController = TextEditingController(
+      text: initial.maxImageHeight.toString(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _imageBatchController.dispose();
+    _videoBatchController.dispose();
+    _interactiveBatchController.dispose();
+    _maxWidthController.dispose();
+    _maxHeightController.dispose();
+    super.dispose();
+  }
+
+  int _intValue(TextEditingController controller, int fallback) {
+    final value = int.tryParse(controller.text.trim()) ?? fallback;
+    return value.clamp(1, 4096).toInt();
+  }
+
+  void _save() {
+    Navigator.of(context).pop(
+      _AiSam3RuntimeConfig(
+        precision: _precision,
+        encoder: _encoder,
+        imageBatchSize: _intValue(_imageBatchController, 1),
+        videoBatchSize: _intValue(_videoBatchController, 1),
+        interactiveBatchSize: _intValue(_interactiveBatchController, 1),
+        maxImageWidth: _intValue(_maxWidthController, 1024),
+        maxImageHeight: _intValue(_maxHeightController, 768),
+        resizeMethod: _resizeMethod,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(t('ai.sam3RuntimeConfig')),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButtonFormField<String>(
+                initialValue: _precision,
+                decoration: InputDecoration(labelText: t('ai.sam3Precision')),
+                items: const [
+                  DropdownMenuItem(value: 'fp16', child: Text('fp16')),
+                  DropdownMenuItem(value: 'bf16', child: Text('bf16')),
+                  DropdownMenuItem(value: 'fp32', child: Text('fp32')),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() => _precision = value);
+                  }
+                },
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: _encoder,
+                decoration: InputDecoration(labelText: t('ai.sam3Encoder')),
+                items: const [
+                  DropdownMenuItem(value: 'vit_b', child: Text('vit_b')),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() => _encoder = value);
+                  }
+                },
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: _resizeMethod,
+                decoration: InputDecoration(
+                  labelText: t('ai.sam3ResizeMethod'),
+                ),
+                items: [
+                  DropdownMenuItem(
+                    value: 'shorter_side',
+                    child: Text(t('ai.sam3ResizeShorterSide')),
+                  ),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() => _resizeMethod = value);
+                  }
+                },
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _imageBatchController,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        labelText: t('ai.sam3BatchImage'),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextField(
+                      controller: _videoBatchController,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        labelText: t('ai.sam3BatchVideo'),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _interactiveBatchController,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText: t('ai.sam3BatchInteractive'),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _maxWidthController,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        labelText: t('ai.sam3MaxWidth'),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextField(
+                      controller: _maxHeightController,
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        labelText: t('ai.sam3MaxHeight'),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(t('action.cancel')),
+        ),
+        FilledButton(onPressed: _save, child: Text(t('action.save'))),
+      ],
+    );
+  }
+}
+
+class _AiOrientedRect {
+  const _AiOrientedRect({required this.rect, required this.rotationDegrees});
+
+  final Rect rect;
+  final double rotationDegrees;
 }
 
 class _TopMenuBar extends StatelessWidget {
@@ -6793,6 +7812,7 @@ class _ShortcutSettingsDialogState extends State<_ShortcutSettingsDialog> {
   @override
   Widget build(BuildContext context) {
     final config = _currentConfig;
+    const scopes = _ShortcutScope.values;
 
     return AlertDialog(
       title: Text(t('shortcut.title')),
@@ -6801,43 +7821,38 @@ class _ShortcutSettingsDialogState extends State<_ShortcutSettingsDialog> {
         autofocus: true,
         onKeyEvent: _captureKey,
         child: SizedBox(
-          width: 420,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 520),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _ShortcutSectionTitle(title: t('shortcut.normalGroup')),
-                  for (final action in _ShortcutAction.values.where(
-                    (action) => !action.isAiAction,
-                  ))
-                    _ShortcutEditRow(
-                      action: action,
-                      label: t(action.labelKey),
-                      shortcut: config.binding(action).displayLabel,
-                      waiting: _waitingAction == action,
-                      onPressed: _startCapture,
-                    ),
-                  const SizedBox(height: 10),
-                  _ShortcutSectionTitle(title: t('shortcut.aiGroup')),
-                  for (final action in _ShortcutAction.values.where(
-                    (action) => action.isAiAction,
-                  ))
-                    _ShortcutEditRow(
-                      action: action,
-                      label: t(action.labelKey),
-                      shortcut: config.binding(action).displayLabel,
-                      waiting: _waitingAction == action,
-                      onPressed: _startCapture,
-                    ),
-                  const SizedBox(height: 8),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(t('shortcut.note')),
+          width: 480,
+          height: 520,
+          child: DefaultTabController(
+            length: scopes.length,
+            child: Column(
+              children: [
+                TabBar(
+                  isScrollable: true,
+                  tabs: [
+                    for (final scope in scopes) Tab(text: t(scope.labelKey)),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: TabBarView(
+                    children: [
+                      for (final scope in scopes)
+                        _ShortcutScopePane(
+                          scope: scope,
+                          config: config,
+                          waitingAction: _waitingAction,
+                          onPressed: _startCapture,
+                        ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(t('shortcut.note')),
+                ),
+              ],
             ),
           ),
         ),
@@ -6858,6 +7873,63 @@ class _ShortcutSettingsDialogState extends State<_ShortcutSettingsDialog> {
           child: Text(t('action.close')),
         ),
       ],
+    );
+  }
+}
+
+class _ShortcutScopePane extends StatelessWidget {
+  const _ShortcutScopePane({
+    required this.scope,
+    required this.config,
+    required this.waitingAction,
+    required this.onPressed,
+  });
+
+  final _ShortcutScope scope;
+  final _ShortcutConfig config;
+  final _ShortcutAction? waitingAction;
+  final ValueChanged<_ShortcutAction> onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final actions = [
+      for (final action in _ShortcutAction.values)
+        if (action.scope == scope) action,
+    ];
+    if (actions.isEmpty) {
+      return Center(child: Text(t('shortcut.noItems')));
+    }
+    final normalActions = actions.where((action) => !action.isAiAction);
+    final aiActions = actions.where((action) => action.isAiAction);
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (normalActions.isNotEmpty) ...[
+            _ShortcutSectionTitle(title: t('shortcut.normalGroup')),
+            for (final action in normalActions)
+              _ShortcutEditRow(
+                action: action,
+                label: t(action.labelKey),
+                shortcut: config.binding(action).displayLabel,
+                waiting: waitingAction == action,
+                onPressed: onPressed,
+              ),
+          ],
+          if (aiActions.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            _ShortcutSectionTitle(title: t('shortcut.aiGroup')),
+            for (final action in aiActions)
+              _ShortcutEditRow(
+                action: action,
+                label: t(action.labelKey),
+                shortcut: config.binding(action).displayLabel,
+                waiting: waitingAction == action,
+                onPressed: onPressed,
+              ),
+          ],
+        ],
+      ),
     );
   }
 }
@@ -7727,6 +8799,17 @@ extension _FirstOrNullExtension<T> on Iterable<T> {
     }
     return iterator.current;
   }
+}
+
+bool _isEditableTextFocused() {
+  final context = FocusManager.instance.primaryFocus?.context;
+  if (context == null) {
+    return false;
+  }
+  if (context.widget is EditableText) {
+    return true;
+  }
+  return context.findAncestorWidgetOfExactType<EditableText>() != null;
 }
 
 String _keyboardLabel(LogicalKeyboardKey key) {

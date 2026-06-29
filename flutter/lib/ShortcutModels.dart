@@ -25,12 +25,19 @@ enum _ShortcutAction {
   rotateObbLeft1,
   rotateObbRight1,
   rotateObbRight5,
+  browsePreviousMedia,
+  browseNextMedia,
+  browseFullscreen,
+  browseVolumeUp,
+  browseVolumeDown,
   videoPlayPause,
   videoRewind,
   videoFastForward,
   aiAnnotateCurrent,
   aiAnnotateAll,
 }
+
+enum _ShortcutScope { global, label, browse, train }
 
 extension _ShortcutActionLabel on _ShortcutAction {
   String get labelKey => switch (this) {
@@ -47,6 +54,11 @@ extension _ShortcutActionLabel on _ShortcutAction {
     _ShortcutAction.rotateObbLeft1 => 'shortcut.rotateObbLeft1',
     _ShortcutAction.rotateObbRight1 => 'shortcut.rotateObbRight1',
     _ShortcutAction.rotateObbRight5 => 'shortcut.rotateObbRight5',
+    _ShortcutAction.browsePreviousMedia => 'shortcut.browsePreviousMedia',
+    _ShortcutAction.browseNextMedia => 'shortcut.browseNextMedia',
+    _ShortcutAction.browseFullscreen => 'shortcut.browseFullscreen',
+    _ShortcutAction.browseVolumeUp => 'shortcut.browseVolumeUp',
+    _ShortcutAction.browseVolumeDown => 'shortcut.browseVolumeDown',
     _ShortcutAction.videoPlayPause => 'shortcut.videoPlayPause',
     _ShortcutAction.videoRewind => 'shortcut.videoRewind',
     _ShortcutAction.videoFastForward => 'shortcut.videoFastForward',
@@ -57,6 +69,27 @@ extension _ShortcutActionLabel on _ShortcutAction {
   bool get isAiAction => switch (this) {
     _ShortcutAction.aiAnnotateCurrent || _ShortcutAction.aiAnnotateAll => true,
     _ => false,
+  };
+
+  _ShortcutScope get scope => switch (this) {
+    _ShortcutAction.browsePreviousMedia ||
+    _ShortcutAction.browseNextMedia ||
+    _ShortcutAction.browseFullscreen ||
+    _ShortcutAction.browseVolumeUp ||
+    _ShortcutAction.browseVolumeDown ||
+    _ShortcutAction.videoPlayPause ||
+    _ShortcutAction.videoRewind ||
+    _ShortcutAction.videoFastForward => _ShortcutScope.browse,
+    _ => _ShortcutScope.label,
+  };
+}
+
+extension _ShortcutScopeLabel on _ShortcutScope {
+  String get labelKey => switch (this) {
+    _ShortcutScope.global => 'shortcut.scopeGlobal',
+    _ShortcutScope.label => 'shortcut.scopeLabel',
+    _ShortcutScope.browse => 'shortcut.scopeBrowse',
+    _ShortcutScope.train => 'shortcut.scopeTrain',
   };
 }
 
@@ -150,6 +183,21 @@ class _ShortcutConfig {
       ),
       _ShortcutAction.rotateObbRight5: _ShortcutBinding.fromKey(
         LogicalKeyboardKey.keyV,
+      ),
+      _ShortcutAction.browsePreviousMedia: _ShortcutBinding.fromKey(
+        LogicalKeyboardKey.keyA,
+      ),
+      _ShortcutAction.browseNextMedia: _ShortcutBinding.fromKey(
+        LogicalKeyboardKey.keyD,
+      ),
+      _ShortcutAction.browseFullscreen: _ShortcutBinding.fromKey(
+        LogicalKeyboardKey.enter,
+      ),
+      _ShortcutAction.browseVolumeUp: _ShortcutBinding.fromKey(
+        LogicalKeyboardKey.arrowUp,
+      ),
+      _ShortcutAction.browseVolumeDown: _ShortcutBinding.fromKey(
+        LogicalKeyboardKey.arrowDown,
       ),
       _ShortcutAction.videoPlayPause: _ShortcutBinding.fromKey(
         LogicalKeyboardKey.space,

@@ -1397,6 +1397,7 @@ impl SseDecode for crate::api::detecting_mod::AiAnnotateBatchRequest {
         let mut var_imgsz = <u32>::sse_decode(deserializer);
         let mut var_device = <String>::sse_decode(deserializer);
         return crate::api::detecting_mod::AiAnnotateBatchRequest {
+            backend: "yolo".to_string(),
             python_path: var_pythonPath,
             model_path: var_modelPath,
             input_paths_text: var_inputPathsText,
@@ -1405,6 +1406,18 @@ impl SseDecode for crate::api::detecting_mod::AiAnnotateBatchRequest {
             iou_threshold: var_iouThreshold,
             imgsz: var_imgsz,
             device: var_device,
+            sam_mode: "seg".to_string(),
+            sam_prompt_mode: "text".to_string(),
+            prompts_text: String::new(),
+            sam_click_points_text: String::new(),
+            sam_precision: "fp16".to_string(),
+            sam_encoder: "vit_b".to_string(),
+            sam_image_batch_size: 1,
+            sam_video_batch_size: 1,
+            sam_interactive_batch_size: 1,
+            sam_max_image_width: 1024,
+            sam_max_image_height: 768,
+            sam_resize_method: "shorter_side".to_string(),
         };
     }
 }
@@ -1421,6 +1434,7 @@ impl SseDecode for crate::api::detecting_mod::AiAnnotateImageRequest {
         let mut var_imgsz = <u32>::sse_decode(deserializer);
         let mut var_device = <String>::sse_decode(deserializer);
         return crate::api::detecting_mod::AiAnnotateImageRequest {
+            backend: "yolo".to_string(),
             python_path: var_pythonPath,
             model_path: var_modelPath,
             input_path: var_inputPath,
@@ -1429,6 +1443,18 @@ impl SseDecode for crate::api::detecting_mod::AiAnnotateImageRequest {
             iou_threshold: var_iouThreshold,
             imgsz: var_imgsz,
             device: var_device,
+            sam_mode: "seg".to_string(),
+            sam_prompt_mode: "text".to_string(),
+            prompts_text: String::new(),
+            sam_click_points_text: String::new(),
+            sam_precision: "fp16".to_string(),
+            sam_encoder: "vit_b".to_string(),
+            sam_image_batch_size: 1,
+            sam_video_batch_size: 1,
+            sam_interactive_batch_size: 1,
+            sam_max_image_width: 1024,
+            sam_max_image_height: 768,
+            sam_resize_method: "shorter_side".to_string(),
         };
     }
 }

@@ -1097,8 +1097,12 @@ fn preload_training_modules(log_path: &Path) -> Result<(), String> {
 
 fn preload_training_modules_opt(log_path: Option<&Path>) -> Result<(), String> {
     let result = ini_python::preload_yolo_modules();
-    if let (Ok(()), Some(path)) = (&result, log_path) {
-        append_log_line(path, "python modules preloaded");
+    match (&result, log_path) {
+        (Ok(()), Some(path)) => append_log_line(path, "python modules preloaded"),
+        (Err(error), Some(path)) => {
+            append_log_line(path, &format!("python modules preload failed: {error}"))
+        }
+        _ => {}
     }
     result
 }

@@ -65,6 +65,7 @@ pub struct DetectModelTaskResult {
 
 #[derive(Debug, Clone)]
 pub struct AiAnnotateImageRequest {
+    pub backend: String,
     pub python_path: String,
     pub model_path: String,
     pub input_path: String,
@@ -73,10 +74,23 @@ pub struct AiAnnotateImageRequest {
     pub iou_threshold: f64,
     pub imgsz: u32,
     pub device: String,
+    pub sam_mode: String,
+    pub sam_prompt_mode: String,
+    pub prompts_text: String,
+    pub sam_click_points_text: String,
+    pub sam_precision: String,
+    pub sam_encoder: String,
+    pub sam_image_batch_size: u32,
+    pub sam_video_batch_size: u32,
+    pub sam_interactive_batch_size: u32,
+    pub sam_max_image_width: u32,
+    pub sam_max_image_height: u32,
+    pub sam_resize_method: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct AiAnnotateBatchRequest {
+    pub backend: String,
     pub python_path: String,
     pub model_path: String,
     pub input_paths_text: String,
@@ -85,6 +99,18 @@ pub struct AiAnnotateBatchRequest {
     pub iou_threshold: f64,
     pub imgsz: u32,
     pub device: String,
+    pub sam_mode: String,
+    pub sam_prompt_mode: String,
+    pub prompts_text: String,
+    pub sam_click_points_text: String,
+    pub sam_precision: String,
+    pub sam_encoder: String,
+    pub sam_image_batch_size: u32,
+    pub sam_video_batch_size: u32,
+    pub sam_interactive_batch_size: u32,
+    pub sam_max_image_width: u32,
+    pub sam_max_image_height: u32,
+    pub sam_resize_method: String,
 }
 
 pub fn detect_model_task(python_path: &str, model_path: &str) -> DetectModelTaskResult {
@@ -157,6 +183,9 @@ print(json.dumps({{"ok": True, "task": task, "classes": items}}, ensure_ascii=Fa
 }
 
 pub fn ai_annotate_image_json(req: &AiAnnotateImageRequest) -> Result<String, String> {
+    if req.backend.trim().eq_ignore_ascii_case("sam3") {
+        return ai_annotate_sam3_image_json(req);
+    }
     let python = verify_python(&req.python_path)?;
     let script = format!(
         r##"import sys, json, os
@@ -234,6 +263,9 @@ print(json.dumps({{"ok": True, "width": width, "height": height, "boxes": boxes}
 }
 
 pub fn ai_annotate_images_json(req: &AiAnnotateBatchRequest) -> Result<String, String> {
+    if req.backend.trim().eq_ignore_ascii_case("sam3") {
+        return ai_annotate_sam3_images_json(req);
+    }
     let python = verify_python(&req.python_path)?;
     let script = format!(
         r##"import sys, json, os
@@ -312,6 +344,368 @@ print(json.dumps({{"ok": True, "images": images}}, ensure_ascii=False))
         device = req.device,
     );
     run_python_script(&python, &script, None)
+}
+
+fn ai_annotate_sam3_image_json(req: &AiAnnotateImageRequest) -> Result<String, String> {
+    let python = verify_python(&req.python_path)?;
+    let script = sam3_script(
+        &req.model_path,
+        &format!("[{}]", python_string_literal(&req.input_path)),
+        &req.sam_prompt_mode,
+        &req.prompts_text,
+        &req.sam_click_points_text,
+        req.conf_threshold,
+        &req.device,
+        &req.sam_precision,
+        &req.sam_encoder,
+        req.sam_image_batch_size,
+        req.sam_video_batch_size,
+        req.sam_interactive_batch_size,
+        req.sam_max_image_width,
+        req.sam_max_image_height,
+        &req.sam_resize_method,
+    );
+    run_python_script(&python, &script, None).map_err(classify_python_error)
+}
+
+fn ai_annotate_sam3_images_json(req: &AiAnnotateBatchRequest) -> Result<String, String> {
+    let python = verify_python(&req.python_path)?;
+    if req.sam_prompt_mode.trim().eq_ignore_ascii_case("click") {
+        return Err("SAM3 click mode supports one image at a time".to_string());
+    }
+    let script = sam3_script(
+        &req.model_path,
+        &python_string_list_literal(&req.input_paths_text),
+        &req.sam_prompt_mode,
+        &req.prompts_text,
+        &req.sam_click_points_text,
+        req.conf_threshold,
+        &req.device,
+        &req.sam_precision,
+        &req.sam_encoder,
+        req.sam_image_batch_size,
+        req.sam_video_batch_size,
+        req.sam_interactive_batch_size,
+        req.sam_max_image_width,
+        req.sam_max_image_height,
+        &req.sam_resize_method,
+    );
+    run_python_script(&python, &script, None).map_err(classify_python_error)
+}
+
+fn sam3_script(
+    model_path: &str,
+    input_paths_literal: &str,
+    prompt_mode: &str,
+    prompts_text: &str,
+    click_points_text: &str,
+    conf_threshold: f64,
+    device: &str,
+    precision: &str,
+    encoder: &str,
+    image_batch_size: u32,
+    video_batch_size: u32,
+    interactive_batch_size: u32,
+    max_image_width: u32,
+    max_image_height: u32,
+    resize_method: &str,
+) -> String {
+    format!(
+        r##"import json, os, sys, traceback
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+model_path = {model_path}
+source_paths = {input_paths}
+prompt_mode = {prompt_mode}.strip().lower() or "text"
+prompts = {prompts}
+click_points_raw = {click_points}
+conf_threshold = float({conf})
+device_value = {device}.strip().lower()
+precision = {precision}.strip().lower()
+encoder = {encoder}.strip().lower()
+image_batch_size = int({image_batch_size})
+video_batch_size = int({video_batch_size})
+interactive_batch_size = int({interactive_batch_size})
+max_image_width = max(64, int({max_image_width}))
+max_image_height = max(64, int({max_image_height}))
+resize_method = {resize_method}.strip().lower() or "shorter_side"
+processor_resolution = 1008
+
+def _parse_click_points(raw):
+    items = []
+    for line in str(raw or "").replace("\r", "\n").split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        parts = [part.strip() for part in line.split(",")]
+        if len(parts) < 3:
+            continue
+        try:
+            x = max(0.0, min(1.0, float(parts[0])))
+            y = max(0.0, min(1.0, float(parts[1])))
+        except Exception:
+            continue
+        label_text = parts[2].lower()
+        positive = label_text in ("1", "true", "yes", "positive", "pos", "fg", "foreground")
+        items.append((x, y, positive))
+    return items
+
+click_points = _parse_click_points(click_points_raw)
+print(
+    f"[rustlabel][sam3] start images={{len(source_paths)}} prompts={{len(prompts)}} "
+    f"prompt_mode={{prompt_mode}} click_points={{len(click_points)}} precision={{precision}} encoder={{encoder}} "
+    f"batch=image:{{image_batch_size}}/video:{{video_batch_size}}/interactive:{{interactive_batch_size}} "
+    f"pre_resize={{max_image_width}}x{{max_image_height}} resize_method={{resize_method}} processor_resolution={{processor_resolution}}",
+    file=sys.stderr,
+)
+if prompt_mode not in ("text", "click"):
+    raise RuntimeError(f"SAM3 prompt mode must be text or click, got {{prompt_mode}}")
+if prompt_mode == "text" and not prompts:
+    raise RuntimeError("SAM3 text prompt is empty")
+if prompt_mode == "click" and not click_points:
+    raise RuntimeError("SAM3 click prompt needs at least one point")
+if prompt_mode == "click" and not any(item[2] for item in click_points):
+    raise RuntimeError("SAM3 click prompt needs at least one positive point")
+if encoder and encoder != "vit_b":
+    raise RuntimeError(f"SAM3 low-memory preset only allows encoder=vit_b, got {{encoder}}")
+
+try:
+    import importlib.util
+    import platform
+    is_windows = platform.system().lower() == "windows"
+    triton_package = "triton-windows" if is_windows else "triton"
+    required_modules = [
+        ("numpy", "numpy"),
+        ("torch", "torch"),
+        ("PIL", "pillow"),
+        ("sam3", "sam3"),
+        ("einops", "einops"),
+        ("triton", triton_package),
+    ]
+    missing = [pkg for module, pkg in required_modules if importlib.util.find_spec(module) is None]
+    if missing:
+        hint = ""
+        if "triton-windows" in missing:
+            hint = " On native Windows, install Triton with: python -m pip install triton-windows."
+        raise RuntimeError(
+            f"SAM3 dependency import failed: missing packages: {{', '.join(missing)}}. "
+            f"Install the SAM3 repository requirements into this Python environment.{{hint}}"
+        )
+except RuntimeError:
+    raise
+except Exception as error:
+    raise RuntimeError(f"SAM3 dependency precheck failed: {{type(error).__name__}}: {{error}}")
+
+try:
+    import numpy as np
+    import torch
+    from PIL import Image
+    from sam3.model_builder import build_sam3_image_model
+    from sam3.model.sam3_image_processor import Sam3Processor
+except Exception as error:
+    windows_hint = ""
+    try:
+        import platform as _rustlabel_platform
+        if "triton" in str(error).lower() and _rustlabel_platform.system().lower() == "windows":
+            windows_hint = " On native Windows, install Triton with: python -m pip install triton-windows."
+    except Exception:
+        pass
+    raise RuntimeError(
+        f"SAM3 dependency import failed. Install the SAM3 repository requirements into this Python environment. "
+        f"Original error: {{type(error).__name__}}: {{error}}{{windows_hint}}"
+    )
+
+try:
+    import cv2
+except Exception:
+    cv2 = None
+
+if device_value in ("", "auto", "cuda", "nv", "nvidia"):
+    device_value = "cuda" if torch.cuda.is_available() else "cpu"
+if device_value.startswith("cuda") and not torch.cuda.is_available():
+    print("[rustlabel][sam3] CUDA requested but unavailable, fallback to CPU", file=sys.stderr)
+    device_value = "cpu"
+torch_device = torch.device(device_value)
+device_name = "cuda" if torch_device.type == "cuda" else "cpu"
+
+def _build_model():
+    attempts = []
+    if model_path:
+        attempts.extend([
+            dict(checkpoint_path=model_path, device=device_name),
+            dict(ckpt_path=model_path, device=device_name),
+            dict(checkpoint=model_path, device=device_name),
+            dict(device=device_name),
+        ])
+    else:
+        attempts.append(dict(device=device_name))
+    last_error = None
+    for kwargs in attempts:
+        try:
+            return build_sam3_image_model(**kwargs)
+        except TypeError as error:
+            last_error = error
+            continue
+    try:
+        model = build_sam3_image_model()
+        if hasattr(model, "to"):
+            model = model.to(torch_device)
+        return model
+    except Exception as error:
+        last_error = error
+    raise RuntimeError(f"SAM3 model load failed: {{last_error}}")
+
+model = _build_model()
+if hasattr(model, "eval"):
+    model.eval()
+processor = Sam3Processor(model, confidence_threshold=conf_threshold, resolution=processor_resolution, device=device_name)
+
+def _autocast():
+    if torch_device.type != "cuda":
+        return torch.autocast(device_type="cpu", enabled=False)
+    if precision == "fp16":
+        return torch.autocast(device_type="cuda", dtype=torch.float16)
+    if precision == "bf16":
+        return torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+    return torch.autocast(device_type="cuda", enabled=False)
+
+def _to_numpy(value):
+    if value is None:
+        return None
+    if hasattr(value, "detach"):
+        return value.detach().float().cpu().numpy()
+    return np.asarray(value)
+
+def _mask_to_polygon(mask):
+    arr = np.asarray(mask)
+    while arr.ndim > 2:
+        arr = arr[0]
+    arr = arr > 0.5
+    h, w = arr.shape[:2]
+    if h <= 0 or w <= 0 or not arr.any():
+        return []
+    if cv2 is not None:
+        contours, _ = cv2.findContours(arr.astype("uint8"), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if contours:
+            contour = max(contours, key=cv2.contourArea)
+            epsilon = max(1.5, 0.0025 * cv2.arcLength(contour, True))
+            approx = cv2.approxPolyDP(contour, epsilon, True)
+            return [[float(p[0][0]), float(p[0][1])] for p in approx]
+    ys, xs = np.where(arr)
+    left, right = float(xs.min()), float(xs.max())
+    top, bottom = float(ys.min()), float(ys.max())
+    return [[left, top], [right, top], [right, bottom], [left, bottom]]
+
+def _extract_masks(output, prompt_index, prompt):
+    masks = _to_numpy(output.get("masks") if isinstance(output, dict) else None)
+    scores = _to_numpy(output.get("scores") if isinstance(output, dict) else None)
+    if masks is None:
+        return []
+    if masks.ndim == 2:
+        masks = masks[None, :, :]
+    items = []
+    for idx, mask in enumerate(masks):
+        points = _mask_to_polygon(mask)
+        if len(points) < 3:
+            continue
+        mh, mw = np.asarray(mask).squeeze().shape[-2:]
+        if mw > 0 and mh > 0:
+            points = [[x / mw * current_width, y / mh * current_height] for x, y in points]
+        score = 0.0
+        if scores is not None and scores.size > idx:
+            score = float(scores.reshape(-1)[idx])
+        items.append({{
+            "classId": int(prompt_index),
+            "className": str(prompt),
+            "confidence": score,
+            "points": points,
+        }})
+    return items
+
+def _preprocess_image(image):
+    original_width, original_height = image.size
+    if original_width <= 0 or original_height <= 0:
+        return image
+    if original_width <= max_image_width and original_height <= max_image_height:
+        return image
+    # Keep aspect ratio. "shorter_side" is currently constrained by max_image_size
+    # so the result never exceeds either width or height limits.
+    scale = min(max_image_width / original_width, max_image_height / original_height)
+    scale = min(1.0, max(scale, 1e-6))
+    next_size = (
+        max(1, int(round(original_width * scale))),
+        max(1, int(round(original_height * scale))),
+    )
+    if next_size == image.size:
+        return image
+    return image.resize(next_size, Image.Resampling.LANCZOS)
+
+images = []
+for path in source_paths:
+    try:
+        image = Image.open(path).convert("RGB")
+        original_width, original_height = image.size
+        image = _preprocess_image(image)
+        current_width, current_height = image.size
+        if (current_width, current_height) != (original_width, original_height):
+            print(
+                f"[rustlabel][sam3] preprocess image={{path}} {{original_width}}x{{original_height}} -> {{current_width}}x{{current_height}} method={{resize_method}}",
+                file=sys.stderr,
+            )
+        masks = []
+        with torch.inference_mode():
+            with _autocast():
+                state = processor.set_image(image)
+                if prompt_mode == "click":
+                    prompt_name = prompts[0] if prompts else "sam3_click"
+                    output = state
+                    box_size = max(0.006, min(0.03, 8.0 / max(current_width, current_height)))
+                    for x, y, positive in click_points:
+                        output = processor.add_geometric_prompt(
+                            box=[x, y, box_size, box_size],
+                            label=bool(positive),
+                            state=output,
+                        )
+                    masks.extend(_extract_masks(output, 0, prompt_name))
+                else:
+                    for prompt_index, prompt in enumerate(prompts):
+                        output = processor.set_text_prompt(state=state, prompt=prompt)
+                        masks.extend(_extract_masks(output, prompt_index, prompt))
+        images.append({{
+            "inputPath": str(path),
+            "width": int(current_width),
+            "height": int(current_height),
+            "boxes": [],
+            "masks": masks,
+        }})
+        print(f"[rustlabel][sam3] image={{path}} masks={{len(masks)}}", file=sys.stderr)
+    except RuntimeError as error:
+        message = str(error)
+        if "out of memory" in message.lower():
+            raise RuntimeError(f"SAM3 OOM while processing {{path}}: {{message}}")
+        raise
+
+if len(images) == 1:
+    item = images[0]
+    print(json.dumps({{"ok": True, "width": item["width"], "height": item["height"], "boxes": [], "masks": item["masks"]}}, ensure_ascii=False))
+else:
+    print(json.dumps({{"ok": True, "images": images}}, ensure_ascii=False))
+"##,
+        model_path = python_string_literal(model_path),
+        input_paths = input_paths_literal,
+        prompt_mode = python_string_literal(prompt_mode),
+        prompts = python_string_list_literal(prompts_text),
+        click_points = python_string_literal(click_points_text),
+        conf = conf_threshold,
+        device = python_string_literal(device),
+        precision = python_string_literal(precision),
+        encoder = python_string_literal(encoder),
+        resize_method = python_string_literal(resize_method),
+        image_batch_size = image_batch_size.max(1),
+        video_batch_size = video_batch_size.max(1),
+        interactive_batch_size = interactive_batch_size.max(1),
+        max_image_width = max_image_width.max(64),
+        max_image_height = max_image_height.max(64),
+    )
 }
 
 pub fn detect_image(req: &DetectImageRequest) -> DetectResult {
@@ -858,10 +1252,42 @@ fn run_python_script(python: &str, script: &str, cwd: Option<&Path>) -> Result<S
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("python error: {stderr}"));
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let mut message = format!("python error: exit status {}", output.status);
+        let stderr = stderr.trim();
+        if !stderr.is_empty() {
+            message.push_str("\nstderr:\n");
+            message.push_str(stderr);
+        }
+        let stdout = stdout.trim();
+        if !stdout.is_empty() {
+            message.push_str("\nstdout:\n");
+            message.push_str(stdout);
+        }
+        return Err(message);
     }
     Ok(stdout)
+}
+
+fn classify_python_error(error: String) -> String {
+    let lower = error.to_lowercase();
+    let kind = if lower.contains("out of memory")
+        || lower.contains("cuda oom")
+        || lower.contains("cublas_status_alloc_failed")
+        || lower.contains("memoryerror")
+    {
+        "oom"
+    } else if lower.contains("no module named")
+        || lower.contains("modulenotfounderror")
+        || lower.contains("dependency import failed")
+    {
+        "dependency"
+    } else if lower.contains("sam3") {
+        "sam3"
+    } else {
+        "runtime"
+    };
+    format!("{kind}: {error}")
 }
 
 pub fn shutdown_python_children() -> usize {

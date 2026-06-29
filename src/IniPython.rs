@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use once_cell::sync::Lazy;
 
@@ -188,7 +189,13 @@ pub fn python_is_initialized() -> bool {
 }
 
 fn run_python_code_with_runtime(runtime: &PythonRuntime, code: &str) -> Result<(), String> {
-    let code = CString::new(code).map_err(|_| "Python code contains NUL byte".to_string())?;
+    let error_path = env::temp_dir().join(format!(
+        "rustlabel_python_error_{}_{}.txt",
+        std::process::id(),
+        unix_millis_now()
+    ));
+    let wrapped = wrap_python_code_for_traceback(code, &error_path);
+    let code = CString::new(wrapped).map_err(|_| "Python code contains NUL byte".to_string())?;
     let result = unsafe {
         let gil = (runtime.py_gil_state_ensure)();
         let result = (runtime.py_run_simple_string_flags)(code.as_ptr(), ptr::null_mut());
@@ -196,13 +203,63 @@ fn run_python_code_with_runtime(runtime: &PythonRuntime, code: &str) -> Result<(
         result
     };
     if result == 0 {
+        let _ = fs::remove_file(&error_path);
         Ok(())
     } else {
-        Err(format!(
-            "Python code execution failed in {}. See the training terminal/log output for details.",
-            runtime.dll_path.display()
-        ))
+        let details = fs::read_to_string(&error_path).unwrap_or_default();
+        let _ = fs::remove_file(&error_path);
+        let details = details.trim();
+        if details.is_empty() {
+            Err(format!(
+                "Python code execution failed in {}. See the training terminal/log output for details.",
+                runtime.dll_path.display()
+            ))
+        } else {
+            Err(format!(
+                "Python code execution failed in {}.\n{}",
+                runtime.dll_path.display(),
+                details
+            ))
+        }
     }
+}
+
+fn wrap_python_code_for_traceback(code: &str, error_path: &Path) -> String {
+    format!(
+        r#"import sys, traceback
+try:
+    exec({})
+except BaseException:
+    _rustlabel_traceback = traceback.format_exc()
+    try:
+        with open({}, "w", encoding="utf-8") as _rustlabel_file:
+            _rustlabel_file.write(_rustlabel_traceback)
+    except Exception:
+        pass
+    sys.stderr.write(_rustlabel_traceback)
+    raise
+"#,
+        python_string_literal(code),
+        python_string_literal(&error_path.to_string_lossy())
+    )
+}
+
+fn python_string_literal(value: &str) -> String {
+    let mut result = String::with_capacity(value.len() + 2);
+    result.push('\'');
+    for ch in value.chars() {
+        match ch {
+            '\\' => result.push_str("\\\\"),
+            '\'' => result.push_str("\\'"),
+            '\n' => result.push_str("\\n"),
+            '\r' => result.push_str("\\r"),
+            '\t' => result.push_str("\\t"),
+            ch if ch.is_control() => result.push_str(&format!("\\u{:04x}", ch as u32)),
+            ch => result.push(ch),
+        }
+    }
+    result.push('\'');
+    result
 }
 
 #[derive(Debug)]
@@ -475,4 +532,11 @@ fn dedupe_pathbufs(paths: Vec<PathBuf>) -> Vec<PathBuf> {
         result.push(path);
     }
     result
+}
+
+fn unix_millis_now() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0)
 }

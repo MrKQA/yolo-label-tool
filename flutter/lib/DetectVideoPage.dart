@@ -738,8 +738,7 @@ class _DetectVideoSession extends ChangeNotifier {
       }
       return KeyEventResult.handled;
     }
-    if (key == LogicalKeyboardKey.enter ||
-        key == LogicalKeyboardKey.numpadEnter) {
+    if (shortcutConfig.matches(_ShortcutAction.browseFullscreen, key)) {
       if (event is KeyDownEvent) {
         _showShortcutHud(
           fullscreen
@@ -750,7 +749,7 @@ class _DetectVideoSession extends ChangeNotifier {
       }
       return KeyEventResult.handled;
     }
-    if (key == LogicalKeyboardKey.keyA) {
+    if (shortcutConfig.matches(_ShortcutAction.browsePreviousMedia, key)) {
       selectRelativeMedia(-previewStep).then((changed) {
         if (!_disposed) {
           _showShortcutHud(
@@ -760,7 +759,7 @@ class _DetectVideoSession extends ChangeNotifier {
       });
       return KeyEventResult.handled;
     }
-    if (key == LogicalKeyboardKey.keyD) {
+    if (shortcutConfig.matches(_ShortcutAction.browseNextMedia, key)) {
       selectRelativeMedia(previewStep).then((changed) {
         if (!_disposed) {
           _showShortcutHud(
@@ -770,11 +769,11 @@ class _DetectVideoSession extends ChangeNotifier {
       });
       return KeyEventResult.handled;
     }
-    if (key == LogicalKeyboardKey.arrowUp) {
+    if (shortcutConfig.matches(_ShortcutAction.browseVolumeUp, key)) {
       adjustVolume(0.05);
       return KeyEventResult.handled;
     }
-    if (key == LogicalKeyboardKey.arrowDown) {
+    if (shortcutConfig.matches(_ShortcutAction.browseVolumeDown, key)) {
       adjustVolume(-0.05);
       return KeyEventResult.handled;
     }
@@ -1444,6 +1443,9 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (_isEditableTextFocused()) {
+      return KeyEventResult.ignored;
+    }
     final key = event.logicalKey;
     final predictionPreviewActive =
         _session.predicting ||
@@ -1973,11 +1975,7 @@ class _DetectDeviceChip extends StatelessWidget {
         selected: selected,
         label: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 210),
-          child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
+          child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
         ),
         avatar: Icon(
           selected ? Icons.check_circle : Icons.memory_outlined,
@@ -2604,6 +2602,9 @@ class _VideoFullscreenOverlayState extends State<_VideoFullscreenOverlay> {
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (_isEditableTextFocused()) {
+      return KeyEventResult.ignored;
+    }
     if (event is KeyDownEvent &&
         event.logicalKey == LogicalKeyboardKey.escape) {
       widget.session.requestFullscreenToggle();

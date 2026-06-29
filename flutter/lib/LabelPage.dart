@@ -57,6 +57,7 @@ class _LabelPage extends StatelessWidget {
     required this.onToggleClassLabels,
     required this.onAnnotationClassChanged,
     required this.onAiConfigPressed,
+    this.onSam3ClickPrompt,
     this.onImageDisplaySizeChanged,
   });
 
@@ -104,6 +105,12 @@ class _LabelPage extends StatelessWidget {
   final void Function(String annotationId, int classId)
   onAnnotationClassChanged;
   final VoidCallback onAiConfigPressed;
+  final Future<bool> Function(
+    Offset imagePoint,
+    Size imageDisplaySize,
+    bool positive,
+  )?
+  onSam3ClickPrompt;
   final void Function(Size imageDisplaySize)? onImageDisplaySizeChanged;
 
   @override
@@ -148,6 +155,7 @@ class _LabelPage extends StatelessWidget {
                 onAnnotationUpdated: onAnnotationUpdated,
                 onAnnotationDeleted: onAnnotationDeleted,
                 onAnnotationDragStarted: onAnnotationDragStarted,
+                onSam3ClickPrompt: onSam3ClickPrompt,
                 onImageDisplaySizeChanged: onImageDisplaySizeChanged,
               ),
             ),
@@ -693,6 +701,7 @@ class _CanvasStage extends StatelessWidget {
     required this.onAnnotationUpdated,
     required this.onAnnotationDeleted,
     required this.onAnnotationDragStarted,
+    this.onSam3ClickPrompt,
     this.onImageDisplaySizeChanged,
   });
 
@@ -722,6 +731,12 @@ class _CanvasStage extends StatelessWidget {
   final ValueChanged<_AnnotationRegion> onAnnotationUpdated;
   final ValueChanged<String> onAnnotationDeleted;
   final VoidCallback onAnnotationDragStarted;
+  final Future<bool> Function(
+    Offset imagePoint,
+    Size imageDisplaySize,
+    bool positive,
+  )?
+  onSam3ClickPrompt;
   final void Function(Size imageDisplaySize)? onImageDisplaySizeChanged;
 
   @override
@@ -782,6 +797,7 @@ class _CanvasStage extends StatelessWidget {
                           onAnnotationUpdated: onAnnotationUpdated,
                           onAnnotationDeleted: onAnnotationDeleted,
                           onAnnotationDragStarted: onAnnotationDragStarted,
+                          onSam3ClickPrompt: onSam3ClickPrompt,
                           onImageDisplaySizeChanged: onImageDisplaySizeChanged,
                         ),
                       ),
@@ -988,6 +1004,7 @@ class _ImageCanvas extends StatefulWidget {
     required this.onAnnotationUpdated,
     required this.onAnnotationDeleted,
     required this.onAnnotationDragStarted,
+    this.onSam3ClickPrompt,
     this.onImageDisplaySizeChanged,
   });
 
@@ -1011,6 +1028,12 @@ class _ImageCanvas extends StatefulWidget {
   final ValueChanged<_AnnotationRegion> onAnnotationUpdated;
   final ValueChanged<String> onAnnotationDeleted;
   final VoidCallback onAnnotationDragStarted;
+  final Future<bool> Function(
+    Offset imagePoint,
+    Size imageDisplaySize,
+    bool positive,
+  )?
+  onSam3ClickPrompt;
 
   @override
   State<_ImageCanvas> createState() => _ImageCanvasState();
@@ -1683,6 +1706,25 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     final insideImage = _placedImageRect().contains(rawPoint);
     final localPoint = _toContentPoint(event.localPosition);
     final hit = insideImage ? _annotationAt(rawPoint) : null;
+    final sam3ClickPrompt = widget.onSam3ClickPrompt;
+    if (sam3ClickPrompt != null &&
+        insideImage &&
+        (event.buttons == kPrimaryMouseButton ||
+            event.buttons == kSecondaryMouseButton)) {
+      final imageRect = _placedImageRect();
+      final imagePoint = _clampOffset(
+        _toImagePoint(rawPoint),
+        Offset.zero & imageRect.size,
+      );
+      final handled = await sam3ClickPrompt(
+        imagePoint,
+        imageRect.size,
+        event.buttons == kPrimaryMouseButton,
+      );
+      if (handled) {
+        return;
+      }
+    }
 
     if (event.buttons == kSecondaryMouseButton) {
       if (widget.activeTool == 'draw' &&

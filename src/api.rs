@@ -1263,6 +1263,7 @@ fn ai_model_classes_from_json_request(request: &str) -> Result<String, String> {
 
 fn ai_annotate_image_from_json_request(request: &str) -> Result<String, String> {
     let req = detecting_mod::AiAnnotateImageRequest {
+        backend: json_string_field(request, "backend").unwrap_or_else(|| "yolo".to_string()),
         python_path: required_json_string(request, "pythonPath")?,
         model_path: required_json_string(request, "modelPath")?,
         input_path: required_json_string(request, "inputPath")?,
@@ -1271,12 +1272,29 @@ fn ai_annotate_image_from_json_request(request: &str) -> Result<String, String> 
         iou_threshold: json_f64_field(request, "iouThreshold").unwrap_or(0.45),
         imgsz: json_u32_field(request, "imgsz").unwrap_or(640),
         device: json_string_field(request, "device").unwrap_or_else(|| "auto".to_string()),
+        sam_mode: json_string_field(request, "samMode").unwrap_or_else(|| "seg".to_string()),
+        sam_prompt_mode: json_string_field(request, "samPromptMode")
+            .unwrap_or_else(|| "text".to_string()),
+        prompts_text: json_string_field(request, "promptsText").unwrap_or_default(),
+        sam_click_points_text: json_string_field(request, "samClickPointsText").unwrap_or_default(),
+        sam_precision: json_string_field(request, "samPrecision")
+            .unwrap_or_else(|| "fp16".to_string()),
+        sam_encoder: json_string_field(request, "samEncoder")
+            .unwrap_or_else(|| "vit_b".to_string()),
+        sam_image_batch_size: json_u32_field(request, "samImageBatchSize").unwrap_or(1),
+        sam_video_batch_size: json_u32_field(request, "samVideoBatchSize").unwrap_or(1),
+        sam_interactive_batch_size: json_u32_field(request, "samInteractiveBatchSize").unwrap_or(1),
+        sam_max_image_width: json_u32_field(request, "samMaxImageWidth").unwrap_or(1024),
+        sam_max_image_height: json_u32_field(request, "samMaxImageHeight").unwrap_or(768),
+        sam_resize_method: json_string_field(request, "samResizeMethod")
+            .unwrap_or_else(|| "shorter_side".to_string()),
     };
     detecting_mod::ai_annotate_image_json(&req)
 }
 
 fn ai_annotate_images_from_json_request(request: &str) -> Result<String, String> {
     let req = detecting_mod::AiAnnotateBatchRequest {
+        backend: json_string_field(request, "backend").unwrap_or_else(|| "yolo".to_string()),
         python_path: required_json_string(request, "pythonPath")?,
         model_path: required_json_string(request, "modelPath")?,
         input_paths_text: required_json_string(request, "inputPathsText")?,
@@ -1285,6 +1303,22 @@ fn ai_annotate_images_from_json_request(request: &str) -> Result<String, String>
         iou_threshold: json_f64_field(request, "iouThreshold").unwrap_or(0.45),
         imgsz: json_u32_field(request, "imgsz").unwrap_or(640),
         device: json_string_field(request, "device").unwrap_or_else(|| "auto".to_string()),
+        sam_mode: json_string_field(request, "samMode").unwrap_or_else(|| "seg".to_string()),
+        sam_prompt_mode: json_string_field(request, "samPromptMode")
+            .unwrap_or_else(|| "text".to_string()),
+        prompts_text: json_string_field(request, "promptsText").unwrap_or_default(),
+        sam_click_points_text: json_string_field(request, "samClickPointsText").unwrap_or_default(),
+        sam_precision: json_string_field(request, "samPrecision")
+            .unwrap_or_else(|| "fp16".to_string()),
+        sam_encoder: json_string_field(request, "samEncoder")
+            .unwrap_or_else(|| "vit_b".to_string()),
+        sam_image_batch_size: json_u32_field(request, "samImageBatchSize").unwrap_or(1),
+        sam_video_batch_size: json_u32_field(request, "samVideoBatchSize").unwrap_or(1),
+        sam_interactive_batch_size: json_u32_field(request, "samInteractiveBatchSize").unwrap_or(1),
+        sam_max_image_width: json_u32_field(request, "samMaxImageWidth").unwrap_or(1024),
+        sam_max_image_height: json_u32_field(request, "samMaxImageHeight").unwrap_or(768),
+        sam_resize_method: json_string_field(request, "samResizeMethod")
+            .unwrap_or_else(|| "shorter_side".to_string()),
     };
     detecting_mod::ai_annotate_images_json(&req)
 }
