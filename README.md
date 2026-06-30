@@ -16,6 +16,7 @@ A YOLO image labeling, training, and video processing tool built with Flutter + 
 ## Current Features
 
 - HBB / OBB / SEG annotation interface.
+- AI-assisted annotation supports YOLO plus SAM3 text prompts and click prompts; SAM3 can output HBB / OBB / SEG annotations.
 - Collaborative annotation over LAN with host approval and collaborator image-range assignment.
 - `data.yaml` import, export, and Roboflow path compatibility.
 - Training page: select `.pt` model, read dataset statistics, configure hyperparameters.
@@ -68,7 +69,7 @@ A YOLO image labeling, training, and video processing tool built with Flutter + 
 - Rust toolchain
 - Flutter SDK
 - Visual Studio 2022 ("Desktop development with C++" workload)
-- Python environment with `ultralytics`, `torch`, `onnxruntime`
+- Python environment with `torch` and `ultralytics`; `onnxruntime` is optional for ONNX/GPU workflows, and SAM3 has extra optional dependencies below
 - FFmpeg (for video frame extraction)
 
 ## Getting Started
@@ -96,6 +97,43 @@ flutter_rust_bridge_codegen generate
 ### Python Environment
 
 Open the app → Settings → Preferences → Python Environment Path. Select `python.exe` or a Python environment folder. Green checkmark confirms detection.
+
+#### YOLO / Training Environment
+
+The training and YOLO AI annotation path uses [ultralytics/ultralytics](https://github.com/ultralytics/ultralytics). Install a PyTorch build that matches your GPU driver/CUDA from the [PyTorch previous versions](https://pytorch.org/get-started/previous-versions/) page, then install Ultralytics:
+
+```bash
+conda create -n yolo python=3.12
+conda activate yolo
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+pip install ultralytics opencv-python
+```
+
+`onnxruntime-gpu` is only needed when using ONNX/GPU inference. If the app logs an ONNX import warning but you only train with `.pt` models, it can be ignored.
+
+#### SAM3 Assisted Annotation Environment
+
+SAM3 assisted annotation is only used on the Label page. It supports text prompt segmentation and click prompt refinement: left click adds positive target points, right click adds negative/exclusion points. Output mode can be HBB, OBB, or SEG.
+
+Install [facebookresearch/sam3](https://github.com/facebookresearch/sam3) in the Python environment selected in Settings, or use a separate SAM3 environment and select its `python.exe`:
+
+```bash
+conda create -n sam3 python=3.12
+conda activate sam3
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+git clone https://github.com/facebookresearch/sam3.git
+cd sam3
+pip install -e .
+pip install opencv-python matplotlib pandas tqdm psutil
+```
+
+Notes:
+
+- Official SAM3 currently expects Python 3.12+, PyTorch 2.7+, and a CUDA-capable GPU.
+- On native Windows, install `triton-windows` if the log reports `No module named 'triton'`: `pip install triton-windows`.
+- `opencv-python` is recommended because the app converts SAM3 masks into SEG polygon contours. `matplotlib`, `pandas`, `tqdm`, and `psutil` are commonly required by the SAM3 runtime and examples. Without OpenCV, a slower numpy fallback is used.
+- For 6-8 GB laptop GPUs, use the SAM3 panel low-memory settings such as `precision=fp16`, `encoder=vit_b`, batch size `1`, and pre-resize `1024x768` or lower.
+- Download or prepare the SAM3 checkpoint according to the SAM3 repository instructions, then select the `.pt` file in the AI → SAM3 panel. The selected path is saved for later launches.
 
 ### Training
 
@@ -213,6 +251,7 @@ All pages kept alive via `IndexedStack` — training, playback, crop state prese
 ## 当前能力
 
 - HBB / OBB / SEG 标注界面。
+- AI 辅助标注支持 YOLO，以及 SAM3 文本提示词和点击提示；SAM3 可输出 HBB / OBB / SEG 标注。
 - 局域网协助标注：主机确认加入，并为协助者分配图片索引范围。
 - `data.yaml` 导入、导出和 Roboflow 路径兼容。
 - 训练页支持选择 `.pt` 模型、读取数据集统计、设置超参数。
@@ -265,7 +304,7 @@ All pages kept alive via `IndexedStack` — training, playback, crop state prese
 - Rust 工具链
 - Flutter SDK
 - Visual Studio 2022（"使用 C++ 的桌面开发" 工作负载）
-- Python 环境（需安装 `ultralytics`、`torch`、`onnxruntime`）
+- Python 环境（需安装 `torch`、`ultralytics`；`onnxruntime` 仅在 ONNX/GPU 流程中需要，SAM3 额外依赖见下方）
 - FFmpeg（视频取帧依赖）
 
 ## 使用方法
@@ -293,6 +332,45 @@ flutter_rust_bridge_codegen generate
 ### Python 环境
 
 打开软件 → 设置 → 首选项 → Python 环境路径，选择 `python.exe` 或环境文件夹。绿色勾表示可用。
+
+#### YOLO / 训练环境
+
+训练和 YOLO AI 辅助标注使用 [ultralytics/ultralytics](https://github.com/ultralytics/ultralytics)。先从 [PyTorch previous versions](https://pytorch.org/get-started/previous-versions/) 选择与显卡驱动 / CUDA 匹配的 PyTorch，再安装 Ultralytics：
+
+```bash
+conda create -n yolo python=3.12
+conda activate yolo
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+git clone https://github.com/ultralytics/ultralytics.git
+cd ultralytics
+pip install -e . opencv-python
+```
+
+`onnxruntime-gpu` 只在 ONNX/GPU 推理时需要。如果只使用 `.pt` 模型训练，日志中出现 ONNX 导入警告可以忽略。
+
+#### SAM3 辅助标注环境
+
+SAM3 只用于标注页面的 AI 辅助标注，支持文本提示词分割和点击提示微调：左键添加目标正点，右键添加排除负点。输出模式可选择 HBB、OBB 或 SEG。
+
+在设置中选择的 Python 环境内安装 [facebookresearch/sam3](https://github.com/facebookresearch/sam3)，也可以单独创建 SAM3 环境并选择该环境的 `python.exe`：
+
+```bash
+conda create -n sam3 python=3.12
+conda activate sam3
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+git clone https://github.com/facebookresearch/sam3.git
+cd sam3
+pip install -e .
+pip install opencv-python matplotlib pandas tqdm psutil
+```
+
+注意事项：
+
+- SAM3 官方当前要求 Python 3.12+、PyTorch 2.7+，并需要支持 CUDA 的显卡。
+- Windows 原生环境如果日志出现 `No module named 'triton'`，安装 `triton-windows`：`pip install triton-windows`。
+- 推荐安装 `opencv-python`，软件会用它把 SAM3 mask 转成 SEG 多边形轮廓；`matplotlib`、`pandas`、`tqdm`、`psutil` 也是 SAM3 运行和示例中常用依赖。没有 OpenCV 时会使用较慢的 numpy fallback。
+- 6-8 GB 显存的笔记本显卡建议在 SAM3 面板使用低显存配置：`precision=fp16`、`encoder=vit_b`、batch size `1`，预缩放 `1024x768` 或更低。
+- 按 SAM3 仓库说明下载或准备 checkpoint 后，在 AI → SAM3 面板选择 `.pt` 文件；路径会被保存，后续启动无需重复选择。
 
 ### 训练
 

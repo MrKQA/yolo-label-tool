@@ -29,6 +29,8 @@ class _LabelPage extends StatelessWidget {
     required this.labelClasses,
     required this.annotationsByImage,
     required this.annotations,
+    required this.sam3ClickPrompts,
+    required this.sam3PreviewAnnotations,
     required this.selectedAnnotationId,
     required this.showClassLabels,
     required this.aiPanelVisible,
@@ -75,6 +77,8 @@ class _LabelPage extends StatelessWidget {
   final List<_LabelClass> labelClasses;
   final Map<String, List<_AnnotationRegion>> annotationsByImage;
   final List<_AnnotationRegion> annotations;
+  final List<_Sam3ClickPromptPoint> sam3ClickPrompts;
+  final List<_AnnotationRegion> sam3PreviewAnnotations;
   final String? selectedAnnotationId;
   final bool showClassLabels;
   final bool aiPanelVisible;
@@ -141,6 +145,8 @@ class _LabelPage extends StatelessWidget {
                 imageSplit: imageSplit,
                 labelClasses: labelClasses,
                 annotations: annotations,
+                sam3ClickPrompts: sam3ClickPrompts,
+                sam3PreviewAnnotations: sam3PreviewAnnotations,
                 selectedAnnotationId: selectedAnnotationId,
                 showClassLabels: showClassLabels,
                 onPointerSignal: onPointerSignal,
@@ -215,7 +221,9 @@ class _ImagePreviewPane extends StatefulWidget {
 class _ImagePreviewPaneState extends State<_ImagePreviewPane> {
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _indexController = TextEditingController();
+  final TextEditingController _filterController = TextEditingController();
   final FocusNode _indexFocusNode = FocusNode(debugLabel: 'preview-index');
+  late final FocusNode _filterFocusNode;
   String _filterValue = _imagePreviewFilterAll;
 
   static const _imagePreviewFilterAll = 'all';
@@ -225,7 +233,13 @@ class _ImagePreviewPaneState extends State<_ImagePreviewPane> {
   @override
   void initState() {
     super.initState();
+    _filterFocusNode = FocusNode(
+      debugLabel: 'preview-filter',
+      onKeyEvent: _handleFilterKeyEvent,
+    );
+    _filterFocusNode.addListener(_handleFilterFocusChanged);
     _syncIndexText();
+    _syncFilterText();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
@@ -239,6 +253,9 @@ class _ImagePreviewPaneState extends State<_ImagePreviewPane> {
     super.didUpdateWidget(oldWidget);
     _normalizeFilter();
     _syncIndexText();
+    if (!_filterFocusNode.hasFocus) {
+      _syncFilterText();
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
@@ -256,6 +273,9 @@ class _ImagePreviewPaneState extends State<_ImagePreviewPane> {
   void dispose() {
     _scrollController.dispose();
     _indexController.dispose();
+    _filterFocusNode.removeListener(_handleFilterFocusChanged);
+    _filterFocusNode.dispose();
+    _filterController.dispose();
     _indexFocusNode.dispose();
     super.dispose();
   }
@@ -307,6 +327,91 @@ class _ImagePreviewPaneState extends State<_ImagePreviewPane> {
           label: '${labelClass.name} (${_countImagesForClass(labelClass.id)})',
         ),
     ];
+  }
+
+  String _filterLabelForValue(String value) {
+    if (value == _imagePreviewFilterAll) {
+      return '${t('label.previewFilterAll')} (${widget.images.length})';
+    }
+    if (value == _imagePreviewFilterUnlabeled) {
+      return '${t('label.previewFilterUnlabeled')} (${_countUnlabeledImages()})';
+    }
+    if (value.startsWith(_imagePreviewClassPrefix)) {
+      final classId = int.tryParse(
+        value.substring(_imagePreviewClassPrefix.length),
+      );
+      final labelClass = widget.labelClasses
+          .where((item) => item.id == classId)
+          .firstOrNull;
+      if (labelClass != null) {
+        return '${labelClass.name} (${_countImagesForClass(labelClass.id)})';
+      }
+    }
+    return '${t('label.previewFilterAll')} (${widget.images.length})';
+  }
+
+  String _filterSearchTextForEntry(DropdownMenuEntry<String> entry) {
+    if (entry.value == _imagePreviewFilterAll) {
+      return '${t('label.previewFilterAll')} all ${entry.label}';
+    }
+    if (entry.value == _imagePreviewFilterUnlabeled) {
+      return '${t('label.previewFilterUnlabeled')} unlabeled ${entry.label}';
+    }
+    if (entry.value.startsWith(_imagePreviewClassPrefix)) {
+      final classId = int.tryParse(
+        entry.value.substring(_imagePreviewClassPrefix.length),
+      );
+      final labelClass = widget.labelClasses
+          .where((item) => item.id == classId)
+          .firstOrNull;
+      return labelClass == null ? entry.label : labelClass.name;
+    }
+    return entry.label;
+  }
+
+  String _normalizeFilterSearchText(String value) {
+    return value.trim().toLowerCase();
+  }
+
+  List<DropdownMenuEntry<String>> _filterDropdownEntries(
+    List<DropdownMenuEntry<String>> entries,
+    String rawFilter,
+  ) {
+    final filter = _normalizeFilterSearchText(rawFilter);
+    if (filter.isEmpty) {
+      return entries;
+    }
+    return entries
+        .where(
+          (entry) => _normalizeFilterSearchText(
+            _filterSearchTextForEntry(entry),
+          ).contains(filter),
+        )
+        .toList();
+  }
+
+  int? _searchFilterDropdownEntry(
+    List<DropdownMenuEntry<String>> entries,
+    String rawQuery,
+  ) {
+    final query = _normalizeFilterSearchText(rawQuery);
+    if (query.isEmpty) {
+      return null;
+    }
+    final startsWithIndex = entries.indexWhere(
+      (entry) => _normalizeFilterSearchText(
+        _filterSearchTextForEntry(entry),
+      ).startsWith(query),
+    );
+    if (startsWithIndex >= 0) {
+      return startsWithIndex;
+    }
+    final containsIndex = entries.indexWhere(
+      (entry) => _normalizeFilterSearchText(
+        _filterSearchTextForEntry(entry),
+      ).contains(query),
+    );
+    return containsIndex >= 0 ? containsIndex : null;
   }
 
   int _countUnlabeledImages() {
@@ -361,6 +466,53 @@ class _ImagePreviewPaneState extends State<_ImagePreviewPane> {
     _indexController.text = _filteredPosition(entries).toString();
   }
 
+  void _syncFilterText({bool selectAll = false}) {
+    final text = _filterLabelForValue(_filterValue);
+    _filterController.value = TextEditingValue(
+      text: text,
+      selection: selectAll
+          ? TextSelection(baseOffset: 0, extentOffset: text.length)
+          : TextSelection.collapsed(offset: text.length),
+    );
+  }
+
+  void _selectFilterTextNextFrame() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_filterFocusNode.hasFocus) {
+        return;
+      }
+      final text = _filterController.text;
+      _filterController.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: text.length,
+      );
+    });
+  }
+
+  void _handleFilterFocusChanged() {
+    if (_filterFocusNode.hasFocus) {
+      _selectFilterTextNextFrame();
+    } else {
+      _syncFilterText();
+    }
+  }
+
+  KeyEventResult _handleFilterKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) {
+      return KeyEventResult.ignored;
+    }
+    final key = event.logicalKey;
+    if (key != LogicalKeyboardKey.enter &&
+        key != LogicalKeyboardKey.numpadEnter) {
+      return KeyEventResult.ignored;
+    }
+    if (_filterController.text.trim().isNotEmpty) {
+      return KeyEventResult.ignored;
+    }
+    _setFilter(_imagePreviewFilterAll, force: true);
+    return KeyEventResult.handled;
+  }
+
   void _commitIndex() {
     final entries = _filteredEntries();
     if (entries.isEmpty) {
@@ -378,11 +530,16 @@ class _ImagePreviewPaneState extends State<_ImagePreviewPane> {
     widget.onImageSelected(nextIndex);
   }
 
-  void _setFilter(String? value) {
-    if (value == null || value == _filterValue) {
+  void _setFilter(String? value, {bool force = false}) {
+    if (value == null) {
+      return;
+    }
+    if (value == _filterValue && !force) {
+      _syncFilterText(selectAll: _filterFocusNode.hasFocus);
       return;
     }
     setState(() => _filterValue = value);
+    _syncFilterText(selectAll: _filterFocusNode.hasFocus);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
@@ -525,21 +682,30 @@ class _ImagePreviewPaneState extends State<_ImagePreviewPane> {
                   const SizedBox(height: 4),
                   SizedBox(
                     width: double.infinity,
-                    child: DropdownMenu<String>(
-                      key: ValueKey(_filterValue),
-                      width: previewWidth - 20,
-                      initialSelection: _filterValue,
-                      textStyle: Theme.of(context).textTheme.labelSmall,
-                      inputDecorationTheme: const InputDecorationTheme(
-                        isDense: true,
-                        border: OutlineInputBorder(),
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 8,
+                    child: Listener(
+                      onPointerDown: (_) => _selectFilterTextNextFrame(),
+                      child: DropdownMenu<String>(
+                        key: ValueKey(_filterValue),
+                        controller: _filterController,
+                        focusNode: _filterFocusNode,
+                        requestFocusOnTap: true,
+                        width: previewWidth - 20,
+                        initialSelection: _filterValue,
+                        textStyle: Theme.of(context).textTheme.labelSmall,
+                        enableFilter: true,
+                        filterCallback: _filterDropdownEntries,
+                        searchCallback: _searchFilterDropdownEntry,
+                        inputDecorationTheme: const InputDecorationTheme(
+                          isDense: true,
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 8,
+                          ),
                         ),
+                        dropdownMenuEntries: _filterEntries(),
+                        onSelected: _setFilter,
                       ),
-                      dropdownMenuEntries: _filterEntries(),
-                      onSelected: _setFilter,
                     ),
                   ),
                 ],
@@ -687,6 +853,8 @@ class _CanvasStage extends StatelessWidget {
     required this.imageSplit,
     required this.labelClasses,
     required this.annotations,
+    required this.sam3ClickPrompts,
+    required this.sam3PreviewAnnotations,
     required this.selectedAnnotationId,
     required this.showClassLabels,
     required this.onPointerSignal,
@@ -717,6 +885,8 @@ class _CanvasStage extends StatelessWidget {
   final String imageSplit;
   final List<_LabelClass> labelClasses;
   final List<_AnnotationRegion> annotations;
+  final List<_Sam3ClickPromptPoint> sam3ClickPrompts;
+  final List<_AnnotationRegion> sam3PreviewAnnotations;
   final String? selectedAnnotationId;
   final bool showClassLabels;
   final void Function(PointerSignalEvent event) onPointerSignal;
@@ -786,6 +956,8 @@ class _CanvasStage extends StatelessWidget {
                           activeMode: activeMode,
                           labelClasses: labelClasses,
                           annotations: annotations,
+                          sam3ClickPrompts: sam3ClickPrompts,
+                          sam3PreviewAnnotations: sam3PreviewAnnotations,
                           selectedAnnotationId: selectedAnnotationId,
                           showClassLabels: showClassLabels,
                           onViewportOffsetChanged: onViewportOffsetChanged,
@@ -993,6 +1165,8 @@ class _ImageCanvas extends StatefulWidget {
     required this.activeMode,
     required this.labelClasses,
     required this.annotations,
+    required this.sam3ClickPrompts,
+    required this.sam3PreviewAnnotations,
     required this.selectedAnnotationId,
     required this.showClassLabels,
     required this.onViewportOffsetChanged,
@@ -1017,6 +1191,8 @@ class _ImageCanvas extends StatefulWidget {
   final _AnnotationMode activeMode;
   final List<_LabelClass> labelClasses;
   final List<_AnnotationRegion> annotations;
+  final List<_Sam3ClickPromptPoint> sam3ClickPrompts;
+  final List<_AnnotationRegion> sam3PreviewAnnotations;
   final String? selectedAnnotationId;
   final bool showClassLabels;
   final ValueChanged<Offset> onViewportOffsetChanged;
@@ -2141,6 +2317,10 @@ class _ImageCanvasState extends State<_ImageCanvas> {
                                         painter: _AnnotationPainter(
                                           image: _decodedImage,
                                           annotations: widget.annotations,
+                                          sam3PreviewAnnotations:
+                                              widget.sam3PreviewAnnotations,
+                                          sam3ClickPrompts:
+                                              widget.sam3ClickPrompts,
                                           classes: widget.labelClasses,
                                           selectedAnnotation:
                                               selectedAnnotation,
@@ -2406,6 +2586,8 @@ class _AnnotationPainter extends CustomPainter {
   const _AnnotationPainter({
     this.image,
     required this.annotations,
+    required this.sam3PreviewAnnotations,
+    required this.sam3ClickPrompts,
     required this.classes,
     required this.selectedAnnotation,
     required this.draftRect,
@@ -2423,6 +2605,8 @@ class _AnnotationPainter extends CustomPainter {
 
   final ui.Image? image;
   final List<_AnnotationRegion> annotations;
+  final List<_AnnotationRegion> sam3PreviewAnnotations;
+  final List<_Sam3ClickPromptPoint> sam3ClickPrompts;
   final List<_LabelClass> classes;
   final _AnnotationRegion? selectedAnnotation;
   final Rect? draftRect;
@@ -2464,6 +2648,10 @@ class _AnnotationPainter extends CustomPainter {
     }
 
     _drawImageBounds(canvas, placedImageRect);
+
+    for (final annotation in sam3PreviewAnnotations) {
+      _drawSam3PreviewAnnotation(canvas, annotation);
+    }
 
     for (final annotation in annotations) {
       final labelClass = _classById(annotation.classId);
@@ -2521,6 +2709,10 @@ class _AnnotationPainter extends CustomPainter {
         color != null &&
         placedImageRect.contains(crosshair)) {
       _drawCrosshair(canvas, crosshair, color);
+    }
+
+    if (sam3ClickPrompts.isNotEmpty) {
+      _drawSam3ClickPrompts(canvas, placedImageRect);
     }
   }
 
@@ -2637,6 +2829,85 @@ class _AnnotationPainter extends CustomPainter {
     _drawDashedLine(canvas, start, end, underlay);
     _drawDashedLine(canvas, start, end, paint);
     canvas.drawCircle(end, 2.2 / scale, Paint()..color = color);
+  }
+
+  void _drawSam3PreviewAnnotation(Canvas canvas, _AnnotationRegion annotation) {
+    final points = annotation.points.isEmpty
+        ? _rectToPoints(annotation.rect)
+        : annotation.points;
+    if (points.length < 3) {
+      return;
+    }
+    final canvasPoints = points
+        .map((point) => point + imageRect.topLeft + imageOffset)
+        .toList();
+    final path = Path()..addPolygon(canvasPoints, true);
+    final fill = Paint()
+      ..color = const Color(0xFF06B6D4).withValues(alpha: 0.20)
+      ..style = PaintingStyle.fill;
+    final underlay = Paint()
+      ..color = Colors.white.withValues(alpha: darkMode ? 0.45 : 0.65)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3.2 / scale;
+    final stroke = Paint()
+      ..color = const Color(0xFF0891B2).withValues(alpha: 0.92)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.7 / scale;
+    canvas.drawPath(path, fill);
+    canvas.drawPath(path, underlay);
+    canvas.drawPath(path, stroke);
+  }
+
+  void _drawSam3ClickPrompts(Canvas canvas, Rect placedImageRect) {
+    for (final point in sam3ClickPrompts) {
+      final canvasPoint = Offset(
+        placedImageRect.left + point.x * placedImageRect.width,
+        placedImageRect.top + point.y * placedImageRect.height,
+      );
+      if (!placedImageRect.contains(canvasPoint)) {
+        continue;
+      }
+      _drawSam3ClickPrompt(canvas, canvasPoint, point.positive);
+    }
+  }
+
+  void _drawSam3ClickPrompt(Canvas canvas, Offset center, bool positive) {
+    final color = positive ? const Color(0xFF16A34A) : const Color(0xFFDC2626);
+    final symbol = positive ? '+' : '-';
+    final haloRadius = (positive ? 9.0 : 13.0) / scale;
+    final radius = 7.0 / scale;
+    final halo = Paint()
+      ..color = color.withValues(alpha: positive ? 0.18 : 0.24)
+      ..style = PaintingStyle.fill;
+    final fill = Paint()
+      ..color = (darkMode ? const Color(0xFF020617) : Colors.white).withValues(
+        alpha: 0.86,
+      )
+      ..style = PaintingStyle.fill;
+    final stroke = Paint()
+      ..color = color.withValues(alpha: 0.98)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0 / scale;
+    canvas.drawCircle(center, haloRadius, halo);
+    canvas.drawCircle(center, radius, fill);
+    canvas.drawCircle(center, radius, stroke);
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: symbol,
+        style: TextStyle(
+          color: color,
+          fontSize: 13 / scale,
+          height: 1,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+      maxLines: 1,
+    )..layout();
+    textPainter.paint(
+      canvas,
+      center - Offset(textPainter.width / 2, textPainter.height / 2),
+    );
   }
 
   void _drawAnnotation(

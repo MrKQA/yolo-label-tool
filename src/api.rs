@@ -1293,6 +1293,7 @@ fn ai_annotate_image_from_json_request(request: &str) -> Result<String, String> 
 }
 
 fn ai_annotate_images_from_json_request(request: &str) -> Result<String, String> {
+    let sam_prompt_frame_index = json_u32_field(request, "samPromptFrameIndex").unwrap_or(0);
     let req = detecting_mod::AiAnnotateBatchRequest {
         backend: json_string_field(request, "backend").unwrap_or_else(|| "yolo".to_string()),
         python_path: required_json_string(request, "pythonPath")?,
@@ -1320,7 +1321,7 @@ fn ai_annotate_images_from_json_request(request: &str) -> Result<String, String>
         sam_resize_method: json_string_field(request, "samResizeMethod")
             .unwrap_or_else(|| "shorter_side".to_string()),
     };
-    detecting_mod::ai_annotate_images_json(&req)
+    detecting_mod::ai_annotate_images_json_with_sam_prompt_frame(&req, sam_prompt_frame_index)
 }
 
 fn detect_from_json_request(request: &str) -> Result<detecting_mod::DetectResult, String> {

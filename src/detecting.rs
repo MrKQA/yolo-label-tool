@@ -263,8 +263,15 @@ print(json.dumps({{"ok": True, "width": width, "height": height, "boxes": boxes}
 }
 
 pub fn ai_annotate_images_json(req: &AiAnnotateBatchRequest) -> Result<String, String> {
+    ai_annotate_images_json_with_sam_prompt_frame(req, 0)
+}
+
+pub fn ai_annotate_images_json_with_sam_prompt_frame(
+    req: &AiAnnotateBatchRequest,
+    sam_prompt_frame_index: u32,
+) -> Result<String, String> {
     if req.backend.trim().eq_ignore_ascii_case("sam3") {
-        return ai_annotate_sam3_images_json(req);
+        return ai_annotate_sam3_images_json(req, sam_prompt_frame_index);
     }
     let python = verify_python(&req.python_path)?;
     let script = format!(
@@ -364,15 +371,16 @@ fn ai_annotate_sam3_image_json(req: &AiAnnotateImageRequest) -> Result<String, S
         req.sam_max_image_width,
         req.sam_max_image_height,
         &req.sam_resize_method,
+        0,
     );
-    run_python_script(&python, &script, None).map_err(classify_python_error)
+    run_python_json_script(&python, &script, None).map_err(classify_python_error)
 }
 
-fn ai_annotate_sam3_images_json(req: &AiAnnotateBatchRequest) -> Result<String, String> {
+fn ai_annotate_sam3_images_json(
+    req: &AiAnnotateBatchRequest,
+    sam_prompt_frame_index: u32,
+) -> Result<String, String> {
     let python = verify_python(&req.python_path)?;
-    if req.sam_prompt_mode.trim().eq_ignore_ascii_case("click") {
-        return Err("SAM3 click mode supports one image at a time".to_string());
-    }
     let script = sam3_script(
         &req.model_path,
         &python_string_list_literal(&req.input_paths_text),
@@ -389,8 +397,9 @@ fn ai_annotate_sam3_images_json(req: &AiAnnotateBatchRequest) -> Result<String, 
         req.sam_max_image_width,
         req.sam_max_image_height,
         &req.sam_resize_method,
+        sam_prompt_frame_index,
     );
-    run_python_script(&python, &script, None).map_err(classify_python_error)
+    run_python_json_script(&python, &script, None).map_err(classify_python_error)
 }
 
 fn sam3_script(
@@ -409,6 +418,7 @@ fn sam3_script(
     max_image_width: u32,
     max_image_height: u32,
     resize_method: &str,
+    prompt_frame_index: u32,
 ) -> String {
     format!(
         r##"import json, os, sys, traceback
@@ -428,6 +438,7 @@ interactive_batch_size = int({interactive_batch_size})
 max_image_width = max(64, int({max_image_width}))
 max_image_height = max(64, int({max_image_height}))
 resize_method = {resize_method}.strip().lower() or "shorter_side"
+prompt_frame_index = int({prompt_frame_index})
 processor_resolution = 1008
 
 def _parse_click_points(raw):
@@ -454,7 +465,8 @@ print(
     f"[rustlabel][sam3] start images={{len(source_paths)}} prompts={{len(prompts)}} "
     f"prompt_mode={{prompt_mode}} click_points={{len(click_points)}} precision={{precision}} encoder={{encoder}} "
     f"batch=image:{{image_batch_size}}/video:{{video_batch_size}}/interactive:{{interactive_batch_size}} "
-    f"pre_resize={{max_image_width}}x{{max_image_height}} resize_method={{resize_method}} processor_resolution={{processor_resolution}}",
+    f"pre_resize={{max_image_width}}x{{max_image_height}} resize_method={{resize_method}} "
+    f"prompt_frame={{prompt_frame_index}} processor_resolution={{processor_resolution}}",
     file=sys.stderr,
 )
 if prompt_mode not in ("text", "click"):
@@ -499,7 +511,7 @@ try:
     import numpy as np
     import torch
     from PIL import Image
-    from sam3.model_builder import build_sam3_image_model
+    from sam3.model_builder import build_sam3_image_model, build_sam3_video_model
     from sam3.model.sam3_image_processor import Sam3Processor
 except Exception as error:
     windows_hint = ""
@@ -518,6 +530,7 @@ try:
     import cv2
 except Exception:
     cv2 = None
+    print("[rustlabel][sam3] cv2 is unavailable; using numpy boundary polygon fallback", file=sys.stderr)
 
 if device_value in ("", "auto", "cuda", "nv", "nvidia"):
     device_value = "cuda" if torch.cuda.is_available() else "cpu"
@@ -526,18 +539,24 @@ if device_value.startswith("cuda") and not torch.cuda.is_available():
     device_value = "cpu"
 torch_device = torch.device(device_value)
 device_name = "cuda" if torch_device.type == "cuda" else "cpu"
+interactive_enabled = prompt_mode == "click"
+video_click_enabled = interactive_enabled and len(source_paths) > 1
 
-def _build_model():
+def _build_image_model():
     attempts = []
+    def with_model_options(kwargs):
+        kwargs = dict(kwargs)
+        kwargs["enable_inst_interactivity"] = interactive_enabled
+        return kwargs
     if model_path:
         attempts.extend([
-            dict(checkpoint_path=model_path, device=device_name),
-            dict(ckpt_path=model_path, device=device_name),
-            dict(checkpoint=model_path, device=device_name),
-            dict(device=device_name),
+            with_model_options(dict(checkpoint_path=model_path, device=device_name)),
+            with_model_options(dict(ckpt_path=model_path, device=device_name)),
+            with_model_options(dict(checkpoint=model_path, device=device_name)),
+            with_model_options(dict(device=device_name)),
         ])
     else:
-        attempts.append(dict(device=device_name))
+        attempts.append(with_model_options(dict(device=device_name)))
     last_error = None
     for kwargs in attempts:
         try:
@@ -546,7 +565,7 @@ def _build_model():
             last_error = error
             continue
     try:
-        model = build_sam3_image_model()
+        model = build_sam3_image_model(enable_inst_interactivity=interactive_enabled)
         if hasattr(model, "to"):
             model = model.to(torch_device)
         return model
@@ -554,10 +573,54 @@ def _build_model():
         last_error = error
     raise RuntimeError(f"SAM3 model load failed: {{last_error}}")
 
-model = _build_model()
-if hasattr(model, "eval"):
-    model.eval()
-processor = Sam3Processor(model, confidence_threshold=conf_threshold, resolution=processor_resolution, device=device_name)
+def _build_video_model():
+    attempts = []
+    if model_path:
+        attempts.extend([
+            dict(checkpoint_path=model_path, device=device_name, compile=False),
+            dict(checkpoint_path=model_path, device=device_name),
+        ])
+    else:
+        attempts.append(dict(device=device_name, compile=False))
+    last_error = None
+    for kwargs in attempts:
+        try:
+            return build_sam3_video_model(**kwargs)
+        except TypeError as error:
+            last_error = error
+            continue
+    try:
+        return build_sam3_video_model()
+    except Exception as error:
+        last_error = error
+    raise RuntimeError(f"SAM3-Video model load failed: {{last_error}}")
+
+def _disable_windows_cc_cleanup(loaded_model):
+    try:
+        # Disable interactive mask cleanup that triggers connected-components
+        # Triton/CUDA JIT on Windows. It only fills tiny holes/sprinkles, while
+        # failed JIT can print non-JSON compiler logs to stdout or abort preview.
+        predictor = getattr(loaded_model, "inst_interactive_predictor", None)
+        if predictor is not None and getattr(predictor, "_transforms", None) is not None:
+            predictor._transforms.max_hole_area = 0.0
+            predictor._transforms.max_sprinkle_area = 0.0
+        if hasattr(loaded_model, "fill_hole_area"):
+            loaded_model.fill_hole_area = 0
+        print("[rustlabel][sam3] disabled interactive mask postprocess connected-components", file=sys.stderr)
+    except Exception as error:
+        print(f"[rustlabel][sam3] failed to disable interactive postprocess: {{error}}", file=sys.stderr)
+
+model = None
+processor = None
+if not video_click_enabled:
+    model = _build_image_model()
+    if hasattr(model, "eval"):
+        model.eval()
+    if interactive_enabled and getattr(model, "inst_interactive_predictor", None) is None:
+        raise RuntimeError("SAM3 click mode requires enable_inst_interactivity=True, but the model has no interactive predictor")
+    if interactive_enabled:
+        _disable_windows_cc_cleanup(model)
+    processor = Sam3Processor(model, confidence_threshold=conf_threshold, resolution=processor_resolution, device=device_name)
 
 def _autocast():
     if torch_device.type != "cuda":
@@ -590,12 +653,43 @@ def _mask_to_polygon(mask):
             epsilon = max(1.5, 0.0025 * cv2.arcLength(contour, True))
             approx = cv2.approxPolyDP(contour, epsilon, True)
             return [[float(p[0][0]), float(p[0][1])] for p in approx]
+    padded = np.pad(arr, 1, constant_values=False)
+    interior = (
+        padded[1:-1, 1:-1]
+        & padded[:-2, 1:-1]
+        & padded[2:, 1:-1]
+        & padded[1:-1, :-2]
+        & padded[1:-1, 2:]
+    )
+    boundary = arr & ~interior
+    ys, xs = np.where(boundary)
+    if xs.size >= 3:
+        unique_xs = np.unique(xs)
+        max_columns = 256
+        if unique_xs.size > max_columns:
+            step = int(np.ceil(unique_xs.size / max_columns))
+            unique_xs = unique_xs[::step]
+        top = []
+        bottom = []
+        for x in unique_xs:
+            column_ys = ys[xs == x]
+            if column_ys.size == 0:
+                continue
+            top.append([float(x), float(column_ys.min())])
+            bottom.append([float(x), float(column_ys.max())])
+        points = top + list(reversed(bottom))
+        compact = []
+        for point in points:
+            if not compact or compact[-1] != point:
+                compact.append(point)
+        if len(compact) >= 3:
+            return compact
     ys, xs = np.where(arr)
     left, right = float(xs.min()), float(xs.max())
     top, bottom = float(ys.min()), float(ys.max())
     return [[left, top], [right, top], [right, bottom], [left, bottom]]
 
-def _extract_masks(output, prompt_index, prompt):
+def _extract_masks_for_size(output, prompt_index, prompt, output_width, output_height):
     masks = _to_numpy(output.get("masks") if isinstance(output, dict) else None)
     scores = _to_numpy(output.get("scores") if isinstance(output, dict) else None)
     if masks is None:
@@ -609,7 +703,7 @@ def _extract_masks(output, prompt_index, prompt):
             continue
         mh, mw = np.asarray(mask).squeeze().shape[-2:]
         if mw > 0 and mh > 0:
-            points = [[x / mw * current_width, y / mh * current_height] for x, y in points]
+            points = [[x / mw * output_width, y / mh * output_height] for x, y in points]
         score = 0.0
         if scores is not None and scores.size > idx:
             score = float(scores.reshape(-1)[idx])
@@ -620,6 +714,16 @@ def _extract_masks(output, prompt_index, prompt):
             "points": points,
         }})
     return items
+
+def _extract_masks(output, prompt_index, prompt):
+    return _extract_masks_for_size(output, prompt_index, prompt, current_width, current_height)
+
+def _extract_video_masks(output, prompt, output_width, output_height):
+    if not isinstance(output, dict):
+        return []
+    masks = output.get("out_binary_masks")
+    scores = output.get("out_probs")
+    return _extract_masks_for_size({{"masks": masks, "scores": scores}}, 0, prompt, output_width, output_height)
 
 def _preprocess_image(image):
     original_width, original_height = image.size
@@ -639,6 +743,119 @@ def _preprocess_image(image):
         return image
     return image.resize(next_size, Image.Resampling.LANCZOS)
 
+def _run_video_click_annotation():
+    prompt_name = prompts[0] if prompts else "sam3_click"
+    safe_prompt_frame_index = max(0, min(int(prompt_frame_index), len(source_paths) - 1))
+    if safe_prompt_frame_index != prompt_frame_index:
+        print(
+            f"[rustlabel][sam3-video] prompt frame {{prompt_frame_index}} is out of range; using {{safe_prompt_frame_index}}",
+            file=sys.stderr,
+        )
+    video_frames = []
+    frame_sizes = []
+    sequence_size = None
+    for path in source_paths:
+        image = Image.open(path).convert("RGB")
+        original_width, original_height = image.size
+        image = _preprocess_image(image)
+        current_width, current_height = image.size
+        if (current_width, current_height) != (original_width, original_height):
+            print(
+                f"[rustlabel][sam3-video] preprocess frame={{path}} {{original_width}}x{{original_height}} -> {{current_width}}x{{current_height}} method={{resize_method}}",
+                file=sys.stderr,
+            )
+        if sequence_size is None:
+            sequence_size = (current_width, current_height)
+        elif (current_width, current_height) != sequence_size:
+            print(
+                f"[rustlabel][sam3-video] frame={{path}} size={{current_width}}x{{current_height}} differs from sequence {{sequence_size[0]}}x{{sequence_size[1]}}; resizing for video propagation",
+                file=sys.stderr,
+            )
+            image = image.resize(sequence_size, Image.Resampling.LANCZOS)
+            current_width, current_height = sequence_size
+        video_frames.append(image)
+        frame_sizes.append((current_width, current_height))
+    if not video_frames:
+        return []
+    print(
+        f"[rustlabel][sam3-video] init frames={{len(video_frames)}} prompt_frame={{safe_prompt_frame_index}} size={{frame_sizes[0][0]}}x{{frame_sizes[0][1]}}",
+        file=sys.stderr,
+    )
+    video_model = _build_video_model()
+    if hasattr(video_model, "eval"):
+        video_model.eval()
+    _disable_windows_cc_cleanup(video_model)
+    point_coords = torch.as_tensor(
+        [[x, y] for x, y, _ in click_points],
+        dtype=torch.float32,
+    )
+    point_labels = torch.as_tensor(
+        [1 if positive else 0 for _, _, positive in click_points],
+        dtype=torch.int32,
+    )
+    results_by_frame = {{}}
+    with torch.inference_mode():
+        with _autocast():
+            inference_state = video_model.init_state(
+                resource_path=video_frames,
+                offload_video_to_cpu=torch_device.type != "cuda",
+            )
+            frame_idx, output = video_model.add_prompt(
+                inference_state,
+                frame_idx=safe_prompt_frame_index,
+                points=point_coords,
+                point_labels=point_labels,
+                obj_id=10000,
+                rel_coordinates=True,
+            )
+            if output is not None:
+                results_by_frame[int(frame_idx)] = output
+            max_forward = len(video_frames) - safe_prompt_frame_index
+            for frame_idx, output in video_model.propagate_in_video(
+                inference_state,
+                start_frame_idx=safe_prompt_frame_index,
+                max_frame_num_to_track=max_forward,
+                reverse=False,
+            ):
+                if output is not None:
+                    results_by_frame[int(frame_idx)] = output
+            if safe_prompt_frame_index > 0:
+                max_backward = safe_prompt_frame_index + 1
+                for frame_idx, output in video_model.propagate_in_video(
+                    inference_state,
+                    start_frame_idx=safe_prompt_frame_index,
+                    max_frame_num_to_track=max_backward,
+                    reverse=True,
+                ):
+                    if output is not None:
+                        results_by_frame[int(frame_idx)] = output
+    annotated_images = []
+    for index, path in enumerate(source_paths):
+        current_width, current_height = frame_sizes[index]
+        masks = _extract_video_masks(
+            results_by_frame.get(index),
+            prompt_name,
+            current_width,
+            current_height,
+        )
+        annotated_images.append({{
+            "inputPath": str(path),
+            "width": int(current_width),
+            "height": int(current_height),
+            "boxes": [],
+            "masks": masks,
+        }})
+        print(
+            f"[rustlabel][sam3-video] frame={{index}} image={{path}} masks={{len(masks)}}",
+            file=sys.stderr,
+        )
+    return annotated_images
+
+if video_click_enabled:
+    images = _run_video_click_annotation()
+    print(json.dumps({{"ok": True, "images": images}}, ensure_ascii=False))
+    sys.exit(0)
+
 images = []
 for path in source_paths:
     try:
@@ -657,15 +874,34 @@ for path in source_paths:
                 state = processor.set_image(image)
                 if prompt_mode == "click":
                     prompt_name = prompts[0] if prompts else "sam3_click"
-                    output = state
-                    box_size = max(0.006, min(0.03, 8.0 / max(current_width, current_height)))
-                    for x, y, positive in click_points:
-                        output = processor.add_geometric_prompt(
-                            box=[x, y, box_size, box_size],
-                            label=bool(positive),
-                            state=output,
-                        )
-                    masks.extend(_extract_masks(output, 0, prompt_name))
+                    point_coords = np.asarray(
+                        [[x * current_width, y * current_height] for x, y, _ in click_points],
+                        dtype=np.float32,
+                    )
+                    point_labels = np.asarray(
+                        [1 if positive else 0 for _, _, positive in click_points],
+                        dtype=np.int32,
+                    )
+                    predicted_masks, predicted_scores, _ = model.predict_inst(
+                        state,
+                        point_coords=point_coords,
+                        point_labels=point_labels,
+                        multimask_output=len(click_points) == 1,
+                        return_logits=False,
+                        normalize_coords=True,
+                    )
+                    predicted_masks = np.asarray(predicted_masks)
+                    predicted_scores = np.asarray(predicted_scores).reshape(-1)
+                    if predicted_masks.ndim == 2:
+                        predicted_masks = predicted_masks[None, :, :]
+                    if predicted_masks.ndim >= 3 and predicted_masks.shape[0] > 1:
+                        best_idx = 0
+                        if predicted_scores.size > 0:
+                            best_idx = int(np.argmax(predicted_scores[: predicted_masks.shape[0]]))
+                        predicted_masks = predicted_masks[best_idx : best_idx + 1]
+                        if predicted_scores.size > 0:
+                            predicted_scores = predicted_scores[best_idx : best_idx + 1]
+                    masks.extend(_extract_masks({{"masks": predicted_masks, "scores": predicted_scores}}, 0, prompt_name))
                 else:
                     for prompt_index, prompt in enumerate(prompts):
                         output = processor.set_text_prompt(state=state, prompt=prompt)
@@ -705,6 +941,7 @@ else:
         interactive_batch_size = interactive_batch_size.max(1),
         max_image_width = max_image_width.max(64),
         max_image_height = max_image_height.max(64),
+        prompt_frame_index = prompt_frame_index,
     )
 }
 
@@ -1269,6 +1506,37 @@ fn run_python_script(python: &str, script: &str, cwd: Option<&Path>) -> Result<S
     Ok(stdout)
 }
 
+fn run_python_json_script(
+    python: &str,
+    script: &str,
+    cwd: Option<&Path>,
+) -> Result<String, String> {
+    let stdout = run_python_script(python, script, cwd)?;
+    extract_json_from_python_stdout(&stdout)
+}
+
+fn extract_json_from_python_stdout(stdout: &str) -> Result<String, String> {
+    let trimmed = stdout.trim();
+    if trimmed.starts_with('{') && trimmed.ends_with('}') {
+        return Ok(trimmed.to_string());
+    }
+    for line in stdout.lines().rev() {
+        let candidate = line.trim();
+        if candidate.starts_with('{') && candidate.ends_with('}') {
+            return Ok(candidate.to_string());
+        }
+    }
+    let preview = trimmed.chars().take(12_000).collect::<String>();
+    if preview.is_empty() {
+        Err("python finished without JSON response".to_string())
+    } else {
+        Err(format!(
+            "python finished without JSON response\nstdout:\n{}",
+            preview
+        ))
+    }
+}
+
 fn classify_python_error(error: String) -> String {
     let lower = error.to_lowercase();
     let kind = if lower.contains("out of memory")
@@ -1280,6 +1548,9 @@ fn classify_python_error(error: String) -> String {
     } else if lower.contains("no module named")
         || lower.contains("modulenotfounderror")
         || lower.contains("dependency import failed")
+        || lower.contains("failed to compile")
+        || lower.contains("cc_cmd")
+        || lower.contains("triton")
     {
         "dependency"
     } else if lower.contains("sam3") {

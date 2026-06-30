@@ -462,8 +462,13 @@ class _LanguageStrings {
     'ai.sam3PromptClick': '点击',
     'ai.sam3PromptLabel': '文本提示词',
     'ai.sam3PromptHint': '每行一个目标，例如 mask 或 person',
-    'ai.sam3ClickHint': '点击模式仅用于标注页面交互：左键添加目标点，右键添加排除点。',
+    'ai.sam3ClickHint': '点击模式：左键添加目标点，右键添加排除点。',
+    'ai.sam3ClickLocalOnly':
+        '全部标注会使用 SAM3-Video 将当前图片的正负点传播到目标范围；图片序列构图连续或高度相似时效果最好，不会训练模型。',
+    'ai.sam3ClickPreview': '刷新预览',
     'ai.sam3PromptRequired': '请先输入 SAM3 文本提示词',
+    'ai.sam3ClickRequired': '请先在图片上左键添加 SAM3 正点',
+    'ai.sam3ClickCurrentOnly': '当前点击提示图片必须在标注范围内',
     'ai.sam3RuntimeConfig': 'SAM3 低显存配置',
     'ai.sam3Precision': '精度',
     'ai.sam3Encoder': '编码器',
@@ -537,6 +542,8 @@ class _LanguageStrings {
     'logs.deleteRange': '删除日志',
     'logs.deleted': '已删除日志',
     'logs.selectDeleteRange': '选择要删除的日期范围',
+    'logs.top': '顶端',
+    'logs.bottom': '底部',
     'database.title': '数据库管理',
     'database.refresh': '刷新',
     'database.overview': '数据库概览',
@@ -648,6 +655,9 @@ class _LanguageStrings {
     'action.cancel': '取消',
     'action.delete': '删除',
     'action.clear': '清空',
+    'ai.sam3SaveClassTitle': '保存 SAM3 标注',
+    'ai.sam3SaveClassName': '类别名称',
+    'ai.sam3SaveClassHint': '选择已有类别或输入新类别',
   };
 }
 
@@ -911,6 +921,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   _AiAssistConfig? _aiAssistConfig;
   bool _aiAnnotating = false;
   final Map<String, List<_Sam3ClickPromptPoint>> _sam3ClickPromptsByImage = {};
+  final Map<String, _Sam3ClickPreviewState> _sam3ClickPreviewsByImage = {};
   final Map<String, Set<String>> _sam3ClickAnnotationIdsByImage = {};
   Offset? _aiAssistPanelOffset;
   Size _aiAssistPanelSize = const Size(320, 360);
@@ -982,6 +993,36 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     return _currentAnnotations;
   }
 
+  bool get _sam3ClickModeActive {
+    final config = _aiAssistConfig;
+    return _aiPanelVisible &&
+        config != null &&
+        config.backend == _AiAssistBackend.sam3 &&
+        config.sam3PromptMode == _AiSam3PromptMode.click;
+  }
+
+  List<_Sam3ClickPromptPoint> get _currentSam3ClickPromptsForLabel {
+    if (!_sam3ClickModeActive || !_selectedImageAuthorized) {
+      return const [];
+    }
+    final imageKey = _selectedImageKey;
+    if (imageKey == null) {
+      return const [];
+    }
+    return _sam3ClickPromptsByImage[imageKey] ?? const [];
+  }
+
+  List<_AnnotationRegion> get _currentSam3ClickPreviewForLabel {
+    if (!_sam3ClickModeActive || !_selectedImageAuthorized) {
+      return const [];
+    }
+    final imageKey = _selectedImageKey;
+    if (imageKey == null) {
+      return const [];
+    }
+    return _sam3ClickPreviewsByImage[imageKey]?.annotations ?? const [];
+  }
+
   bool _isImageIndexAuthorized(int zeroBasedIndex) {
     if (!_collaborationClientMode) {
       return true;
@@ -1024,6 +1065,9 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     _annotationsByImage.clear();
     _imageSplits.clear();
     _imageDisplaySizes.clear();
+    _sam3ClickPromptsByImage.clear();
+    _sam3ClickPreviewsByImage.clear();
+    _sam3ClickAnnotationIdsByImage.clear();
     _undoStack.clear();
     _redoStack.clear();
     _importedDataset = null;
@@ -1822,21 +1866,41 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     }
     _log('LABEL', 'Open image file: ${file.path}');
 
-    final existingIndex = _imageIndexOfPath(file.path);
-    if (existingIndex >= 0) {
+    if (insertAfterIndex != null) {
+      final existingIndex = _imageIndexOfPath(file.path);
+      if (existingIndex >= 0) {
+        if (_touchRecent(_recentFiles, file.path)) {
+          _saveHistory();
+        }
+        _selectImage(existingIndex);
+        return;
+      }
+
       if (_touchRecent(_recentFiles, file.path)) {
         _saveHistory();
       }
-      _selectImage(existingIndex);
+      _importedDataset = null;
+      _insertImages([file.path], insertAfterIndex: insertAfterIndex);
+      await _loadAnnotationDatabaseForCurrentImages();
       return;
     }
 
     if (_touchRecent(_recentFiles, file.path)) {
       _saveHistory();
     }
-    _importedDataset = null;
-    _insertImages([file.path], insertAfterIndex: insertAfterIndex);
+    await _openSingleImageProject(file.path);
+  }
+
+  Future<void> _openSingleImageProject(String path) async {
+    setState(() {
+      _clearCurrentProjectState();
+      _images.add(_ImageItem.fromPath(path));
+      _imageSplits[_pathKey(path)] = 'train';
+      _activeSection = 'label';
+    });
+    _log('LABEL', 'Single image project opened: $path');
     await _loadAnnotationDatabaseForCurrentImages();
+    _scheduleLabelResumePositionSave();
   }
 
   Future<void> _openImageFolder([String? path]) async {
@@ -1900,7 +1964,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     await _openImageFolder(path);
   }
 
-  void _openRecentFile(String path) {
+  Future<void> _openRecentFile(String path) async {
     if (_guardProjectChangeBlocked()) {
       return;
     }
@@ -1923,14 +1987,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     if (_touchRecent(_recentFiles, path)) {
       _saveHistory();
     }
-    final existingIndex = _imageIndexOfPath(path);
-    if (existingIndex >= 0) {
-      _selectImage(existingIndex);
-      return;
-    }
-    _importedDataset = null;
-    _insertImages([path]);
-    unawaited(_loadAnnotationDatabaseForCurrentImages());
+    await _openSingleImageProject(path);
   }
 
   void _insertImages(List<String> paths, {int? insertAfterIndex}) {
@@ -1985,6 +2042,9 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       final removed = _images.removeAt(index);
       _imageSplits.remove(_pathKey(removed.path));
       _annotationsByImage.remove(_pathKey(removed.path));
+      _sam3ClickPromptsByImage.remove(_pathKey(removed.path));
+      _sam3ClickPreviewsByImage.remove(_pathKey(removed.path));
+      _sam3ClickAnnotationIdsByImage.remove(_pathKey(removed.path));
       _selectedImageIndex = _images.isEmpty
           ? 0
           : _selectedImageIndex.clamp(0, _images.length - 1);
@@ -2883,6 +2943,11 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     return points.map((point) => point.wireLine).join('\n');
   }
 
+  bool _sam3ClickHasPositivePoint(String imagePath) {
+    final points = _sam3ClickPromptsByImage[_pathKey(imagePath)] ?? const [];
+    return points.any((point) => point.positive);
+  }
+
   Future<bool> _handleSam3ClickPrompt(
     Offset imagePoint,
     Size imageDisplaySize,
@@ -2913,13 +2978,283 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     );
     final points = _sam3ClickPromptsByImage.putIfAbsent(imageKey, () => []);
     points.add(point);
+    setState(() {});
     _log(
       'AI',
       'SAM3 click prompt added: image=${image.name}, point=${point.x.toStringAsFixed(4)},${point.y.toStringAsFixed(4)}, positive=$positive, total=${points.length}',
       level: _LogLevel.debug,
     );
-    await _runAiAnnotateCurrentWithConfig(config);
+    if (_sam3ClickHasPositivePoint(image.path)) {
+      await _runSam3ClickPreview(config);
+    } else {
+      _showFloatingMessage(t('ai.sam3ClickRequired'));
+    }
     return true;
+  }
+
+  Future<void> _runSam3ClickPreview(_AiAssistConfig config) async {
+    final image = _selectedImage;
+    final imageKey = _selectedImageKey;
+    if (_aiAnnotating ||
+        image == null ||
+        imageKey == null ||
+        config.backend != _AiAssistBackend.sam3 ||
+        config.sam3PromptMode != _AiSam3PromptMode.click) {
+      return;
+    }
+    if (_appSettings.pythonPath.trim().isEmpty) {
+      _log(
+        'AI',
+        'SAM3 click preview blocked: Python path is empty',
+        level: _LogLevel.warning,
+      );
+      _showFloatingMessage(t('detect.pythonNotConfigured'));
+      return;
+    }
+    final samClickPointsText = _sam3ClickPointsTextForImage(image.path);
+    if (samClickPointsText.trim().isEmpty ||
+        !_sam3ClickHasPositivePoint(image.path)) {
+      _log(
+        'AI',
+        'SAM3 click preview blocked: no positive click prompt points',
+        level: _LogLevel.warning,
+      );
+      _showFloatingMessage(t('ai.sam3ClickRequired'));
+      return;
+    }
+    _log(
+      'AI',
+      'SAM3 click preview started: image=${image.name}, mode=${config.sam3OutputMode.wireName}, clickPoints=${samClickPointsText.trim().split('\n').length}, ${config.sam3Runtime.logSummary}',
+    );
+    setState(() => _aiAnnotating = true);
+    await WidgetsBinding.instance.endOfFrame;
+    try {
+      final result = await _RustVideoBackend.aiAnnotateImage(
+        backend: config.backend.wireName,
+        pythonPath: _appSettings.pythonPath.trim(),
+        modelPath: config.modelPath,
+        inputPath: image.path,
+        classIds: config.selectedClassIds.toList()..sort(),
+        confThreshold: config.confThreshold,
+        iouThreshold: 0.45,
+        imgsz: config.imageSize,
+        device: 'auto',
+        samMode: _AiSam3OutputMode.seg.wireName,
+        samPromptMode: config.sam3PromptMode.wireName,
+        promptsText: config.sam3PromptText,
+        samClickPointsText: samClickPointsText,
+        samPrecision: config.sam3Runtime.precision,
+        samEncoder: config.sam3Runtime.encoder,
+        samImageBatchSize: config.sam3Runtime.imageBatchSize,
+        samVideoBatchSize: config.sam3Runtime.videoBatchSize,
+        samInteractiveBatchSize: config.sam3Runtime.interactiveBatchSize,
+        samMaxImageWidth: config.sam3Runtime.maxImageWidth,
+        samMaxImageHeight: config.sam3Runtime.maxImageHeight,
+        samResizeMethod: config.sam3Runtime.resizeMethod,
+      );
+      final displaySize = await _computeImageDisplaySize(image.path);
+      final annotations = _sam3PreviewAnnotationsFromResult(
+        result: result,
+        displaySize: displaySize,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _sam3ClickPreviewsByImage[imageKey] = _Sam3ClickPreviewState(
+          result: result,
+          displaySize: displaySize,
+          annotations: annotations,
+        );
+      });
+      _log(
+        'AI',
+        'SAM3 click preview updated: image=${image.name}, masks=${result.masks.length}, preview=${annotations.length}',
+      );
+    } on Object catch (error) {
+      final failure = _classifyAiFailure(error);
+      _log(
+        'AI',
+        'SAM3 click preview failed: failure=$failure',
+        level: _LogLevel.error,
+      );
+      _logMultiline(
+        'AI',
+        error.toString(),
+        level: _LogLevel.error,
+        prefix: 'detail: ',
+      );
+      _showFloatingMessage('${t('ai.failed')}: ${_shortAiError(error)}');
+    } finally {
+      if (mounted) {
+        setState(() => _aiAnnotating = false);
+      }
+    }
+  }
+
+  List<_AnnotationRegion> _sam3PreviewAnnotationsFromResult({
+    required _AiAnnotationResult result,
+    required Size displaySize,
+  }) {
+    if (result.width <= 0 || result.height <= 0) {
+      return const [];
+    }
+    final annotations = <_AnnotationRegion>[];
+    for (var index = 0; index < result.masks.length; index += 1) {
+      final mask = result.masks[index];
+      final points = _scaleAiPoints(
+        mask.points,
+        sourceSize: Size(result.width, result.height),
+        displaySize: displaySize,
+      );
+      if (points.length < 3) {
+        continue;
+      }
+      final bounds = _pointsBounds(points).intersect(Offset.zero & displaySize);
+      if (bounds.width < 2 || bounds.height < 2) {
+        continue;
+      }
+      annotations.add(
+        _AnnotationRegion(
+          id: 'sam3_preview_$index',
+          mode: _AnnotationMode.seg,
+          rect: bounds,
+          classId: _activeClassId ?? -1,
+          points: points,
+        ),
+      );
+    }
+    return annotations;
+  }
+
+  Future<void> _commitSam3ClickPreview(_AiAssistConfig config) async {
+    final image = _selectedImage;
+    final imageKey = _selectedImageKey;
+    if (image == null ||
+        imageKey == null ||
+        config.backend != _AiAssistBackend.sam3 ||
+        config.sam3PromptMode != _AiSam3PromptMode.click) {
+      return;
+    }
+    if (!_sam3ClickHasPositivePoint(image.path)) {
+      _showFloatingMessage(t('ai.sam3ClickRequired'));
+      return;
+    }
+    var preview = _sam3ClickPreviewsByImage[imageKey];
+    if (preview == null) {
+      await _runSam3ClickPreview(config);
+      preview = _sam3ClickPreviewsByImage[imageKey];
+    }
+    if (preview == null) {
+      return;
+    }
+    if (preview.result.masks.isEmpty) {
+      _showFloatingMessage('${t('ai.done')} (0)');
+      return;
+    }
+    final selectedClassName = await _promptSam3ClickSaveClassName(config);
+    if (selectedClassName == null || selectedClassName.trim().isEmpty) {
+      return;
+    }
+    final classCountBefore = _labelClasses.length;
+    _pushAnnotationSnapshot();
+    final added = _applyAiAnnotationResult(
+      imagePath: image.path,
+      displaySize: preview.displaySize,
+      result: preview.result,
+      config: config,
+      classNameOverride: selectedClassName.trim(),
+    );
+    setState(() {
+      _sam3ClickPreviewsByImage.remove(imageKey);
+    });
+    final classesChanged = _labelClasses.length != classCountBefore;
+    if (classesChanged) {
+      _broadcastCollaborationClassSnapshot('sam3 click preview saved');
+    }
+    if (added > 0 || classesChanged) {
+      _scheduleAnnotationDatabaseSave();
+    }
+    _log('AI', 'SAM3 click preview saved: image=${image.name}, added=$added');
+    _showFloatingMessage('${t('ai.done')} ($added)');
+  }
+
+  Future<void> _handleAiAssistSave(_AiAssistConfig config) async {
+    if (config.backend == _AiAssistBackend.sam3 &&
+        config.sam3PromptMode == _AiSam3PromptMode.click) {
+      await _commitSam3ClickPreview(config);
+    }
+  }
+
+  Future<String?> _promptSam3ClickSaveClassName(_AiAssistConfig config) async {
+    final activeClass = _activeClassId == null
+        ? null
+        : _classById(_activeClassId!);
+    final firstPrompt = config.sam3PromptText
+        .split(RegExp(r'\r?\n'))
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .firstOrNull;
+    final initialName =
+        activeClass?.name ??
+        (_labelClasses.isNotEmpty ? _labelClasses.first.name : null) ??
+        firstPrompt ??
+        'sam3_click';
+    final controller = TextEditingController(text: initialName);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(t('ai.sam3SaveClassTitle')),
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: DropdownMenu<String>(
+              controller: controller,
+              requestFocusOnTap: true,
+              enableFilter: true,
+              width: 360,
+              label: Text(t('ai.sam3SaveClassName')),
+              hintText: t('ai.sam3SaveClassHint'),
+              dropdownMenuEntries: [
+                for (final labelClass in _labelClasses)
+                  DropdownMenuEntry<String>(
+                    value: labelClass.name,
+                    label: labelClass.name,
+                    leadingIcon: Icon(
+                      Icons.square_rounded,
+                      color: labelClass.color,
+                      size: 16,
+                    ),
+                  ),
+              ],
+              onSelected: (value) {
+                if (value != null) {
+                  controller.text = value;
+                }
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(t('action.cancel')),
+            ),
+            FilledButton(
+              onPressed: () {
+                final value = controller.text.trim();
+                if (value.isEmpty) {
+                  return;
+                }
+                Navigator.of(dialogContext).pop(value);
+              },
+              child: Text(t('action.save')),
+            ),
+          ],
+        );
+      },
+    );
+    controller.dispose();
+    return result;
   }
 
   Future<void> _runAiAnnotateForIndices(
@@ -2972,36 +3307,48 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       return;
     }
     var samClickPointsText = '';
+    var samPromptFrameIndex = 0;
+    String? samClickClassNameOverride;
     final isSam3ClickMode =
         config.backend == _AiAssistBackend.sam3 &&
         config.sam3PromptMode == _AiSam3PromptMode.click;
     if (isSam3ClickMode) {
-      if (targetIndices.length != 1 ||
-          targetIndices.first != _selectedImageIndex) {
+      final promptImageIndex = _selectedImageIndex;
+      if (!targetIndices.contains(promptImageIndex)) {
         _log(
           'AI',
-          'SAM3 click annotation blocked: click mode only supports the current image',
+          'SAM3 click annotation blocked: prompt image is outside the target range',
           level: _LogLevel.warning,
         );
         _showFloatingMessage(t('ai.sam3ClickCurrentOnly'));
         return;
       }
-      samClickPointsText = _sam3ClickPointsTextForImage(
-        _images[targetIndices.first].path,
-      );
-      if (samClickPointsText.trim().isEmpty) {
+      final promptImage = _images[promptImageIndex];
+      samPromptFrameIndex = targetIndices.indexOf(promptImageIndex);
+      samClickPointsText = _sam3ClickPointsTextForImage(promptImage.path);
+      if (samClickPointsText.trim().isEmpty ||
+          !_sam3ClickHasPositivePoint(promptImage.path)) {
         _log(
           'AI',
-          'SAM3 click annotation blocked: no click prompt points',
+          'SAM3 click annotation blocked: no positive click prompt points',
           level: _LogLevel.warning,
         );
         _showFloatingMessage(t('ai.sam3ClickRequired'));
         return;
       }
+      if (targetIndices.length == 1 && targetIndices.first == promptImageIndex) {
+        await _runSam3ClickPreview(config);
+        return;
+      }
+      samClickClassNameOverride = await _promptSam3ClickSaveClassName(config);
+      if (samClickClassNameOverride == null ||
+          samClickClassNameOverride.trim().isEmpty) {
+        return;
+      }
     }
     _log(
       'AI',
-      'AI annotation started: backend=${config.backend.wireName}, targets=${targetIndices.length}, model=${_fileName(config.modelPath)}, classes=${config.selectedClassIds.length}, conf=${config.confThreshold.toStringAsFixed(2)}, imgsz=${config.imageSize}, sam3Mode=${config.sam3OutputMode.wireName}, prompt=${config.sam3PromptMode.wireName}, clickPoints=${samClickPointsText.trim().isEmpty ? 0 : samClickPointsText.trim().split('\n').length}, ${config.sam3Runtime.logSummary}',
+      'AI annotation started: backend=${config.backend.wireName}, targets=${targetIndices.length}, model=${_fileName(config.modelPath)}, classes=${config.selectedClassIds.length}, conf=${config.confThreshold.toStringAsFixed(2)}, imgsz=${config.imageSize}, sam3Mode=${config.sam3OutputMode.wireName}, prompt=${config.sam3PromptMode.wireName}, clickPoints=${samClickPointsText.trim().isEmpty ? 0 : samClickPointsText.trim().split('\n').length}, samPromptFrame=$samPromptFrameIndex, ${config.sam3Runtime.logSummary}',
     );
 
     setState(() => _aiAnnotating = true);
@@ -3044,6 +3391,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
           displaySize: displaySize,
           result: result,
           config: config,
+          classNameOverride: samClickClassNameOverride,
         );
       } else if (targetIndices.isNotEmpty) {
         final targetImages = [
@@ -3062,7 +3410,8 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
           samMode: config.sam3OutputMode.wireName,
           samPromptMode: config.sam3PromptMode.wireName,
           promptsText: config.sam3PromptText,
-          samClickPointsText: '',
+          samClickPointsText: samClickPointsText,
+          samPromptFrameIndex: samPromptFrameIndex,
           samPrecision: config.sam3Runtime.precision,
           samEncoder: config.sam3Runtime.encoder,
           samImageBatchSize: config.sam3Runtime.imageBatchSize,
@@ -3083,6 +3432,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
             displaySize: displaySize,
             result: result,
             config: config,
+            classNameOverride: samClickClassNameOverride,
           );
         }
       }
@@ -3127,6 +3477,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
     required Size displaySize,
     required _AiAnnotationResult result,
     required _AiAssistConfig config,
+    String? classNameOverride,
   }) {
     if (result.width <= 0 || result.height <= 0) {
       return 0;
@@ -3141,7 +3492,9 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       if (replaceSam3ClickAnnotations) {
         final previousIds = _sam3ClickAnnotationIdsByImage.remove(imageKey);
         if (previousIds != null && previousIds.isNotEmpty) {
-          annotations.removeWhere((annotation) => previousIds.contains(annotation.id));
+          annotations.removeWhere(
+            (annotation) => previousIds.contains(annotation.id),
+          );
         }
       }
       for (final mask in result.masks) {
@@ -3153,7 +3506,11 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
         if (points.length < 3) {
           continue;
         }
-        final classId = _ensureLabelClassByName(mask.className);
+        final classId = _ensureLabelClassByName(
+          classNameOverride?.trim().isNotEmpty == true
+              ? classNameOverride!.trim()
+              : mask.className,
+        );
         final bounds = _pointsBounds(
           points,
         ).intersect(Offset.zero & displaySize);
@@ -4156,175 +4513,176 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
         context: context,
         builder: (context) {
           return StatefulBuilder(
-          builder: (context, setDialogState) {
-            void scrollLogToTop() {
-              if (!logScrollController.hasClients) {
-                return;
+            builder: (context, setDialogState) {
+              void scrollLogToTop() {
+                if (!logScrollController.hasClients) {
+                  return;
+                }
+                logScrollController.animateTo(
+                  0,
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOut,
+                );
               }
-              logScrollController.animateTo(
-                0,
-                duration: const Duration(milliseconds: 180),
-                curve: Curves.easeOut,
-              );
-            }
 
-            void scrollLogToBottom() {
-              if (!logScrollController.hasClients) {
-                return;
+              void scrollLogToBottom() {
+                if (!logScrollController.hasClients) {
+                  return;
+                }
+                logScrollController.animateTo(
+                  logScrollController.position.maxScrollExtent,
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOut,
+                );
               }
-              logScrollController.animateTo(
-                logScrollController.position.maxScrollExtent,
-                duration: const Duration(milliseconds: 180),
-                curve: Curves.easeOut,
-              );
-            }
 
-            Future<void> deleteLogRange() async {
-              final now = DateTime.now();
-              final parsedDates = dates
-                  .map(DateTime.tryParse)
-                  .whereType<DateTime>()
-                  .toList();
-              final firstDate = parsedDates.isEmpty
-                  ? now.subtract(const Duration(days: 365))
-                  : parsedDates.reduce((a, b) => a.isBefore(b) ? a : b);
-              final lastDate = parsedDates.isEmpty
-                  ? now
-                  : parsedDates.reduce((a, b) => a.isAfter(b) ? a : b);
-              final range = await showDateRangePicker(
-                context: context,
-                firstDate: firstDate,
-                lastDate: lastDate.isBefore(now) ? now : lastDate,
-                initialDateRange: DateTimeRange(
-                  start: selectedDate == null
-                      ? lastDate
-                      : DateTime.tryParse(selectedDate!) ?? lastDate,
-                  end: selectedDate == null
-                      ? lastDate
-                      : DateTime.tryParse(selectedDate!) ?? lastDate,
-                ),
-                helpText: t('logs.selectDeleteRange'),
-              );
-              if (range == null) {
-                return;
+              Future<void> deleteLogRange() async {
+                final now = DateTime.now();
+                final parsedDates = dates
+                    .map(DateTime.tryParse)
+                    .whereType<DateTime>()
+                    .toList();
+                final firstDate = parsedDates.isEmpty
+                    ? now.subtract(const Duration(days: 365))
+                    : parsedDates.reduce((a, b) => a.isBefore(b) ? a : b);
+                final lastDate = parsedDates.isEmpty
+                    ? now
+                    : parsedDates.reduce((a, b) => a.isAfter(b) ? a : b);
+                final range = await showDateRangePicker(
+                  context: context,
+                  firstDate: firstDate,
+                  lastDate: lastDate.isBefore(now) ? now : lastDate,
+                  initialDateRange: DateTimeRange(
+                    start: selectedDate == null
+                        ? lastDate
+                        : DateTime.tryParse(selectedDate!) ?? lastDate,
+                    end: selectedDate == null
+                        ? lastDate
+                        : DateTime.tryParse(selectedDate!) ?? lastDate,
+                  ),
+                  helpText: t('logs.selectDeleteRange'),
+                );
+                if (range == null) {
+                  return;
+                }
+                final deleted = _ConfigStore.deleteLogsByDateRange(
+                  dateKey(range.start),
+                  dateKey(range.end),
+                );
+                dates = _ConfigStore.logDates();
+                selectedDate = dates.contains(selectedDate)
+                    ? selectedDate
+                    : (dates.isEmpty ? null : dates.first);
+                logText = selectedDate == null
+                    ? t('logs.noLogs')
+                    : _ConfigStore.readLogsForDate(selectedDate!);
+                setDialogState(() {});
+                _showFloatingMessage('${t('logs.deleted')}: $deleted');
               }
-              final deleted = _ConfigStore.deleteLogsByDateRange(
-                dateKey(range.start),
-                dateKey(range.end),
-              );
-              dates = _ConfigStore.logDates();
-              selectedDate = dates.contains(selectedDate)
-                  ? selectedDate
-                  : (dates.isEmpty ? null : dates.first);
-              logText = selectedDate == null
-                  ? t('logs.noLogs')
-                  : _ConfigStore.readLogsForDate(selectedDate!);
-              setDialogState(() {});
-              _showFloatingMessage('${t('logs.deleted')}: $deleted');
-            }
 
-            return AlertDialog(
-              title: Text(t('logs.title')),
-              content: SizedBox(
-                width: 760,
-                height: 520,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: DropdownButtonFormField<String>(
-                            initialValue: selectedDate,
-                            decoration: InputDecoration(
-                              labelText: t('logs.date'),
-                              isDense: true,
+              return AlertDialog(
+                title: Text(t('logs.title')),
+                content: SizedBox(
+                  width: 760,
+                  height: 520,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              initialValue: selectedDate,
+                              decoration: InputDecoration(
+                                labelText: t('logs.date'),
+                                isDense: true,
+                              ),
+                              items: [
+                                for (final date in dates)
+                                  DropdownMenuItem(
+                                    value: date,
+                                    child: Text(date),
+                                  ),
+                              ],
+                              onChanged: dates.isEmpty
+                                  ? null
+                                  : (value) {
+                                      if (value == null) return;
+                                      setDialogState(() {
+                                        selectedDate = value;
+                                        logText = _ConfigStore.readLogsForDate(
+                                          value,
+                                        );
+                                      });
+                                      WidgetsBinding.instance
+                                          .addPostFrameCallback((_) {
+                                            if (logScrollController
+                                                .hasClients) {
+                                              logScrollController.jumpTo(0);
+                                            }
+                                          });
+                                    },
                             ),
-                            items: [
-                              for (final date in dates)
-                                DropdownMenuItem(
-                                  value: date,
-                                  child: Text(date),
-                                ),
-                            ],
-                            onChanged: dates.isEmpty
-                                ? null
-                                : (value) {
-                                    if (value == null) return;
-                                    setDialogState(() {
-                                      selectedDate = value;
-                                      logText = _ConfigStore.readLogsForDate(
-                                        value,
-                                      );
-                                    });
-                                    WidgetsBinding.instance
-                                        .addPostFrameCallback((_) {
-                                          if (logScrollController.hasClients) {
-                                            logScrollController.jumpTo(0);
-                                          }
-                                        });
-                                  },
                           ),
-                        ),
-                        const SizedBox(width: 12),
-                        OutlinedButton.icon(
-                          onPressed: logText.isEmpty ? null : scrollLogToTop,
-                          icon: const Icon(Icons.vertical_align_top),
-                          label: Text(t('logs.top')),
-                        ),
-                        const SizedBox(width: 8),
-                        OutlinedButton.icon(
-                          onPressed: logText.isEmpty
-                              ? null
-                              : scrollLogToBottom,
-                          icon: const Icon(Icons.vertical_align_bottom),
-                          label: Text(t('logs.bottom')),
-                        ),
-                        const SizedBox(width: 8),
-                        OutlinedButton.icon(
-                          onPressed: dates.isEmpty ? null : deleteLogRange,
-                          icon: const Icon(Icons.delete_outline),
-                          label: Text(t('logs.deleteRange')),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Expanded(
-                      child: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(12),
-                        color: _isDarkMode(context)
-                            ? const Color(0xFF090515)
-                            : Colors.black,
-                        child: Scrollbar(
-                          controller: logScrollController,
-                          thumbVisibility: true,
-                          child: SingleChildScrollView(
+                          const SizedBox(width: 12),
+                          OutlinedButton.icon(
+                            onPressed: logText.isEmpty ? null : scrollLogToTop,
+                            icon: const Icon(Icons.vertical_align_top),
+                            label: Text(t('logs.top')),
+                          ),
+                          const SizedBox(width: 8),
+                          OutlinedButton.icon(
+                            onPressed: logText.isEmpty
+                                ? null
+                                : scrollLogToBottom,
+                            icon: const Icon(Icons.vertical_align_bottom),
+                            label: Text(t('logs.bottom')),
+                          ),
+                          const SizedBox(width: 8),
+                          OutlinedButton.icon(
+                            onPressed: dates.isEmpty ? null : deleteLogRange,
+                            icon: const Icon(Icons.delete_outline),
+                            label: Text(t('logs.deleteRange')),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Expanded(
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          color: _isDarkMode(context)
+                              ? const Color(0xFF090515)
+                              : Colors.black,
+                          child: Scrollbar(
                             controller: logScrollController,
-                            child: SelectableText(
-                              logText,
-                              style: const TextStyle(
-                                color: Color(0xFFE5E7EB),
-                                fontFamily: 'Consolas',
-                                fontSize: 12.5,
-                                height: 1.35,
+                            thumbVisibility: true,
+                            child: SingleChildScrollView(
+                              controller: logScrollController,
+                              child: SelectableText(
+                                logText,
+                                style: const TextStyle(
+                                  color: Color(0xFFE5E7EB),
+                                  fontFamily: 'Consolas',
+                                  fontSize: 12.5,
+                                  height: 1.35,
+                                ),
                               ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: Text(t('action.close')),
-                ),
-              ],
-            );
-          },
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: Text(t('action.close')),
+                  ),
+                ],
+              );
+            },
           );
         },
       );
@@ -5832,7 +6190,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                   onOpenFolder: () => _openImageFolder(),
                   onOpenRecentFolder: (path) =>
                       unawaited(_openRecentFolder(path)),
-                  onOpenRecentFile: _openRecentFile,
+                  onOpenRecentFile: (path) => unawaited(_openRecentFile(path)),
                   onClearRecent: _clearRecentItems,
                   onExit: () => SystemNavigator.pop(),
                   onImportDataset: _importYoloDataset,
@@ -5901,6 +6259,10 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                               labelClasses: _labelClasses,
                               annotationsByImage: _annotationsByImage,
                               annotations: _currentAnnotationsForLabel,
+                              sam3ClickPrompts:
+                                  _currentSam3ClickPromptsForLabel,
+                              sam3PreviewAnnotations:
+                                  _currentSam3ClickPreviewForLabel,
                               selectedAnnotationId: _selectedAnnotationId,
                               showClassLabels: _showClassLabels,
                               classesEditable: !_collaborationClientMode,
@@ -6053,6 +6415,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                               panelOffset,
                             ),
                             onConfigSaved: _saveAiAssistConfig,
+                            onSave: _handleAiAssistSave,
                             onAnnotateCurrent: _runAiAnnotateCurrentWithConfig,
                             onAnnotateAll: _runAiAnnotateAllWithConfig,
                           ),
@@ -6320,6 +6683,18 @@ class _Sam3ClickPromptPoint {
       '${x.toStringAsFixed(6)},${y.toStringAsFixed(6)},${positive ? 1 : 0}';
 }
 
+class _Sam3ClickPreviewState {
+  const _Sam3ClickPreviewState({
+    required this.result,
+    required this.displaySize,
+    required this.annotations,
+  });
+
+  final _AiAnnotationResult result;
+  final Size displaySize;
+  final List<_AnnotationRegion> annotations;
+}
+
 double _normalizeAiConfidence(double value) {
   if (!value.isFinite) {
     return 0.25;
@@ -6338,6 +6713,7 @@ class _AiAssistFloatingPanel extends StatefulWidget {
     required this.onDrag,
     required this.onResize,
     required this.onConfigSaved,
+    required this.onSave,
     required this.onAnnotateCurrent,
     required this.onAnnotateAll,
   });
@@ -6351,6 +6727,7 @@ class _AiAssistFloatingPanel extends StatefulWidget {
   final ValueChanged<Offset> onDrag;
   final ValueChanged<Offset> onResize;
   final ValueChanged<_AiAssistConfig> onConfigSaved;
+  final Future<void> Function(_AiAssistConfig config) onSave;
   final Future<void> Function(_AiAssistConfig config) onAnnotateCurrent;
   final Future<void> Function(_AiAssistConfig config) onAnnotateAll;
 
@@ -6548,13 +6925,14 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
     }
   }
 
-  void _save() {
+  Future<void> _save() async {
     final config = _configFromFields();
     if (config == null) {
       return;
     }
     widget.onConfigSaved(config);
     setState(() => _error = null);
+    await widget.onSave(config);
   }
 
   Future<void> _annotateCurrent() async {
@@ -6810,9 +7188,21 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
             ),
           )
         else
-          Text(
-            t('ai.sam3ClickHint'),
-            style: Theme.of(context).textTheme.bodySmall,
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: Theme.of(
+                context,
+              ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.42),
+              border: Border.all(color: _borderColor(context)),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(10),
+              child: Text(
+                '${t('ai.sam3ClickHint')}\n${t('ai.sam3ClickLocalOnly')}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
           ),
         const SizedBox(height: 12),
         _confidenceSlider(disabled: disabled),
@@ -6835,6 +7225,9 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
     final disabled = _loadingClasses;
+    final sam3ClickMode =
+        _backend == _AiAssistBackend.sam3 &&
+        _sam3PromptMode == _AiSam3PromptMode.click;
 
     return Material(
       elevation: 18,
@@ -6950,18 +7343,27 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
                                       Icons.image_search_outlined,
                                       size: 17,
                                     ),
-                                    label: Text(t('ai.annotateCurrent')),
+                                    label: Text(
+                                      sam3ClickMode
+                                          ? t('ai.sam3ClickPreview')
+                                          : t('ai.annotateCurrent'),
+                                    ),
                                   ),
                                 ),
                                 const SizedBox(width: 10),
                                 Expanded(
-                                  child: FilledButton.icon(
-                                    onPressed: disabled ? null : _annotateAll,
-                                    icon: const Icon(
-                                      Icons.auto_awesome_motion,
-                                      size: 17,
+                                  child: Tooltip(
+                                    message: sam3ClickMode
+                                        ? t('ai.sam3ClickLocalOnly')
+                                        : '',
+                                    child: FilledButton.icon(
+                                      onPressed: disabled ? null : _annotateAll,
+                                      icon: const Icon(
+                                        Icons.auto_awesome_motion,
+                                        size: 17,
+                                      ),
+                                      label: Text(t('ai.annotateAll')),
                                     ),
-                                    label: Text(t('ai.annotateAll')),
                                   ),
                                 ),
                               ],
@@ -6976,7 +7378,9 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
                                 ),
                                 const SizedBox(width: 10),
                                 OutlinedButton(
-                                  onPressed: disabled ? null : _save,
+                                  onPressed: disabled
+                                      ? null
+                                      : () => unawaited(_save()),
                                   child: Text(t('action.save')),
                                 ),
                               ],
