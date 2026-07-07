@@ -1,0 +1,221 @@
+// AI toolbar for the label page.
+
+part of '../../main.dart';
+
+/// Right-side AI/annotation toolbar with tools and class management.
+class _AiToolbar extends StatelessWidget {
+  const _AiToolbar({
+    required this.activeTool,
+    required this.activeClassId,
+    required this.labelClasses,
+    required this.annotations,
+    required this.selectedAnnotationId,
+    required this.showClassLabels,
+    required this.aiPanelVisible,
+    required this.classesEditable,
+    required this.onToolSelected,
+    required this.onClassSelected,
+    required this.onClassAdded,
+    required this.onClassEdited,
+    required this.onClassColorChanged,
+    required this.onClassDeleted,
+    required this.onClassReordered,
+    required this.onToggleClassLabels,
+    required this.onAnnotationSelected,
+    required this.onAnnotationClassChanged,
+    required this.onAiConfigPressed,
+  });
+
+  final String activeTool;
+  final int? activeClassId;
+  final List<_LabelClass> labelClasses;
+  final List<_AnnotationRegion> annotations;
+  final String? selectedAnnotationId;
+  final bool showClassLabels;
+  final bool aiPanelVisible;
+  final bool classesEditable;
+  final ValueChanged<String> onToolSelected;
+  final ValueChanged<int> onClassSelected;
+  final VoidCallback onClassAdded;
+  final ValueChanged<_LabelClass> onClassEdited;
+  final ValueChanged<_LabelClass> onClassColorChanged;
+  final ValueChanged<_LabelClass> onClassDeleted;
+  final void Function(int oldIndex, int newIndex) onClassReordered;
+  final VoidCallback onToggleClassLabels;
+  final ValueChanged<String?> onAnnotationSelected;
+  final void Function(String annotationId, int classId)
+  onAnnotationClassChanged;
+  final VoidCallback onAiConfigPressed;
+
+  static const _tools = [
+    _ToolSpec('select', Icons.near_me_outlined, 'tool.select'),
+    _ToolSpec('ai_config', Icons.auto_awesome, 'label.aiConfig'),
+    _ToolSpec('copy', Icons.copy_outlined, 'tool.copy'),
+    _ToolSpec('paste', Icons.content_paste_outlined, 'tool.paste'),
+    _ToolSpec('undo', Icons.undo, 'tool.undo'),
+    _ToolSpec('redo', Icons.redo, 'tool.redo'),
+    _ToolSpec('delete', Icons.delete_outline, 'tool.delete'),
+    _ToolSpec('export', Icons.file_download_outlined, 'tool.export'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final showAnnotations =
+        selectedAnnotationId != null || activeTool == 'annotations';
+    return Container(
+      width: _toolbarWidth,
+      clipBehavior: Clip.hardEdge,
+      decoration: BoxDecoration(
+        color: _panelColor(context),
+        border: Border(left: BorderSide(color: _borderColor(context))),
+      ),
+      child: Column(
+        children: [
+          const SizedBox(height: 18),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              children: [
+                const Icon(Icons.auto_awesome, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    showAnnotations ? t('label.annotations') : t('label.ai'),
+                    style: Theme.of(context).textTheme.titleMedium,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Tooltip(
+                  message: showAnnotations
+                      ? t('label.showTools')
+                      : t('label.showAnnotations'),
+                  child: IconButton(
+                    onPressed: () => onToolSelected(
+                      showAnnotations ? 'select' : 'annotations',
+                    ),
+                    icon: Icon(
+                      showAnnotations
+                          ? Icons.construction_outlined
+                          : Icons.format_list_bulleted,
+                    ),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          if (showAnnotations)
+            Expanded(
+              child: _AnnotationListPanel(
+                annotations: annotations,
+                labelClasses: labelClasses,
+                selectedAnnotationId: selectedAnnotationId,
+                onAnnotationSelected: onAnnotationSelected,
+                onAnnotationClassChanged: onAnnotationClassChanged,
+              ),
+            )
+          else ...[
+            for (final tool in _tools)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 0, 10, 6),
+                child: _ToolButton(
+                  tool: tool,
+                  selected: tool.id == 'ai_config'
+                      ? aiPanelVisible
+                      : tool.id == activeTool,
+                  onPressed: () {
+                    if (tool.id == 'ai_config') {
+                      onAiConfigPressed();
+                    } else {
+                      onToolSelected(tool.id);
+                    }
+                  },
+                ),
+              ),
+            const Divider(height: 16),
+            Expanded(
+              child: _ClassManager(
+                activeClassId: activeClassId,
+                labelClasses: labelClasses,
+                showClassLabels: showClassLabels,
+                classesEditable: classesEditable,
+                onClassSelected: onClassSelected,
+                onClassAdded: onClassAdded,
+                onClassEdited: onClassEdited,
+                onClassColorChanged: onClassColorChanged,
+                onClassDeleted: onClassDeleted,
+                onClassReordered: onClassReordered,
+                onToggleClassLabels: onToggleClassLabels,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// 工具栏按钮，负责图标、文字和选中态显示。
+/// Toolbar button that renders icon, text, and selected state.
+class _ToolButton extends StatelessWidget {
+  const _ToolButton({
+    required this.tool,
+    required this.selected,
+    required this.onPressed,
+  });
+
+  final _ToolSpec tool;
+  final bool selected;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final background = selected
+        ? colorScheme.primaryContainer
+        : _controlColor(context);
+    final foreground = selected
+        ? colorScheme.onPrimaryContainer
+        : _primaryTextColor(context);
+
+    return Tooltip(
+      message: t(tool.label),
+      child: Material(
+        color: background,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(6),
+          side: BorderSide(
+            color: selected ? colorScheme.primary : _borderColor(context),
+          ),
+        ),
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(6),
+          child: SizedBox(
+            height: 42,
+            child: Row(
+              children: [
+                const SizedBox(width: 12),
+                Icon(tool.icon, size: 19, color: foreground),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    t(tool.label),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: foreground,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

@@ -1,0 +1,429 @@
+part of '../main.dart';
+
+class _ExportEntry {
+  const _ExportEntry(this.path, this.annotations);
+
+  final String path;
+  final List<_AnnotationRegion> annotations;
+}
+
+class _DatasetExportResult {
+  const _DatasetExportResult({
+    required this.dataYamlPath,
+    required this.outputPath,
+    required this.imageCount,
+    required this.annotationCount,
+    required this.trainCount,
+    required this.valCount,
+    required this.testCount,
+    required this.exportImages,
+    required this.skipEmpty,
+  });
+
+  final String dataYamlPath;
+  final String outputPath;
+  final int imageCount;
+  final int annotationCount;
+  final int trainCount;
+  final int valCount;
+  final int testCount;
+  final bool exportImages;
+  final bool skipEmpty;
+}
+
+Future<_DatasetExportResult?> _exportAnnotationsToNewDataset({
+  required _ExportConfig config,
+  required String exportRoot,
+  required List<_ImageItem> images,
+  required List<_LabelClass> labelClasses,
+  required Map<String, List<_AnnotationRegion>> annotationsByImage,
+  required Size? Function(String imagePath) displaySizeForImagePath,
+  required Future<Size> Function(String imagePath) ensureDisplaySizeForImagePath,
+}) async {
+  final baseDir = Directory('$exportRoot\\${config.folderName}');
+  if (baseDir.existsSync()) {
+    baseDir.deleteSync(recursive: true);
+  }
+
+  final entries = <_ExportEntry>[];
+  for (final image in images) {
+    final annotations = _exportAnnotationsForPath(
+      annotationsByImage,
+      image.path,
+    );
+    entries.add(_ExportEntry(image.path, annotations.toList()));
+    if (displaySizeForImagePath(image.path) == null) {
+      await ensureDisplaySizeForImagePath(image.path);
+    }
+  }
+  if (entries.isEmpty) {
+    return null;
+  }
+
+  final splitPlan = _buildClassBalancedExportSplit(entries, config);
+  final splitDirs = _createExportSplitDirectories(baseDir, splitPlan);
+  final pathToEntry = {for (final entry in entries) entry.path: entry};
+
+  _writeExportLabels(
+    paths: splitPlan.trainSet,
+    split: 'train',
+    pathToEntry: pathToEntry,
+    splitDirs: splitDirs,
+    labelClasses: labelClasses,
+    displaySizeForImagePath: displaySizeForImagePath,
+    skipEmpty: config.skipEmpty,
+  );
+  _writeExportLabels(
+    paths: splitPlan.valSet,
+    split: 'val',
+    pathToEntry: pathToEntry,
+    splitDirs: splitDirs,
+    labelClasses: labelClasses,
+    displaySizeForImagePath: displaySizeForImagePath,
+    skipEmpty: config.skipEmpty,
+  );
+  _writeExportLabels(
+    paths: splitPlan.testSet,
+    split: 'test',
+    pathToEntry: pathToEntry,
+    splitDirs: splitDirs,
+    labelClasses: labelClasses,
+    displaySizeForImagePath: displaySizeForImagePath,
+    skipEmpty: config.skipEmpty,
+  );
+
+  final dataYamlPath = '${baseDir.path}\\data.yaml';
+  File(dataYamlPath).writeAsStringSync(
+    '${_newDatasetYamlContent(baseDir, splitPlan, labelClasses)}\n',
+  );
+
+  if (config.exportImages) {
+    _copyExportImages(
+      paths: splitPlan.trainSet,
+      split: 'train',
+      splitDirs: splitDirs,
+    );
+    _copyExportImages(
+      paths: splitPlan.valSet,
+      split: 'val',
+      splitDirs: splitDirs,
+    );
+    _copyExportImages(
+      paths: splitPlan.testSet,
+      split: 'test',
+      splitDirs: splitDirs,
+    );
+  }
+
+  return _DatasetExportResult(
+    dataYamlPath: dataYamlPath,
+    outputPath: baseDir.path,
+    imageCount: entries.length,
+    annotationCount: _annotationCount(entries),
+    trainCount: splitPlan.trainSet.length,
+    valCount: splitPlan.valSet.length,
+    testCount: splitPlan.testSet.length,
+    exportImages: config.exportImages,
+    skipEmpty: config.skipEmpty,
+  );
+}
+
+Future<_DatasetExportResult?> _overwriteImportedDatasetExport({
+  required _ExportConfig config,
+  required _ImportedDataset dataset,
+  required List<_ImageItem> images,
+  required List<_LabelClass> labelClasses,
+  required Map<String, List<_AnnotationRegion>> annotationsByImage,
+  required Map<String, String> imageSplits,
+  required Size? Function(String imagePath) displaySizeForImagePath,
+  required Future<Size> Function(String imagePath) ensureDisplaySizeForImagePath,
+}) async {
+  final entries = <_ExportEntry>[
+    for (final image in images)
+      _ExportEntry(
+        image.path,
+        _exportAnnotationsForPath(annotationsByImage, image.path).toList(),
+      ),
+  ];
+  if (entries.isEmpty) {
+    return null;
+  }
+
+  for (final entry in entries) {
+    if (displaySizeForImagePath(entry.path) == null) {
+      await ensureDisplaySizeForImagePath(entry.path);
+    }
+  }
+
+  final grouped = <String, Set<String>>{
+    for (final split in _datasetSplits) split: <String>{},
+  };
+  for (final entry in entries) {
+    final split = imageSplits[_pathKey(entry.path)] ?? 'train';
+    grouped[_datasetSplits.contains(split) ? split : 'train']!.add(entry.path);
+  }
+
+  final pathToEntry = {for (final entry in entries) entry.path: entry};
+  for (final split in _datasetSplits) {
+    _writeImportedDatasetLabels(
+      paths: grouped[split]!,
+      split: split,
+      dataset: dataset,
+      pathToEntry: pathToEntry,
+      labelClasses: labelClasses,
+      displaySizeForImagePath: displaySizeForImagePath,
+      skipEmpty: config.skipEmpty,
+    );
+  }
+
+  if (config.exportImages) {
+    _copyImportedDatasetImages(dataset, grouped);
+  }
+
+  File(dataset.dataYamlPath).writeAsStringSync(
+    '${_datasetYamlContent(dataset, grouped, labelClasses)}\n',
+  );
+
+  return _DatasetExportResult(
+    dataYamlPath: dataset.dataYamlPath,
+    outputPath: dataset.rootPath,
+    imageCount: entries.length,
+    annotationCount: _annotationCount(entries),
+    trainCount: grouped['train']?.length ?? 0,
+    valCount: grouped['val']?.length ?? 0,
+    testCount: grouped['test']?.length ?? 0,
+    exportImages: config.exportImages,
+    skipEmpty: config.skipEmpty,
+  );
+}
+
+List<_AnnotationRegion> _exportAnnotationsForPath(
+  Map<String, List<_AnnotationRegion>> annotationsByImage,
+  String path,
+) {
+  return annotationsByImage[_pathKey(path)] ?? const [];
+}
+
+int _annotationCount(List<_ExportEntry> entries) {
+  return entries.fold<int>(0, (sum, entry) => sum + entry.annotations.length);
+}
+
+class _ExportSplitPlan {
+  const _ExportSplitPlan({
+    required this.trainSet,
+    required this.valSet,
+    required this.testSet,
+  });
+
+  final Set<String> trainSet;
+  final Set<String> valSet;
+  final Set<String> testSet;
+}
+
+_ExportSplitPlan _buildClassBalancedExportSplit(
+  List<_ExportEntry> entries,
+  _ExportConfig config,
+) {
+  final assigned = <String>{};
+  final trainSet = <String>{};
+  final valSet = <String>{};
+  final testSet = <String>{};
+  final allClassIds = <int>{};
+
+  for (final entry in entries) {
+    for (final annotation in entry.annotations) {
+      allClassIds.add(annotation.classId);
+    }
+  }
+
+  for (final classId in allClassIds) {
+    final classImages = entries
+        .where((entry) => entry.annotations.any((a) => a.classId == classId))
+        .toList()
+      ..sort((left, right) => left.path.compareTo(right.path));
+    final total = classImages.length;
+    final valCount = (total * config.valRatio).round();
+    final testCount = (total * config.testRatio).round();
+
+    for (var i = 0; i < classImages.length; i++) {
+      final path = classImages[i].path;
+      if (assigned.contains(path)) {
+        continue;
+      }
+      if (i < total - valCount - testCount) {
+        trainSet.add(path);
+      } else if (i < total - testCount) {
+        valSet.add(path);
+      } else {
+        testSet.add(path);
+      }
+      assigned.add(path);
+    }
+  }
+
+  for (final entry in entries) {
+    if (!assigned.contains(entry.path)) {
+      trainSet.add(entry.path);
+    }
+  }
+
+  return _ExportSplitPlan(
+    trainSet: trainSet,
+    valSet: valSet,
+    testSet: testSet,
+  );
+}
+
+Map<String, Directory> _createExportSplitDirectories(
+  Directory baseDir,
+  _ExportSplitPlan splitPlan,
+) {
+  final splitDirs = <String, Directory>{};
+
+  void makeDirs(String split) {
+    splitDirs['${split}_images'] = Directory('${baseDir.path}\\$split\\images')
+      ..createSync(recursive: true);
+    splitDirs['${split}_labels'] = Directory('${baseDir.path}\\$split\\labels')
+      ..createSync(recursive: true);
+  }
+
+  makeDirs('train');
+  makeDirs('val');
+  if (splitPlan.testSet.isNotEmpty) {
+    makeDirs('test');
+  }
+  return splitDirs;
+}
+
+void _writeExportLabels({
+  required Set<String> paths,
+  required String split,
+  required Map<String, _ExportEntry> pathToEntry,
+  required Map<String, Directory> splitDirs,
+  required List<_LabelClass> labelClasses,
+  required Size? Function(String imagePath) displaySizeForImagePath,
+  required bool skipEmpty,
+}) {
+  final labelDir = splitDirs['${split}_labels'];
+  if (labelDir == null) {
+    return;
+  }
+
+  for (final path in paths) {
+    final entry = pathToEntry[path]!;
+    final baseName = _fileName(path).replaceAll(RegExp(r'\.[^.]+$'), '');
+    _writeYoloLabelFile(
+      path: path,
+      labelFile: File('${labelDir.path}\\$baseName.txt'),
+      annotations: entry.annotations,
+      labelClasses: labelClasses,
+      displaySizeForImagePath: displaySizeForImagePath,
+      skipEmpty: skipEmpty,
+    );
+  }
+}
+
+void _writeImportedDatasetLabels({
+  required Set<String> paths,
+  required String split,
+  required _ImportedDataset dataset,
+  required Map<String, _ExportEntry> pathToEntry,
+  required List<_LabelClass> labelClasses,
+  required Size? Function(String imagePath) displaySizeForImagePath,
+  required bool skipEmpty,
+}) {
+  final labelDir = Directory(dataset.labelDirForSplit(split))
+    ..createSync(recursive: true);
+  for (final path in paths) {
+    final entry = pathToEntry[path]!;
+    _writeYoloLabelFile(
+      path: path,
+      labelFile: File(
+        '${labelDir.path}\\${_baseNameWithoutExtension(path)}.txt',
+      ),
+      annotations: entry.annotations,
+      labelClasses: labelClasses,
+      displaySizeForImagePath: displaySizeForImagePath,
+      skipEmpty: skipEmpty,
+    );
+  }
+}
+
+void _writeYoloLabelFile({
+  required String path,
+  required File labelFile,
+  required List<_AnnotationRegion> annotations,
+  required List<_LabelClass> labelClasses,
+  required Size? Function(String imagePath) displaySizeForImagePath,
+  required bool skipEmpty,
+}) {
+  final lines = <String>[];
+  for (final annotation in annotations) {
+    final classIndex = labelClasses.indexWhere(
+      (labelClass) => labelClass.id == annotation.classId,
+    );
+    if (classIndex < 0) {
+      continue;
+    }
+    lines.add(
+      annotation.toUltralyticsLabelLine(
+        classIndex: classIndex,
+        imageSize: displaySizeForImagePath(path) ?? const Size(1, 1),
+      ),
+    );
+  }
+  if (lines.isNotEmpty || !skipEmpty) {
+    labelFile.writeAsStringSync(lines.isEmpty ? '' : '${lines.join('\n')}\n');
+  } else if (labelFile.existsSync()) {
+    labelFile.deleteSync();
+  }
+}
+
+String _newDatasetYamlContent(
+  Directory baseDir,
+  _ExportSplitPlan splitPlan,
+  List<_LabelClass> labelClasses,
+) {
+  final lines = <String>[
+    'path: ${baseDir.path.replaceAll('\\', '/')}',
+    'train: train/images',
+    'val: val/images',
+    if (splitPlan.testSet.isNotEmpty) 'test: test/images',
+    '',
+    'nc: ${labelClasses.length}',
+    'names:',
+    for (var i = 0; i < labelClasses.length; i++)
+      '  $i: ${labelClasses[i].name}',
+  ];
+  return lines.join('\n');
+}
+
+void _copyExportImages({
+  required Set<String> paths,
+  required String split,
+  required Map<String, Directory> splitDirs,
+}) {
+  final imageDir = splitDirs['${split}_images'];
+  if (imageDir == null) {
+    return;
+  }
+  for (final path in paths) {
+    _copyFileOverwrite(path, '${imageDir.path}\\${_fileName(path)}');
+  }
+}
+
+void _copyImportedDatasetImages(
+  _ImportedDataset dataset,
+  Map<String, Set<String>> grouped,
+) {
+  for (final split in _datasetSplits) {
+    final imageDir = Directory(dataset.imageDirForSplit(split))
+      ..createSync(recursive: true);
+    for (final path in grouped[split]!) {
+      final target = '${imageDir.path}\\${_fileName(path)}';
+      if (_pathKey(path) != _pathKey(target)) {
+        _copyFileOverwrite(path, target);
+      }
+    }
+  }
+}

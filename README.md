@@ -31,36 +31,38 @@ A YOLO image labeling, training, and video processing tool built with Flutter + 
 ## Project Structure
 
 ```text
-├── Cargo.toml                  # Rust project config & dependencies
-├── flutter_rust_bridge.yaml    # FRB codegen config
-├── src/                        # Rust source
-│   ├── api.rs                  # Public API exposed to Flutter
-│   ├── training.rs             # PyO3 + Ultralytics training backend
-│   ├── detecting.rs            # PyO3 + Ultralytics YOLO inference
-│   ├── collaboration.rs        # LAN collaboration transport
-│   ├── main.rs                 # Dev launcher
-│   └── frb_generated.rs        # FRB auto-generated glue code
-├── flutter/                    # Flutter frontend
-│   ├── pubspec.yaml
-│   └── lib/
-│       ├── main.dart           # App entry, global state, page routing
-│       ├── LabelPage.dart      # Annotation page
-│       ├── TrainPage.dart      # Training page
-│       ├── DetectVideoPage.dart # Browse / video playback page
-│       ├── CropPage.dart       # Video frame extraction page
-│       ├── DatabasePage.dart   # SQLite database browser / management page
-│       ├── CollaborationPage.dart # Collaboration host/client page
-│       ├── ExportDialog.dart   # Annotation export dialog
-│       ├── ConfigStore.dart    # Config persistence
-│       ├── SettingsDialog.dart # Settings dialog
-│       ├── AnnotationModels.dart
-│       ├── ShortcutModels.dart
-│       ├── FloatingMessage.dart
-│       ├── RustVideoBackend.dart
-│       └── language/           # i18n resources
-├── models/                     # YOLO model files (git-ignored)
-├── datasets/                   # Export directory (configurable)
-└── ffmpeg/                     # FFmpeg binaries (download separately)
+./
++-- Cargo.toml                    # Rust project config and dependencies
++-- flutter_rust_bridge.yaml      # Flutter Rust Bridge codegen config
++-- src/                          # Rust backend source
+|   +-- api.rs                    # Public API exposed to Flutter
+|   +-- training.rs               # Ultralytics training backend and Python process control
+|   +-- detecting.rs              # YOLO / OpenVINO inference backend
+|   +-- collaboration.rs          # LAN collaboration transport
+|   +-- main.rs                   # Dev launcher entry
+|   +-- frb_generated.rs          # Generated Flutter Rust Bridge glue
++-- flutter/                      # Flutter frontend
+|   +-- pubspec.yaml              # Flutter dependencies and assets
+|   +-- lib/
+|       +-- main.dart             # App entry, global init, part registry
+|       +-- app.dart              # Root app widget and top-level routing
+|       +-- theme/                # Colors, dimensions, theme helpers
+|       +-- services/             # Logger, i18n, config DB, Rust backend, import/export helpers
+|       +-- models/               # Annotation, detection, training, shortcut, AI data models
+|       +-- pages/                # Label, train, detect, crop, database, collaboration pages
+|       |   +-- label/            # Label-page canvas, preview, toolbar, class widgets
+|       +-- widgets/              # Reusable and page-specific widgets
+|       |   +-- common/           # Navigation, overlays, workspace shell, floating messages
+|       |   +-- database/         # Database browser sidebar, table, detail widgets
+|       |   +-- detect/           # Detect panels, playback, prediction sequence widgets
+|       |   +-- label/            # Label AI panel, grid painter, tool specs
+|       |   +-- train/            # Training parameter, progress, resource and terminal widgets
+|       +-- dialogs/              # Settings, export, shortcut, logs, SAM3 and training dialogs
+|       +-- language/             # i18n JSON resources
+|       +-- src/rust/             # Generated Dart bindings for Rust APIs
++-- models/                       # YOLO model files (git-ignored)
++-- datasets/                     # Export directory (configurable)
++-- ffmpeg/                       # FFmpeg binaries (download separately)
 ```
 
 ## Requirements
@@ -280,36 +282,38 @@ All pages kept alive via `IndexedStack` — training, playback, crop state prese
 ## 项目结构
 
 ```text
-├── Cargo.toml                  # Rust 项目配置与依赖
-├── flutter_rust_bridge.yaml    # FRB 代码生成配置
-├── src/                        # Rust 源码
-│   ├── api.rs                  # 对 Flutter 暴露的接口
-│   ├── training.rs             # PyO3 + Ultralytics 训练后端
-│   ├── detecting.rs            # PyO3 + Ultralytics YOLO 推理
-│   ├── collaboration.rs        # 局域网协作传输
-│   ├── main.rs                 # 开发启动器
-│   └── frb_generated.rs        # FRB 自动生成的胶水代码
-├── flutter/                    # Flutter 前端
-│   ├── pubspec.yaml
-│   └── lib/
-│       ├── main.dart           # 应用入口、全局状态、页面路由
-│       ├── LabelPage.dart      # 标注页
-│       ├── TrainPage.dart      # 训练页
-│       ├── DetectVideoPage.dart # 浏览/视频播放页
-│       ├── CropPage.dart       # 视频取帧裁剪页
-│       ├── DatabasePage.dart   # SQLite 数据库查看/管理页
-│       ├── CollaborationPage.dart # 协作主机/客户端页
-│       ├── ExportDialog.dart   # 标注导出弹窗
-│       ├── ConfigStore.dart    # 配置持久化
-│       ├── SettingsDialog.dart # 设置弹窗
-│       ├── AnnotationModels.dart
-│       ├── ShortcutModels.dart
-│       ├── FloatingMessage.dart
-│       ├── RustVideoBackend.dart
-│       └── language/           # 多语言资源
-├── models/                     # YOLO 模型文件（不提交到 Git）
-├── datasets/                   # 标注导出目录（可配置）
-└── ffmpeg/                     # FFmpeg 二进制（需自行下载）
+./
++-- Cargo.toml                    # Rust 项目配置与依赖
++-- flutter_rust_bridge.yaml      # Flutter Rust Bridge 代码生成配置
++-- src/                          # Rust 后端源码
+|   +-- api.rs                    # 暴露给 Flutter 的公共 API
+|   +-- training.rs               # Ultralytics 训练后端与 Python 子进程控制
+|   +-- detecting.rs              # YOLO / OpenVINO 推理后端
+|   +-- collaboration.rs          # 局域网协助标注通信
+|   +-- main.rs                   # 开发启动入口
+|   +-- frb_generated.rs          # Flutter Rust Bridge 生成代码
++-- flutter/                      # Flutter 前端
+|   +-- pubspec.yaml              # Flutter 依赖与资源配置
+|   +-- lib/
+|       +-- main.dart             # 应用入口、全局初始化、part 注册
+|       +-- app.dart              # 根 Widget 与顶层路由
+|       +-- theme/                # 颜色、尺寸、主题辅助函数
+|       +-- services/             # 日志、语言、配置数据库、Rust 后端、导入导出辅助
+|       +-- models/               # 标注、检测、训练、快捷键、AI 数据模型
+|       +-- pages/                # 标注、训练、检测、裁剪、数据库、协助页面
+|       |   +-- label/            # 标注页画布、预览、工具栏、类别组件
+|       +-- widgets/              # 通用组件和页面专属组件
+|       |   +-- common/           # 导航、遮罩、工作区壳、浮动消息
+|       |   +-- database/         # 数据库侧栏、表格、详情组件
+|       |   +-- detect/           # 检测参数、播放、预测序列组件
+|       |   +-- label/            # 标注 AI 面板、网格绘制、工具定义
+|       |   +-- train/            # 训练参数、进度、资源占用、终端组件
+|       +-- dialogs/              # 设置、导出、快捷键、日志、SAM3、训练相关弹窗
+|       +-- language/             # 多语言 JSON 资源
+|       +-- src/rust/             # Rust API 生成的 Dart 绑定
++-- models/                       # YOLO 模型文件目录（不提交到 Git）
++-- datasets/                     # 标注导出目录（可配置）
++-- ffmpeg/                       # FFmpeg 二进制文件（需自行下载）
 ```
 
 ## 环境要求
