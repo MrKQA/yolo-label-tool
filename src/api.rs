@@ -230,6 +230,19 @@ pub unsafe extern "C" fn rust_label_ai_model_classes_json(
     vec_into_ffi_buffer(result.into_bytes())
 }
 
+/// C ABI: export a YOLO model through Ultralytics `model.export(...)`.
+#[frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn rust_label_export_model_json(
+    request_ptr: *const u8,
+    request_len: usize,
+) -> RustLabelByteBuffer {
+    let result = string_from_ffi(request_ptr, request_len)
+        .and_then(|request| export_model_from_json_request(&request))
+        .unwrap_or_else(error_json);
+    vec_into_ffi_buffer(result.into_bytes())
+}
+
 /// C ABI: run YOLO on one image and return raw HBB predictions.
 #[frb(ignore)]
 #[no_mangle]
@@ -1261,7 +1274,103 @@ fn ai_model_classes_from_json_request(request: &str) -> Result<String, String> {
     detecting_mod::ai_model_classes_json(&python_path, &model_path)
 }
 
+fn export_model_from_json_request(request: &str) -> Result<String, String> {
+    let python_path = required_json_string(request, "pythonPath")?;
+    let model_path = required_json_string(request, "modelPath")?;
+    let format = required_json_string(request, "format")?.to_ascii_lowercase();
+    if !matches!(format.as_str(), "onnx" | "openvino") {
+        return Err(format!("Unsupported export format: {format}"));
+    }
+    let python = ini_python::verify_python_path(&python_path)?;
+    let imgsz = json_u32_field(request, "imgsz").unwrap_or(640).max(1);
+    let batch = json_u32_field(request, "batch").unwrap_or(1).max(1);
+    let dynamic = json_bool_field(request, "dynamic").unwrap_or(false);
+    let nms = json_bool_field(request, "nms").unwrap_or(false);
+    let simplify = json_bool_field(request, "simplify").unwrap_or(true);
+    let opset = json_u32_field(request, "opset").unwrap_or(0);
+    let fraction = json_f64_field(request, "fraction").unwrap_or(1.0);
+    let quantize = json_string_field(request, "quantize").unwrap_or_default();
+    let data = json_string_field(request, "data").unwrap_or_default();
+    let device = json_string_field(request, "device").unwrap_or_default();
+    let script = format!(
+        r#"import json
+import os
+import sys
+os.environ["ULTRALYTICS_TQDM"] = "false"
+from ultralytics import YOLO
+model = YOLO({model_path})
+kwargs = {{
+    "format": {format},
+    "imgsz": int({imgsz}),
+    "batch": int({batch}),
+    "dynamic": bool({dynamic}),
+    "nms": bool({nms}),
+}}
+quantize_text = {quantize}.strip()
+quantize_requires_data = False
+if quantize_text and quantize_text.lower() not in ("none", "null", "fp32", "32"):
+    try:
+        kwargs["quantize"] = int(quantize_text)
+    except Exception:
+        kwargs["quantize"] = quantize_text
+    quantize_requires_data = str(kwargs["quantize"]).lower() in ("8", "int8", "w8a8")
+data_text = {data}.strip()
+if data_text and quantize_requires_data:
+    kwargs["data"] = data_text
+fraction_value = float({fraction})
+if fraction_value > 0 and fraction_value <= 1:
+    kwargs["fraction"] = fraction_value
+device_text = {device}.strip()
+if device_text and {format} == "onnx":
+    kwargs["device"] = device_text
+if {format} == "onnx":
+    kwargs["simplify"] = bool({simplify})
+    opset_value = int({opset})
+    if opset_value > 0:
+        kwargs["opset"] = opset_value
+print(f"[rustlabel] exporting kwargs={{kwargs}}", file=sys.stderr)
+output = model.export(**kwargs)
+print(json.dumps({{"ok": True, "outputPath": str(output), "format": {format}}}, ensure_ascii=False))
+"#,
+        model_path = python_string_literal_for_api(&model_path),
+        format = python_string_literal_for_api(&format),
+        imgsz = imgsz,
+        batch = batch,
+        dynamic = if dynamic { "True" } else { "False" },
+        nms = if nms { "True" } else { "False" },
+        simplify = if simplify { "True" } else { "False" },
+        opset = opset,
+        fraction = finite_json_number(fraction),
+        quantize = python_string_literal_for_api(&quantize),
+        data = python_string_literal_for_api(&data),
+        device = python_string_literal_for_api(&device),
+    );
+    let output = Command::new(&python)
+        .arg("-c")
+        .arg(script)
+        .output()
+        .map_err(|error| format!("Failed to run Python export: {error}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    if !output.status.success() {
+        return Err(format!(
+            "export failed: {}\nstderr:\n{}",
+            output.status,
+            stderr.trim()
+        ));
+    }
+    let output_path = parse_json_string_from_last_line(&stdout, "outputPath").unwrap_or_default();
+    Ok(format!(
+        "{{\"ok\":true,\"format\":\"{}\",\"outputPath\":\"{}\",\"stdout\":\"{}\",\"stderr\":\"{}\"}}",
+        json_escape(&format),
+        json_escape(&output_path),
+        json_escape(&stdout),
+        json_escape(&stderr)
+    ))
+}
+
 fn ai_annotate_image_from_json_request(request: &str) -> Result<String, String> {
+    let sam_compile = json_bool_field(request, "samCompile").unwrap_or(false);
     let req = detecting_mod::AiAnnotateImageRequest {
         backend: json_string_field(request, "backend").unwrap_or_else(|| "yolo".to_string()),
         python_path: required_json_string(request, "pythonPath")?,
@@ -1289,11 +1398,12 @@ fn ai_annotate_image_from_json_request(request: &str) -> Result<String, String> 
         sam_resize_method: json_string_field(request, "samResizeMethod")
             .unwrap_or_else(|| "shorter_side".to_string()),
     };
-    detecting_mod::ai_annotate_image_json(&req)
+    detecting_mod::ai_annotate_image_json_with_sam_compile(&req, sam_compile)
 }
 
 fn ai_annotate_images_from_json_request(request: &str) -> Result<String, String> {
     let sam_prompt_frame_index = json_u32_field(request, "samPromptFrameIndex").unwrap_or(0);
+    let sam_compile = json_bool_field(request, "samCompile").unwrap_or(false);
     let req = detecting_mod::AiAnnotateBatchRequest {
         backend: json_string_field(request, "backend").unwrap_or_else(|| "yolo".to_string()),
         python_path: required_json_string(request, "pythonPath")?,
@@ -1321,7 +1431,11 @@ fn ai_annotate_images_from_json_request(request: &str) -> Result<String, String>
         sam_resize_method: json_string_field(request, "samResizeMethod")
             .unwrap_or_else(|| "shorter_side".to_string()),
     };
-    detecting_mod::ai_annotate_images_json_with_sam_prompt_frame(&req, sam_prompt_frame_index)
+    detecting_mod::ai_annotate_images_json_with_sam_options(
+        &req,
+        sam_prompt_frame_index,
+        sam_compile,
+    )
 }
 
 fn detect_from_json_request(request: &str) -> Result<detecting_mod::DetectResult, String> {
@@ -1502,6 +1616,22 @@ fn optional_json_number(value: Option<f64>) -> String {
         Some(value) if value.is_finite() => finite_json_number(value),
         _ => "null".to_string(),
     }
+}
+
+fn python_string_literal_for_api(value: &str) -> String {
+    let escaped = value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\r', "\\r")
+        .replace('\n', "\\n");
+    format!("\"{escaped}\"")
+}
+
+fn parse_json_string_from_last_line(stdout: &str, key: &str) -> Option<String> {
+    stdout
+        .lines()
+        .rev()
+        .find_map(|line| json_string_field(line.trim(), key))
 }
 
 fn json_escape(value: &str) -> String {

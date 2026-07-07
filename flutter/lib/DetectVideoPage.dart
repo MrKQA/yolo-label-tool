@@ -3,7 +3,7 @@
 part of 'main.dart';
 
 const _videoExtensions = {'mp4', 'avi', 'mov', 'mkv', 'webm', 'wmv', 'flv'};
-const _detectDeviceOptions = ['auto', 'nv', 'cpu'];
+const _detectDeviceOptions = ['auto', 'nv', 'intel', 'cpu'];
 const _mediaTypeGroup = XTypeGroup(
   label: 'Image or video',
   extensions: [
@@ -702,7 +702,7 @@ class _DetectVideoSession extends ChangeNotifier {
     final file = await openFile(
       initialDirectory: initialDirectory,
       acceptedTypeGroups: const [
-        XTypeGroup(label: 'YOLO model', extensions: ['pt', 'onnx']),
+        XTypeGroup(label: 'YOLO model', extensions: ['pt', 'onnx', 'xml']),
       ],
     );
     return file?.path;
@@ -842,6 +842,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
   final FocusNode _focusNode = FocusNode(debugLabel: 'detect-video');
   late final TextEditingController _confController;
   List<_TrainingDeviceOption> _nvidiaDeviceOptions = const [];
+  _OpenVinoDeviceInfo _openVinoInfo = const _OpenVinoDeviceInfo();
   late final String _autoFallbackDeviceLabel;
   String? _activePredictionCancelPath;
   int? _pendingPredictionStartFrame;
@@ -858,7 +859,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
       text: _session.detectConf.toStringAsFixed(2),
     );
     _autoFallbackDeviceLabel = _detectPrimaryProcessorName();
-    unawaited(_loadNvidiaDeviceOptions());
+    unawaited(_loadInferenceDeviceOptions());
     _session.predictAll = false;
     _session.addListener(_handleSessionChanged);
     _schedulePreviewHide();
@@ -875,7 +876,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.settings.pythonPath.trim() !=
         widget.settings.pythonPath.trim()) {
-      unawaited(_loadNvidiaDeviceOptions());
+      unawaited(_loadInferenceDeviceOptions());
     }
     if (oldWidget.session != widget.session) {
       oldWidget.session.removeListener(_handleSessionChanged);
@@ -894,19 +895,46 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
     super.dispose();
   }
 
-  Future<void> _loadNvidiaDeviceOptions() async {
+  Future<void> _loadInferenceDeviceOptions() async {
     if (_resolvePythonExecutable(widget.settings.pythonPath.trim()) == null) {
-      if (mounted && _nvidiaDeviceOptions.isNotEmpty) {
-        setState(() => _nvidiaDeviceOptions = const []);
+      if (mounted &&
+          (_nvidiaDeviceOptions.isNotEmpty ||
+              _openVinoInfo.hasDevices ||
+              _openVinoInfo.hasError)) {
+        setState(() {
+          _nvidiaDeviceOptions = const [];
+          _openVinoInfo = const _OpenVinoDeviceInfo();
+        });
       }
       return;
     }
-    final devices = await _detectNvidiaDevices();
+    final results = await Future.wait<Object>([
+      _detectNvidiaDevices(),
+      _detectOpenVinoDevices(widget.settings.pythonPath.trim()),
+    ]);
+    final devices = results[0] as List<_TrainingDeviceOption>;
+    final openVinoInfo = results[1] as _OpenVinoDeviceInfo;
     devices.sort((a, b) => _naturalCompare(a.id, b.id));
+    if (openVinoInfo.hasDevices) {
+      _log(
+        'DETECT',
+        'OpenVINO devices detected: ${openVinoInfo.displayDevices}; auto priority=NVIDIA CUDA > Intel GPU > NPU > CPU',
+        level: _LogLevel.info,
+      );
+    } else if (openVinoInfo.hasError) {
+      _log(
+        'DETECT',
+        'OpenVINO device detection failed: ${openVinoInfo.error}',
+        level: _LogLevel.warning,
+      );
+    }
     if (!mounted) {
       return;
     }
-    setState(() => _nvidiaDeviceOptions = devices);
+    setState(() {
+      _nvidiaDeviceOptions = devices;
+      _openVinoInfo = openVinoInfo;
+    });
   }
 
   void _handleSessionChanged() {
@@ -1346,6 +1374,9 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
     if (value == 'nv' && _nvidiaDeviceOptions.isEmpty) {
       return 'auto';
     }
+    if (value == 'intel' && !_openVinoInfo.hasDevices) {
+      return 'auto';
+    }
     return value;
   }
 
@@ -1356,6 +1387,16 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
     }
     if (normalized == 'nv') {
       return _nvidiaDeviceOptions.firstOrNullValue?.id ?? 'cpu';
+    }
+    if (normalized == 'intel') {
+      return _openVinoInfo.hasDevices
+          ? _openVinoInfo.inferenceDeviceArgument
+          : 'cpu';
+    }
+    if (normalized == 'auto' &&
+        _nvidiaDeviceOptions.isEmpty &&
+        _openVinoInfo.hasDevices) {
+      return _openVinoInfo.inferenceDeviceArgument;
     }
     return 'auto';
   }
@@ -1469,12 +1510,17 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
     final deviceValue = _selectedDetectDeviceValue;
     final deviceArgument = _detectDeviceArgument(deviceValue);
     final hasNvidiaDevice = _nvidiaDeviceOptions.isNotEmpty;
+    final hasOpenVinoDevice = _openVinoInfo.hasDevices;
     final nvidiaDeviceLabel =
         _nvidiaDeviceOptions.firstOrNullValue?.label ??
         t('detect.deviceNvUnavailable');
+    final intelDeviceLabel = hasOpenVinoDevice
+        ? 'Intel OpenVINO | ${_openVinoInfo.displayDevices}'
+        : t('detect.deviceIntelUnavailable');
+    final autoFallbackLabel = _nvidiaDeviceOptions.firstOrNullValue?.label ??
+        (hasOpenVinoDevice ? intelDeviceLabel : _autoFallbackDeviceLabel);
     final autoDeviceLabel =
-        '${t('detect.deviceAuto')} | '
-        '${_friendlyDeviceLabel(_nvidiaDeviceOptions.firstOrNullValue?.label ?? _autoFallbackDeviceLabel)}';
+        '${t('detect.deviceAuto')} | ${_friendlyDeviceLabel(autoFallbackLabel)}';
     return SizedBox.expand(
       child: Row(
         children: [
@@ -1609,6 +1655,8 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
                         autoDeviceLabel: autoDeviceLabel,
                         nvidiaDeviceLabel: nvidiaDeviceLabel,
                         hasNvidiaDevice: hasNvidiaDevice,
+                        intelDeviceLabel: intelDeviceLabel,
+                        hasOpenVinoDevice: hasOpenVinoDevice,
                         onChooseModel: () => unawaited(_chooseDetectModel()),
                         onResetEffect: () =>
                             unawaited(_resetPredictionEffect()),
@@ -1624,6 +1672,9 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
                         },
                         onDeviceChanged: (value) {
                           if (value == 'nv' && !hasNvidiaDevice) {
+                            return;
+                          }
+                          if (value == 'intel' && !hasOpenVinoDevice) {
                             return;
                           }
                           _session.detectDevice = value;
@@ -1714,6 +1765,8 @@ class _DetectParameterPanel extends StatelessWidget {
     required this.autoDeviceLabel,
     required this.nvidiaDeviceLabel,
     required this.hasNvidiaDevice,
+    required this.intelDeviceLabel,
+    required this.hasOpenVinoDevice,
     required this.onChooseModel,
     required this.onResetEffect,
     required this.onPredict,
@@ -1731,6 +1784,8 @@ class _DetectParameterPanel extends StatelessWidget {
   final String autoDeviceLabel;
   final String nvidiaDeviceLabel;
   final bool hasNvidiaDevice;
+  final String intelDeviceLabel;
+  final bool hasOpenVinoDevice;
   final VoidCallback onChooseModel;
   final VoidCallback onResetEffect;
   final VoidCallback onPredict;
@@ -1927,6 +1982,14 @@ class _DetectParameterPanel extends StatelessWidget {
                               label: nvidiaDeviceLabel,
                               selected: deviceValue == 'nv',
                               enabled: !session.predicting && hasNvidiaDevice,
+                              onSelected: onDeviceChanged,
+                            ),
+                            _DetectDeviceChip(
+                              value: 'intel',
+                              label: intelDeviceLabel,
+                              selected: deviceValue == 'intel',
+                              enabled:
+                                  !session.predicting && hasOpenVinoDevice,
                               onSelected: onDeviceChanged,
                             ),
                             _DetectDeviceChip(

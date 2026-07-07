@@ -111,6 +111,19 @@ pip install ultralytics opencv-python
 
 `onnxruntime-gpu` is only needed when using ONNX/GPU inference. If the app logs an ONNX import warning but you only train with `.pt` models, it can be ignored.
 
+#### OpenVINO Inference on Intel Devices
+
+The Browse page can use [Ultralytics OpenVINO](https://docs.ultralytics.com/integrations/openvino/) exports for inference on Intel hardware. Export the model first. If the exported `*_openvino_model/` directory is next to the original `.pt`, you can keep selecting the `.pt` model and the app will auto-use the export for Intel inference; selecting the generated `.xml` also works:
+
+```bash
+python -c "from ultralytics import YOLO; YOLO('yolo26n.pt').export(format='openvino')"
+python -c "from openvino import Core; print(Core().available_devices)"
+```
+
+Automatic inference priority is NVIDIA CUDA, then Intel GPU, NPU, CPU through OpenVINO, then CPU fallback. iGPU, NPU, and CPU are inference-only here; YOLO training still uses NVIDIA CUDA or CPU. If Intel devices are not detected, update OpenVINO and Intel drivers.
+
+The Training page has Export Settings for ONNX and OpenVINO. `data.yaml` is only used for INT8 calibration; when auto-export after training is enabled, the current training dataset `data.yaml` is used automatically.
+
 #### SAM3 Assisted Annotation Environment
 
 SAM3 assisted annotation is only used on the Label page. It supports text prompt segmentation and click prompt refinement: left click adds positive target points, right click adds negative/exclusion points. Output mode can be HBB, OBB, or SEG.
@@ -132,7 +145,8 @@ Notes:
 - Official SAM3 currently expects Python 3.12+, PyTorch 2.7+, and a CUDA-capable GPU.
 - On native Windows, install `triton-windows` if the log reports `No module named 'triton'`: `pip install triton-windows`.
 - `opencv-python` is recommended because the app converts SAM3 masks into SEG polygon contours. `matplotlib`, `pandas`, `tqdm`, and `psutil` are commonly required by the SAM3 runtime and examples. Without OpenCV, a slower numpy fallback is used.
-- For 6-8 GB laptop GPUs, use the SAM3 panel low-memory settings such as `precision=fp16`, `encoder=vit_b`, batch size `1`, and pre-resize `1024x768` or lower.
+- For 6-8 GB laptop GPUs, use the SAM3 Config panel with low-memory settings such as `precision=fp16`, `encoder=vit_b`, batch size `1`, and pre-resize `1024x768` or lower. `vit_l` and `vit_h` can be selected for matching checkpoints, but they need more VRAM and are not recommended as the default on low-memory GPUs.
+- `torch.compile` can be enabled in the SAM3 Config panel. It is feasible on PyTorch 2.7+ only when the SAM3 model can reuse the compiled graph after a slow warm-up call. Because this app currently runs SAM3 through per-request Python processes, enabling compile may pay the warm-up cost every time. On native Windows it can also fail or compile slowly because it depends on the PyTorch/Triton stack.
 - Download or prepare the SAM3 checkpoint according to the SAM3 repository instructions, then select the `.pt` file in the AI → SAM3 panel. The selected path is saved for later launches.
 
 ### Training
@@ -348,6 +362,19 @@ pip install -e . opencv-python
 
 `onnxruntime-gpu` 只在 ONNX/GPU 推理时需要。如果只使用 `.pt` 模型训练，日志中出现 ONNX 导入警告可以忽略。
 
+#### Intel 设备 OpenVINO 推理
+
+浏览页面可以使用 [Ultralytics OpenVINO](https://docs.ultralytics.com/zh/integrations/openvino/) 导出模型在 Intel 硬件上推理。请先导出 OpenVINO 模型；如果生成的 `*_openvino_model/` 目录与原 `.pt` 在同一目录，可以继续选择原 `.pt`，软件会在 Intel 推理时自动使用导出目录；直接选择生成目录内的 `.xml` 也可以：
+
+```bash
+python -c "from ultralytics import YOLO; YOLO('yolo26n.pt').export(format='openvino')"
+python -c "from openvino import Core; print(Core().available_devices)"
+```
+
+自动推理优先级为 NVIDIA CUDA，其次是 OpenVINO 的 Intel GPU、NPU、CPU，最后回退 CPU。iGPU、NPU、CPU 在本工具中只用于推理；YOLO 训练仍使用 NVIDIA CUDA 或 CPU。如果 Intel 设备无法识别，请更新 OpenVINO 和 Intel 驱动。
+
+训练页提供 ONNX 和 OpenVINO 的导出设置。`data.yaml` 仅用于 INT8 量化校准；勾选训练完成后自动导出时，会自动使用本次训练的数据集 `data.yaml`。
+
 #### SAM3 辅助标注环境
 
 SAM3 只用于标注页面的 AI 辅助标注，支持文本提示词分割和点击提示微调：左键添加目标正点，右键添加排除负点。输出模式可选择 HBB、OBB 或 SEG。
@@ -369,7 +396,8 @@ pip install opencv-python matplotlib pandas tqdm psutil
 - SAM3 官方当前要求 Python 3.12+、PyTorch 2.7+，并需要支持 CUDA 的显卡。
 - Windows 原生环境如果日志出现 `No module named 'triton'`，安装 `triton-windows`：`pip install triton-windows`。
 - 推荐安装 `opencv-python`，软件会用它把 SAM3 mask 转成 SEG 多边形轮廓；`matplotlib`、`pandas`、`tqdm`、`psutil` 也是 SAM3 运行和示例中常用依赖。没有 OpenCV 时会使用较慢的 numpy fallback。
-- 6-8 GB 显存的笔记本显卡建议在 SAM3 面板使用低显存配置：`precision=fp16`、`encoder=vit_b`、batch size `1`，预缩放 `1024x768` 或更低。
+- 6-8 GB 显存的笔记本显卡建议在 SAM3 配置面板使用低显存参数：`precision=fp16`、`encoder=vit_b`、batch size `1`，预缩放 `1024x768` 或更低。`vit_l` 和 `vit_h` 可用于匹配的 checkpoint，但需要更多显存，不建议作为低显存默认选项。
+- `torch.compile` 可在 SAM3 配置面板开启。它在 PyTorch 2.7+ 上只有在 SAM3 模型复用编译图时才适合加速重复推理；当前工具的 SAM3 仍是按请求启动 Python 子进程，开启后可能每次都承担预热成本。Windows 原生环境还可能受 PyTorch/Triton 编译链影响而失败或耗时较长。
 - 按 SAM3 仓库说明下载或准备 checkpoint 后，在 AI → SAM3 面板选择 `.pt` 文件；路径会被保存，后续启动无需重复选择。
 
 ### 训练

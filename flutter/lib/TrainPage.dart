@@ -59,6 +59,38 @@ class _TrainingDeviceOption {
   final String label;
 }
 
+class _OpenVinoDeviceInfo {
+  const _OpenVinoDeviceInfo({
+    this.devices = const [],
+    this.rawOutput = '',
+    this.error = '',
+  });
+
+  final List<String> devices;
+  final String rawOutput;
+  final String error;
+
+  bool get hasDevices => devices.isNotEmpty;
+  bool get hasIntelGpu => devices.any((device) => device.startsWith('GPU'));
+  bool get hasIntelNpu => devices.any((device) => device.startsWith('NPU'));
+  bool get hasAccelerator => hasIntelGpu || hasIntelNpu;
+  bool get hasError => error.trim().isNotEmpty;
+
+  String get displayDevices => hasDevices ? devices.join(', ') : '-';
+
+  String get preferredInferenceDevice {
+    if (hasIntelGpu) {
+      return 'intel:gpu';
+    }
+    if (hasIntelNpu) {
+      return 'intel:npu';
+    }
+    return 'intel:cpu';
+  }
+
+  String get inferenceDeviceArgument => 'openvino:$preferredInferenceDevice';
+}
+
 class _TrainPageState extends State<_TrainPage> {
   final TextEditingController _datasetPathController = TextEditingController();
   final Map<String, double> _parameters = Map<String, double>.from(
@@ -98,6 +130,8 @@ class _TrainPageState extends State<_TrainPage> {
     _TrainingDeviceOption(id: 'cpu', label: 'CPU'),
   ];
   Set<String> _selectedDeviceIds = const {'cpu'};
+  _YoloExportSettings _exportSettings = const _YoloExportSettings();
+  bool _exportingModel = false;
   bool _manualDeviceSelection = false;
   _BatchMode _batchMode = _BatchMode.fixed;
   double _batchSize = 16;
@@ -259,6 +293,7 @@ class _TrainPageState extends State<_TrainPage> {
       _batchSize = prefs.batchSize;
       _batchRatio = prefs.batchRatio;
       _ampEnabled = prefs.ampEnabled;
+      _exportSettings = prefs.exportSettings;
       _manualDeviceSelection = prefs.manualDeviceSelection;
       if (_manualDeviceSelection && prefs.selectedDeviceIds.isNotEmpty) {
         _selectedDeviceIds = prefs.selectedDeviceIds.toSet();
@@ -291,6 +326,7 @@ class _TrainPageState extends State<_TrainPage> {
       selectedDeviceIds: _selectedDeviceIds.toList(),
       manualDeviceSelection: _manualDeviceSelection,
       chartColors: Map<String, int>.from(_chartColors),
+      exportSettings: _exportSettings,
     );
     _ConfigStore.saveTrainingPreferences(prefs);
   }
@@ -867,6 +903,148 @@ class _TrainPageState extends State<_TrainPage> {
     _appendTrainingRecord(_TrainingHistoryAction.stop);
   }
 
+  Future<void> _showExportSettingsDialog() async {
+    final result = await showDialog<_YoloExportSettings>(
+      context: context,
+      builder: (context) => _YoloExportSettingsDialog(
+        initial: _exportSettings,
+        onManualExport: (settings) async {
+          setState(() => _exportSettings = settings);
+          _savePreferences();
+          final modelPath = _modelPath;
+          if (modelPath == null || !File(modelPath).existsSync()) {
+            throw StateError(t('train.exportNoModel'));
+          }
+          return _runModelExport(
+            modelPath: modelPath,
+            settings: settings,
+            trigger: 'manual',
+          );
+        },
+      ),
+    );
+    if (result == null || !mounted) {
+      return;
+    }
+    setState(() => _exportSettings = result);
+    _savePreferences();
+  }
+
+  Future<_ModelExportResult> _runModelExport({
+    required String modelPath,
+    required _YoloExportSettings settings,
+    required String trigger,
+  }) async {
+    final pythonPath = widget.settings.pythonPath.trim();
+    if (pythonPath.isEmpty) {
+      throw StateError(t('train.pythonNotConfigured'));
+    }
+    final exportSettings = _settingsForModelExport(
+      settings: settings,
+      trigger: trigger,
+    );
+    setState(() => _exportingModel = true);
+    _log(
+      'TRAIN',
+      'Model export started: trigger=$trigger, model=$modelPath, format=${exportSettings.format}, imgsz=${exportSettings.imgsz}, batch=${exportSettings.batch}, quantize=${exportSettings.quantize.isEmpty ? 'fp32' : exportSettings.quantize}, data=${_exportNeedsData(exportSettings) ? exportSettings.dataPath : ''}',
+    );
+    try {
+      final result = await _RustVideoBackend.exportYoloModel(
+        pythonPath: pythonPath,
+        modelPath: modelPath,
+        settings: exportSettings,
+      );
+      _log(
+        'TRAIN',
+        'Model export completed: format=${result.format}, output=${result.outputPath}',
+      );
+      if (result.stderr.trim().isNotEmpty) {
+        _log(
+          'TRAIN',
+          'Model export stderr: ${result.stderr.trim()}',
+          level: _LogLevel.debug,
+        );
+      }
+      return result;
+    } catch (error) {
+      _log('TRAIN', 'Model export failed: $error', level: _LogLevel.error);
+      rethrow;
+    } finally {
+      if (mounted) {
+        setState(() => _exportingModel = false);
+      }
+    }
+  }
+
+  _YoloExportSettings _settingsForModelExport({
+    required _YoloExportSettings settings,
+    required String trigger,
+  }) {
+    if (trigger != 'after-training' || !_exportNeedsData(settings)) {
+      return settings;
+    }
+    final trainingDataYaml = _datasetPath?.trim() ?? '';
+    if (trainingDataYaml.isEmpty) {
+      _log(
+        'TRAIN',
+        'Auto export INT8 has no training data.yaml; Ultralytics may require data for calibration.',
+        level: _LogLevel.warning,
+      );
+      return settings.copyWith(dataPath: '');
+    }
+    return settings.copyWith(dataPath: trainingDataYaml);
+  }
+
+  bool _exportNeedsData(_YoloExportSettings settings) {
+    final quantize = settings.quantize.trim().toLowerCase();
+    return quantize == '8' || quantize == 'int8' || quantize == 'w8a8';
+  }
+
+  Future<void> _exportAfterTrainingIfNeeded() async {
+    if (!_exportSettings.autoExportAfterTraining) {
+      return;
+    }
+    final modelPath = _trainedModelForExport();
+    if (modelPath == null) {
+      _log(
+        'TRAIN',
+        'Auto export skipped: no trained model was found',
+        level: _LogLevel.warning,
+      );
+      return;
+    }
+    try {
+      final result = await _runModelExport(
+        modelPath: modelPath,
+        settings: _exportSettings,
+        trigger: 'after-training',
+      );
+      if (mounted) {
+        _showWarning('${t('train.exportDone')}: ${result.outputPath}');
+      }
+    } on Object catch (error) {
+      if (mounted) {
+        _showWarning('${t('train.exportFailed')}: $error');
+      }
+    }
+  }
+
+  String? _trainedModelForExport() {
+    final activeRunDir = _activeRunDir;
+    if (activeRunDir != null && activeRunDir.trim().isNotEmpty) {
+      final best = '$activeRunDir\\weights\\best.pt';
+      if (File(best).existsSync()) {
+        return best;
+      }
+      final last = '$activeRunDir\\weights\\last.pt';
+      if (File(last).existsSync()) {
+        return last;
+      }
+    }
+    final modelPath = _modelPath;
+    return modelPath != null && File(modelPath).existsSync() ? modelPath : null;
+  }
+
   Future<void> _pollTrainingProgress() async {
     if (!mounted || !_trainingRunning) return;
     try {
@@ -874,6 +1052,7 @@ class _TrainPageState extends State<_TrainPage> {
       final logText = await _readTrainingLogTail();
       final resourceUsage = await _readTrainingResourceUsage();
       if (!mounted || !_trainingRunning) return;
+      var shouldAutoExport = false;
       if (progress == null) {
         setState(() {
           _trainingLogText = logText;
@@ -935,10 +1114,14 @@ class _TrainPageState extends State<_TrainPage> {
               'TRAIN',
               'Training finished: ${progress.status} at epoch ${progress.currentEpoch}',
             );
+            shouldAutoExport = progress.status == 'completed';
           }
           _trainingTimer?.cancel();
         }
       });
+      if (shouldAutoExport) {
+        unawaited(_exportAfterTrainingIfNeeded());
+      }
     } on Object catch (error) {
       _log(
         'TRAIN',
@@ -1229,8 +1412,23 @@ class _TrainPageState extends State<_TrainPage> {
                                   ? t('train.stop')
                                   : _showContinueTraining
                                   ? t('train.continueTraining')
-                                  : t('train.start'),
+                              : t('train.start'),
                             ),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: _datasetLoading || _exportingModel
+                                ? null
+                                : _showExportSettingsDialog,
+                            icon: _exportingModel
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.output_outlined),
+                            label: Text(t('train.exportSettings')),
                           ),
                           if (_resumeInfo != null)
                             Tooltip(
@@ -1721,6 +1919,478 @@ class _TrainingParameterPanel extends StatelessWidget {
       ),
     );
   }
+}
+
+class _YoloExportSettingsDialog extends StatefulWidget {
+  const _YoloExportSettingsDialog({
+    required this.initial,
+    required this.onManualExport,
+  });
+
+  final _YoloExportSettings initial;
+  final Future<_ModelExportResult> Function(_YoloExportSettings settings)
+  onManualExport;
+
+  @override
+  State<_YoloExportSettingsDialog> createState() =>
+      _YoloExportSettingsDialogState();
+}
+
+class _YoloExportSettingsDialogState
+    extends State<_YoloExportSettingsDialog> {
+  late String _format;
+  late bool _autoExport;
+  late bool _dynamic;
+  late bool _nms;
+  late bool _simplify;
+  late String _quantize;
+  late final TextEditingController _imgszController;
+  late final TextEditingController _batchController;
+  late final TextEditingController _dataController;
+  late final TextEditingController _fractionController;
+  late final TextEditingController _deviceController;
+  late final TextEditingController _opsetController;
+  bool _manualExporting = false;
+  String? _message;
+
+  @override
+  void initState() {
+    super.initState();
+    _load(widget.initial);
+  }
+
+  void _load(_YoloExportSettings settings) {
+    _format = settings.format == 'onnx' ? 'onnx' : 'openvino';
+    _autoExport = settings.autoExportAfterTraining;
+    _dynamic = settings.dynamic;
+    _nms = settings.nms;
+    _simplify = settings.simplify;
+    _quantize = _normalizeExportQuantize(settings.quantize);
+    _imgszController = TextEditingController(text: settings.imgsz.toString());
+    _batchController = TextEditingController(text: settings.batch.toString());
+    _dataController = TextEditingController(text: settings.dataPath);
+    _fractionController = TextEditingController(
+      text: settings.fraction.toStringAsFixed(2),
+    );
+    _deviceController = TextEditingController(text: settings.device);
+    _opsetController = TextEditingController(
+      text: settings.opset <= 0 ? '' : settings.opset.toString(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _imgszController.dispose();
+    _batchController.dispose();
+    _dataController.dispose();
+    _fractionController.dispose();
+    _deviceController.dispose();
+    _opsetController.dispose();
+    super.dispose();
+  }
+
+  _YoloExportSettings _settingsFromFields() {
+    return _YoloExportSettings(
+      format: _format,
+      autoExportAfterTraining: _autoExport,
+      imgsz: _positiveInt(_imgszController.text, 640),
+      batch: _positiveInt(_batchController.text, 1),
+      quantize: _quantize,
+      dynamic: _dynamic,
+      nms: _nms,
+      dataPath: _isInt8Quantize ? _dataController.text.trim() : '',
+      fraction: _fraction(_fractionController.text),
+      device: _format == 'onnx' ? _deviceController.text.trim() : '',
+      simplify: _simplify,
+      opset: _positiveInt(_opsetController.text, 0),
+    );
+  }
+
+  bool get _isInt8Quantize => _isInt8QuantizeValue(_quantize);
+
+  bool get _showDataWarning =>
+      _isInt8Quantize && _dataController.text.trim().isEmpty;
+
+  String _normalizeExportQuantize(String value) {
+    final normalized = value.trim().toLowerCase();
+    if (normalized == '8' || normalized == 'int8' || normalized == 'w8a8') {
+      return '8';
+    }
+    if (normalized == '16' || normalized == 'fp16' || normalized == 'w16a16') {
+      return '16';
+    }
+    if (normalized == '32' || normalized == 'fp32' || normalized == 'w32a32') {
+      return '32';
+    }
+    return '';
+  }
+
+  bool _isInt8QuantizeValue(String value) {
+    final normalized = value.trim().toLowerCase();
+    return normalized == '8' || normalized == 'int8' || normalized == 'w8a8';
+  }
+
+  int _positiveInt(String text, int fallback) {
+    final parsed = int.tryParse(text.trim());
+    if (parsed == null || parsed < 0) {
+      return fallback;
+    }
+    return parsed;
+  }
+
+  double _fraction(String text) {
+    final parsed = double.tryParse(text.trim());
+    if (parsed == null || !parsed.isFinite) {
+      return 1.0;
+    }
+    return parsed.clamp(0.01, 1.0).toDouble();
+  }
+
+  Future<void> _chooseDataYaml() async {
+    final file = await openFile(acceptedTypeGroups: [_yamlTypeGroup]);
+    if (file == null) {
+      return;
+    }
+    setState(() => _dataController.text = file.path);
+  }
+
+  void _reset() {
+    final defaults = const _YoloExportSettings();
+    setState(() {
+      _format = defaults.format;
+      _autoExport = defaults.autoExportAfterTraining;
+      _dynamic = defaults.dynamic;
+      _nms = defaults.nms;
+      _simplify = defaults.simplify;
+      _quantize = defaults.quantize;
+      _imgszController.text = defaults.imgsz.toString();
+      _batchController.text = defaults.batch.toString();
+      _dataController.text = defaults.dataPath;
+      _fractionController.text = defaults.fraction.toStringAsFixed(2);
+      _deviceController.text = defaults.device;
+      _opsetController.text = '';
+      _message = null;
+    });
+  }
+
+  Future<void> _manualExport() async {
+    setState(() {
+      _manualExporting = true;
+      _message = null;
+    });
+    try {
+      final result = await widget.onManualExport(_settingsFromFields());
+      if (mounted) {
+        setState(() => _message = '${t('train.exportDone')}: ${result.outputPath}');
+      }
+    } on Object catch (error) {
+      if (mounted) {
+        setState(() => _message = '${t('train.exportFailed')}: $error');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _manualExporting = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isOnnx = _format == 'onnx';
+    return AlertDialog(
+      title: Text(t('train.exportSettings')),
+      content: SizedBox(
+        width: 560,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _ExportParameterTooltip(
+                name: 'format',
+                child: DropdownButtonFormField<String>(
+                  initialValue: _format,
+                  decoration: InputDecoration(
+                    labelText: t('train.exportFormat'),
+                  ),
+                  items: const [
+                    DropdownMenuItem(
+                      value: 'openvino',
+                      child: Text('OpenVINO'),
+                    ),
+                    DropdownMenuItem(value: 'onnx', child: Text('ONNX')),
+                  ],
+                  onChanged: _manualExporting
+                      ? null
+                      : (value) {
+                          if (value != null) {
+                            setState(() => _format = value);
+                          }
+                        },
+                ),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  _ExportTextField(
+                    controller: _imgszController,
+                    label: 'imgsz',
+                    width: 120,
+                    enabled: !_manualExporting,
+                  ),
+                  _ExportTextField(
+                    controller: _batchController,
+                    label: 'batch',
+                    width: 120,
+                    enabled: !_manualExporting,
+                  ),
+                  SizedBox(
+                    width: 160,
+                    child: _ExportParameterTooltip(
+                      name: 'quantize',
+                      child: DropdownButtonFormField<String>(
+                        initialValue: _quantize,
+                        decoration: const InputDecoration(
+                          labelText: 'quantize',
+                          isDense: true,
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: '',
+                            child: Text('FP32 / 默认'),
+                          ),
+                          DropdownMenuItem(value: '16', child: Text('FP16')),
+                          DropdownMenuItem(value: '8', child: Text('INT8')),
+                        ],
+                        onChanged: _manualExporting
+                            ? null
+                            : (value) {
+                                setState(() {
+                                  _quantize = value ?? '';
+                                  if (!_isInt8QuantizeValue(_quantize)) {
+                                    _dataController.clear();
+                                  }
+                                });
+                              },
+                      ),
+                    ),
+                  ),
+                  _ExportTextField(
+                    controller: _fractionController,
+                    label: 'fraction',
+                    width: 120,
+                    enabled: !_manualExporting,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              _ExportParameterTooltip(
+                name: 'dynamic',
+                child: SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: const Text('dynamic'),
+                  value: _dynamic,
+                  onChanged: _manualExporting
+                      ? null
+                      : (value) => setState(() => _dynamic = value),
+                ),
+              ),
+              _ExportParameterTooltip(
+                name: 'nms',
+                child: SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: const Text('nms'),
+                  value: _nms,
+                  onChanged: _manualExporting
+                      ? null
+                      : (value) => setState(() => _nms = value),
+                ),
+              ),
+              if (isOnnx) ...[
+                _ExportParameterTooltip(
+                  name: 'simplify',
+                  child: SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    title: const Text('simplify'),
+                    value: _simplify,
+                    onChanged: _manualExporting
+                        ? null
+                        : (value) => setState(() => _simplify = value),
+                  ),
+                ),
+                _ExportTextField(
+                  controller: _opsetController,
+                  label: 'opset',
+                  width: 160,
+                  enabled: !_manualExporting,
+                  hint: 'auto',
+                ),
+              ],
+              const SizedBox(height: 8),
+              _ExportParameterTooltip(
+                name: 'data',
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _dataController,
+                        enabled: !_manualExporting && _isInt8Quantize,
+                        onChanged: (_) => setState(() {}),
+                        decoration: InputDecoration(
+                          labelText: 'data',
+                          hintText: _isInt8Quantize
+                              ? 'data.yaml'
+                              : t('train.exportDataOnlyInt8'),
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      onPressed: _manualExporting || !_isInt8Quantize
+                          ? null
+                          : _chooseDataYaml,
+                      icon: const Icon(Icons.folder_open, size: 16),
+                      label: Text(t('action.select')),
+                    ),
+                    if (_showDataWarning) ...[
+                      const SizedBox(width: 8),
+                      Tooltip(
+                        message: t('train.exportDataMissing'),
+                        child: Icon(
+                          Icons.error,
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (isOnnx) ...[
+                const SizedBox(height: 12),
+                _ExportParameterTooltip(
+                  name: 'device',
+                  child: TextField(
+                    controller: _deviceController,
+                    enabled: !_manualExporting,
+                    decoration: const InputDecoration(
+                      labelText: 'device',
+                      hintText: 'cpu / 0 / mps',
+                      isDense: true,
+                    ),
+                  ),
+                ),
+              ],
+              _ExportParameterTooltip(
+                name: 'autoExport',
+                child: SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(t('train.autoExportAfterTraining')),
+                  value: _autoExport,
+                  onChanged: _manualExporting
+                      ? null
+                      : (value) => setState(() => _autoExport = value),
+                ),
+              ),
+              if (_message != null) ...[
+                const SizedBox(height: 8),
+                Text(_message!, style: Theme.of(context).textTheme.bodySmall),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _manualExporting ? null : _reset,
+          child: Text(t('action.reset')),
+        ),
+        OutlinedButton.icon(
+          onPressed: _manualExporting ? null : _manualExport,
+          icon: _manualExporting
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.output_outlined, size: 16),
+          label: Text(t('train.exportNow')),
+        ),
+        TextButton(
+          onPressed: _manualExporting ? null : () => Navigator.pop(context),
+          child: Text(t('action.cancel')),
+        ),
+        FilledButton(
+          onPressed: _manualExporting
+              ? null
+              : () => Navigator.pop(context, _settingsFromFields()),
+          child: Text(t('action.save')),
+        ),
+      ],
+    );
+  }
+}
+
+class _ExportTextField extends StatelessWidget {
+  const _ExportTextField({
+    required this.controller,
+    required this.label,
+    required this.width,
+    required this.enabled,
+    this.hint,
+    this.helpName,
+  });
+
+  final TextEditingController controller;
+  final String label;
+  final double width;
+  final bool enabled;
+  final String? hint;
+  final String? helpName;
+
+  @override
+  Widget build(BuildContext context) {
+    return _ExportParameterTooltip(
+      name: helpName ?? label,
+      child: SizedBox(
+        width: width,
+        child: TextField(
+          controller: controller,
+          enabled: enabled,
+          decoration: InputDecoration(
+            labelText: label,
+            hintText: hint,
+            isDense: true,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ExportParameterTooltip extends StatelessWidget {
+  const _ExportParameterTooltip({required this.name, required this.child});
+
+  final String name;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      waitDuration: const Duration(milliseconds: 500),
+      message: _exportParameterHelp(name),
+      child: child,
+    );
+  }
+}
+
+String _exportParameterHelp(String name) {
+  return t('train.exportParam.$name');
 }
 
 class _ParameterSectionTitle extends StatelessWidget {
@@ -2675,6 +3345,76 @@ Future<List<_TrainingDeviceOption>> _detectNvidiaDevices() async {
         .toList();
   } on Object {
     return const [];
+  }
+}
+
+Future<_OpenVinoDeviceInfo> _detectOpenVinoDevices(String pythonPath) async {
+  final executable = _resolvePythonExecutable(pythonPath);
+  if (executable == null) {
+    return const _OpenVinoDeviceInfo(error: 'Python path is not configured');
+  }
+  const script = '''
+import json
+try:
+    from openvino import Core
+    print(json.dumps({"ok": True, "devices": list(Core().available_devices)}))
+except Exception as error:
+    print(json.dumps({"ok": False, "error": str(error)}))
+''';
+  try {
+    final result = await Process.run(executable, ['-c', script]).timeout(
+      const Duration(seconds: 15),
+      onTimeout: () => ProcessResult(0, 124, '', 'OpenVINO probe timeout'),
+    );
+    final stdout = result.stdout.toString().trim();
+    final stderr = result.stderr.toString().trim();
+    if (result.exitCode != 0) {
+      return _OpenVinoDeviceInfo(
+        rawOutput: stdout,
+        error: stderr.isEmpty ? 'exit code ${result.exitCode}' : stderr,
+      );
+    }
+    if (stdout.isEmpty) {
+      return _OpenVinoDeviceInfo(
+        error: stderr.isEmpty ? 'empty OpenVINO probe output' : stderr,
+      );
+    }
+    final jsonLine = stdout
+        .split(RegExp(r'\r?\n'))
+        .map((line) => line.trim())
+        .lastWhere(
+          (line) => line.startsWith('{') && line.endsWith('}'),
+          orElse: () => stdout,
+        );
+    final decoded = jsonDecode(jsonLine);
+    if (decoded is! Map<String, dynamic>) {
+      return _OpenVinoDeviceInfo(
+        rawOutput: stdout,
+        error: 'invalid OpenVINO probe output',
+      );
+    }
+    if (decoded['ok'] != true) {
+      return _OpenVinoDeviceInfo(
+        rawOutput: stdout,
+        error: '${decoded['error'] ?? 'OpenVINO probe failed'}',
+      );
+    }
+    final rawDevices = decoded['devices'];
+    if (rawDevices is! List) {
+      return _OpenVinoDeviceInfo(
+        rawOutput: stdout,
+        error: 'OpenVINO device list is missing',
+      );
+    }
+    final devices = rawDevices
+        .map((item) => '$item'.trim().toUpperCase())
+        .where((item) => item.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort(_naturalCompare);
+    return _OpenVinoDeviceInfo(devices: devices, rawOutput: stdout);
+  } on Object catch (error) {
+    return _OpenVinoDeviceInfo(error: '$error');
   }
 }
 

@@ -129,7 +129,15 @@ pub fn detect_model_task(python_path: &str, model_path: &str) -> DetectModelTask
 os.environ["ULTRALYTICS_TQDM"] = "false"
 os.environ["YOLO_VERBOSE"] = "false"
 from ultralytics import YOLO
-model = YOLO({model_path})
+raw_model_path = {model_path}
+def _rustlabel_yolo_model_path(path):
+    text = str(path)
+    if text.lower().endswith(".xml"):
+        parent = os.path.dirname(text)
+        if parent:
+            return parent
+    return text
+model = YOLO(_rustlabel_yolo_model_path(raw_model_path))
 task = str(getattr(model, "task", "") or "detect")
 print(json.dumps({{"ok": True, "task": task}}))
 "##,
@@ -161,7 +169,15 @@ pub fn ai_model_classes_json(python_path: &str, model_path: &str) -> Result<Stri
 os.environ["ULTRALYTICS_TQDM"] = "false"
 os.environ["YOLO_VERBOSE"] = "false"
 from ultralytics import YOLO
-model = YOLO({model_path})
+raw_model_path = {model_path}
+def _rustlabel_yolo_model_path(path):
+    text = str(path)
+    if text.lower().endswith(".xml"):
+        parent = os.path.dirname(text)
+        if parent:
+            return parent
+    return text
+model = YOLO(_rustlabel_yolo_model_path(raw_model_path))
 names = getattr(model, "names", {{}}) or {{}}
 items = []
 if isinstance(names, dict):
@@ -184,7 +200,7 @@ print(json.dumps({{"ok": True, "task": task, "classes": items}}, ensure_ascii=Fa
 
 pub fn ai_annotate_image_json(req: &AiAnnotateImageRequest) -> Result<String, String> {
     if req.backend.trim().eq_ignore_ascii_case("sam3") {
-        return ai_annotate_sam3_image_json(req);
+        return ai_annotate_sam3_image_json(req, false);
     }
     let python = verify_python(&req.python_path)?;
     let script = format!(
@@ -192,14 +208,127 @@ pub fn ai_annotate_image_json(req: &AiAnnotateImageRequest) -> Result<String, St
 os.environ["ULTRALYTICS_TQDM"] = "false"
 os.environ["YOLO_VERBOSE"] = "false"
 from ultralytics import YOLO
-model = YOLO({model_path})
+raw_model_path = {model_path}
+def _rustlabel_yolo_model_path(path):
+    export_path = _rustlabel_openvino_export_path(path)
+    if export_path:
+        return export_path
+    text = str(path)
+    return text
+def _rustlabel_openvino_export_path(path):
+    text = str(path)
+    lower = text.lower()
+    if lower.endswith(".xml"):
+        parent = os.path.dirname(text)
+        return parent if parent else text
+    if os.path.isdir(text):
+        try:
+            if lower.endswith("_openvino_model") or any(name.lower().endswith(".xml") for name in os.listdir(text)):
+                return text
+        except Exception:
+            return ""
+    parent = os.path.dirname(text)
+    stem = os.path.splitext(os.path.basename(text))[0]
+    candidate = os.path.join(parent, stem + "_openvino_model") if stem else ""
+    if candidate and os.path.isdir(candidate):
+        try:
+            if any(name.lower().endswith(".xml") for name in os.listdir(candidate)):
+                return candidate
+        except Exception:
+            return ""
+    return ""
+def _rustlabel_is_openvino_model(path):
+    return bool(_rustlabel_openvino_export_path(path))
+def _rustlabel_openvino_devices():
+    try:
+        from openvino import Core
+        devices = [str(item).upper() for item in Core().available_devices]
+        print(f"[rustlabel] OpenVINO available_devices={{devices}}", file=sys.stderr)
+        return devices
+    except Exception as error:
+        print(f"[rustlabel] OpenVINO device detection failed: {{error}}.", file=sys.stderr)
+        return []
+def _rustlabel_openvino_priority(requested, devices):
+    text = str(requested).strip().upper()
+    candidates = text.split(":", 1)[1].split(",") if text.startswith("AUTO:") else (["GPU", "NPU", "CPU"] if text == "AUTO" else [text])
+    selected = []
+    for candidate in candidates:
+        token = candidate.strip().upper()
+        if token.startswith("INTEL:"):
+            token = token.split(":", 1)[1].strip().upper()
+        if token in ("IGPU", "DGPU"):
+            token = "GPU"
+        if not token:
+            continue
+        prefix = token.split(".", 1)[0]
+        match = next((device for device in devices if device == token or device.startswith(prefix)), "")
+        if match and match not in selected:
+            selected.append(match)
+    if not selected:
+        print("[rustlabel] OpenVINO requested but no matching Intel device was found.", file=sys.stderr)
+        return "cpu"
+    prefix = selected[0].split(".", 1)[0].lower()
+    return f"intel:{{prefix if prefix in ('gpu', 'npu', 'cpu') else 'cpu'}}"
+def _rustlabel_requested_openvino_device(value):
+    text = str(value).strip()
+    lower = text.lower()
+    if not (lower.startswith("openvino:") or lower.startswith("ov:")):
+        return None
+    requested = text.split(":", 1)[1].strip() or "AUTO:GPU,NPU,CPU"
+    if not _rustlabel_is_openvino_model(raw_model_path):
+        print("[rustlabel] OpenVINO device requested but no same-folder OpenVINO export was found; fallback to CPU. Expected <pt_stem>_openvino_model or a selected .xml file.", file=sys.stderr)
+        return "cpu"
+    return _rustlabel_openvino_priority(requested, _rustlabel_openvino_devices())
 device_value = {device}.strip()
-if device_value.lower() in ("", "auto", "cuda", "nv", "nvidia"):
+openvino_device = _rustlabel_requested_openvino_device(device_value)
+if openvino_device is not None:
+    device_value = openvino_device
+elif device_value.lower() in ("", "auto", "cuda", "nv", "nvidia"):
     try:
         import torch
-        device_value = "0" if torch.cuda.is_available() and torch.cuda.device_count() > 0 else "cpu"
+        if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+            device_value = "0"
+        else:
+            device_value = _rustlabel_requested_openvino_device("openvino:AUTO:GPU,NPU,CPU") or "cpu"
     except Exception:
         device_value = "cpu"
+selected_openvino_model = str(raw_model_path).lower().endswith(".xml") or (os.path.isdir(str(raw_model_path)) and _rustlabel_is_openvino_model(raw_model_path))
+if selected_openvino_model and not str(device_value).lower().startswith("intel:"):
+    device_value = _rustlabel_requested_openvino_device("openvino:AUTO:GPU,NPU,CPU") or "intel:cpu"
+use_openvino_model = str(device_value).lower().startswith("intel:") or selected_openvino_model
+model_path_for_inference = _rustlabel_yolo_model_path(raw_model_path) if use_openvino_model else str(raw_model_path)
+if model_path_for_inference != str(raw_model_path):
+    print(f"[rustlabel] using OpenVINO export model: {{model_path_for_inference}}", file=sys.stderr)
+def _rustlabel_load_openvino_metadata(path):
+    text = str(path)
+    model_dir = text if os.path.isdir(text) else (os.path.dirname(text) if text.lower().endswith(".xml") else "")
+    if not model_dir:
+        return {{}}
+    metadata_path = os.path.join(model_dir, "metadata.yaml")
+    if not os.path.isfile(metadata_path):
+        return {{}}
+    try:
+        try:
+            from ultralytics.utils import yaml_load
+            metadata = yaml_load(metadata_path) or {{}}
+        except Exception:
+            import yaml
+            with open(metadata_path, "r", encoding="utf-8") as file:
+                metadata = yaml.safe_load(file) or {{}}
+        return metadata if isinstance(metadata, dict) else {{}}
+    except Exception as error:
+        print(f"[rustlabel] read OpenVINO metadata.yaml failed: {{error}}", file=sys.stderr)
+        return {{}}
+
+def _rustlabel_load_yolo_model(path):
+    metadata = _rustlabel_load_openvino_metadata(path)
+    task = str(metadata.get("task", "") or "").strip().lower()
+    if task:
+        print(f"[rustlabel] loaded OpenVINO metadata task={{task}} from {{path}}", file=sys.stderr)
+        return YOLO(path, task=task)
+    return YOLO(path)
+
+model = _rustlabel_load_yolo_model(model_path_for_inference)
 classes_raw = {class_ids_csv}.strip()
 class_filter = None
 if classes_raw:
@@ -215,7 +344,7 @@ def _rustlabel_predict():
         return model.predict(**kwargs)
     except Exception as error:
         if str(device_value).lower() != "cpu":
-            print(f"[rustlabel] CUDA predict failed, fallback to CPU: {{error}}", file=sys.stderr)
+            print(f"[rustlabel] predict failed on device {{device_value}}, fallback to CPU: {{error}}", file=sys.stderr)
             device_value = "cpu"
             kwargs["device"] = "cpu"
             return model.predict(**kwargs)
@@ -223,6 +352,19 @@ def _rustlabel_predict():
 
 results = _rustlabel_predict()
 names = getattr(model, "names", {{}}) or {{}}
+def _rustlabel_class_name(cls_id):
+    if isinstance(names, dict):
+        if cls_id in names:
+            return names[cls_id]
+        if str(cls_id) in names:
+            return names[str(cls_id)]
+    else:
+        try:
+            if cls_id < len(names):
+                return names[cls_id]
+        except Exception:
+            pass
+    raise RuntimeError(f"model.names is missing class name for class id: {{cls_id}}")
 boxes = []
 width = 0
 height = 0
@@ -237,9 +379,7 @@ for r in results:
         cls_id = int(box.cls[0].item()) if getattr(box, "cls", None) is not None else 0
         conf_value = float(box.conf[0].item()) if getattr(box, "conf", None) is not None else 0.0
         xyxy = box.xyxy[0].tolist()
-        name = names.get(cls_id, f"class_{{cls_id}}") if isinstance(names, dict) else (
-            names[cls_id] if cls_id < len(names) else f"class_{{cls_id}}"
-        )
+        name = _rustlabel_class_name(cls_id)
         boxes.append({{
             "classId": cls_id,
             "className": str(name),
@@ -262,6 +402,16 @@ print(json.dumps({{"ok": True, "width": width, "height": height, "boxes": boxes}
     run_python_script(&python, &script, None)
 }
 
+pub fn ai_annotate_image_json_with_sam_compile(
+    req: &AiAnnotateImageRequest,
+    sam_compile: bool,
+) -> Result<String, String> {
+    if req.backend.trim().eq_ignore_ascii_case("sam3") {
+        return ai_annotate_sam3_image_json(req, sam_compile);
+    }
+    ai_annotate_image_json(req)
+}
+
 pub fn ai_annotate_images_json(req: &AiAnnotateBatchRequest) -> Result<String, String> {
     ai_annotate_images_json_with_sam_prompt_frame(req, 0)
 }
@@ -270,8 +420,16 @@ pub fn ai_annotate_images_json_with_sam_prompt_frame(
     req: &AiAnnotateBatchRequest,
     sam_prompt_frame_index: u32,
 ) -> Result<String, String> {
+    ai_annotate_images_json_with_sam_options(req, sam_prompt_frame_index, false)
+}
+
+pub fn ai_annotate_images_json_with_sam_options(
+    req: &AiAnnotateBatchRequest,
+    sam_prompt_frame_index: u32,
+    sam_compile: bool,
+) -> Result<String, String> {
     if req.backend.trim().eq_ignore_ascii_case("sam3") {
-        return ai_annotate_sam3_images_json(req, sam_prompt_frame_index);
+        return ai_annotate_sam3_images_json(req, sam_prompt_frame_index, sam_compile);
     }
     let python = verify_python(&req.python_path)?;
     let script = format!(
@@ -279,15 +437,128 @@ pub fn ai_annotate_images_json_with_sam_prompt_frame(
 os.environ["ULTRALYTICS_TQDM"] = "false"
 os.environ["YOLO_VERBOSE"] = "false"
 from ultralytics import YOLO
-model = YOLO({model_path})
+raw_model_path = {model_path}
+def _rustlabel_yolo_model_path(path):
+    export_path = _rustlabel_openvino_export_path(path)
+    if export_path:
+        return export_path
+    text = str(path)
+    return text
+def _rustlabel_openvino_export_path(path):
+    text = str(path)
+    lower = text.lower()
+    if lower.endswith(".xml"):
+        parent = os.path.dirname(text)
+        return parent if parent else text
+    if os.path.isdir(text):
+        try:
+            if lower.endswith("_openvino_model") or any(name.lower().endswith(".xml") for name in os.listdir(text)):
+                return text
+        except Exception:
+            return ""
+    parent = os.path.dirname(text)
+    stem = os.path.splitext(os.path.basename(text))[0]
+    candidate = os.path.join(parent, stem + "_openvino_model") if stem else ""
+    if candidate and os.path.isdir(candidate):
+        try:
+            if any(name.lower().endswith(".xml") for name in os.listdir(candidate)):
+                return candidate
+        except Exception:
+            return ""
+    return ""
+def _rustlabel_is_openvino_model(path):
+    return bool(_rustlabel_openvino_export_path(path))
+def _rustlabel_openvino_devices():
+    try:
+        from openvino import Core
+        devices = [str(item).upper() for item in Core().available_devices]
+        print(f"[rustlabel] OpenVINO available_devices={{devices}}", file=sys.stderr)
+        return devices
+    except Exception as error:
+        print(f"[rustlabel] OpenVINO device detection failed: {{error}}.", file=sys.stderr)
+        return []
+def _rustlabel_openvino_priority(requested, devices):
+    text = str(requested).strip().upper()
+    candidates = text.split(":", 1)[1].split(",") if text.startswith("AUTO:") else (["GPU", "NPU", "CPU"] if text == "AUTO" else [text])
+    selected = []
+    for candidate in candidates:
+        token = candidate.strip().upper()
+        if token.startswith("INTEL:"):
+            token = token.split(":", 1)[1].strip().upper()
+        if token in ("IGPU", "DGPU"):
+            token = "GPU"
+        if not token:
+            continue
+        prefix = token.split(".", 1)[0]
+        match = next((device for device in devices if device == token or device.startswith(prefix)), "")
+        if match and match not in selected:
+            selected.append(match)
+    if not selected:
+        print("[rustlabel] OpenVINO requested but no matching Intel device was found.", file=sys.stderr)
+        return "cpu"
+    prefix = selected[0].split(".", 1)[0].lower()
+    return f"intel:{{prefix if prefix in ('gpu', 'npu', 'cpu') else 'cpu'}}"
+def _rustlabel_requested_openvino_device(value):
+    text = str(value).strip()
+    lower = text.lower()
+    if not (lower.startswith("openvino:") or lower.startswith("ov:")):
+        return None
+    requested = text.split(":", 1)[1].strip() or "AUTO:GPU,NPU,CPU"
+    if not _rustlabel_is_openvino_model(raw_model_path):
+        print("[rustlabel] OpenVINO device requested but no same-folder OpenVINO export was found; fallback to CPU. Expected <pt_stem>_openvino_model or a selected .xml file.", file=sys.stderr)
+        return "cpu"
+    return _rustlabel_openvino_priority(requested, _rustlabel_openvino_devices())
 source_paths = {input_paths}
 device_value = {device}.strip()
-if device_value.lower() in ("", "auto", "cuda", "nv", "nvidia"):
+openvino_device = _rustlabel_requested_openvino_device(device_value)
+if openvino_device is not None:
+    device_value = openvino_device
+elif device_value.lower() in ("", "auto", "cuda", "nv", "nvidia"):
     try:
         import torch
-        device_value = "0" if torch.cuda.is_available() and torch.cuda.device_count() > 0 else "cpu"
+        if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+            device_value = "0"
+        else:
+            device_value = _rustlabel_requested_openvino_device("openvino:AUTO:GPU,NPU,CPU") or "cpu"
     except Exception:
         device_value = "cpu"
+selected_openvino_model = str(raw_model_path).lower().endswith(".xml") or (os.path.isdir(str(raw_model_path)) and _rustlabel_is_openvino_model(raw_model_path))
+if selected_openvino_model and not str(device_value).lower().startswith("intel:"):
+    device_value = _rustlabel_requested_openvino_device("openvino:AUTO:GPU,NPU,CPU") or "intel:cpu"
+use_openvino_model = str(device_value).lower().startswith("intel:") or selected_openvino_model
+model_path_for_inference = _rustlabel_yolo_model_path(raw_model_path) if use_openvino_model else str(raw_model_path)
+if model_path_for_inference != str(raw_model_path):
+    print(f"[rustlabel] using OpenVINO export model: {{model_path_for_inference}}", file=sys.stderr)
+def _rustlabel_load_openvino_metadata(path):
+    text = str(path)
+    model_dir = text if os.path.isdir(text) else (os.path.dirname(text) if text.lower().endswith(".xml") else "")
+    if not model_dir:
+        return {{}}
+    metadata_path = os.path.join(model_dir, "metadata.yaml")
+    if not os.path.isfile(metadata_path):
+        return {{}}
+    try:
+        try:
+            from ultralytics.utils import yaml_load
+            metadata = yaml_load(metadata_path) or {{}}
+        except Exception:
+            import yaml
+            with open(metadata_path, "r", encoding="utf-8") as file:
+                metadata = yaml.safe_load(file) or {{}}
+        return metadata if isinstance(metadata, dict) else {{}}
+    except Exception as error:
+        print(f"[rustlabel] read OpenVINO metadata.yaml failed: {{error}}", file=sys.stderr)
+        return {{}}
+
+def _rustlabel_load_yolo_model(path):
+    metadata = _rustlabel_load_openvino_metadata(path)
+    task = str(metadata.get("task", "") or "").strip().lower()
+    if task:
+        print(f"[rustlabel] loaded OpenVINO metadata task={{task}} from {{path}}", file=sys.stderr)
+        return YOLO(path, task=task)
+    return YOLO(path)
+
+model = _rustlabel_load_yolo_model(model_path_for_inference)
 classes_raw = {class_ids_csv}.strip()
 class_filter = None
 if classes_raw:
@@ -303,13 +574,26 @@ def _rustlabel_predict():
         return model.predict(**kwargs)
     except Exception as error:
         if str(device_value).lower() != "cpu":
-            print(f"[rustlabel] CUDA batch predict failed, fallback to CPU: {{error}}", file=sys.stderr)
+            print(f"[rustlabel] batch predict failed on device {{device_value}}, fallback to CPU: {{error}}", file=sys.stderr)
             device_value = "cpu"
             kwargs["device"] = "cpu"
             return model.predict(**kwargs)
         raise
 
 names = getattr(model, "names", {{}}) or {{}}
+def _rustlabel_class_name(cls_id):
+    if isinstance(names, dict):
+        if cls_id in names:
+            return names[cls_id]
+        if str(cls_id) in names:
+            return names[str(cls_id)]
+    else:
+        try:
+            if cls_id < len(names):
+                return names[cls_id]
+        except Exception:
+            pass
+    raise RuntimeError(f"model.names is missing class name for class id: {{cls_id}}")
 images = []
 for index, r in enumerate(_rustlabel_predict()):
     shape = getattr(r, "orig_shape", None)
@@ -322,9 +606,7 @@ for index, r in enumerate(_rustlabel_predict()):
             cls_id = int(box.cls[0].item()) if getattr(box, "cls", None) is not None else 0
             conf_value = float(box.conf[0].item()) if getattr(box, "conf", None) is not None else 0.0
             xyxy = box.xyxy[0].tolist()
-            name = names.get(cls_id, f"class_{{cls_id}}") if isinstance(names, dict) else (
-                names[cls_id] if cls_id < len(names) else f"class_{{cls_id}}"
-            )
+            name = _rustlabel_class_name(cls_id)
             boxes.append({{
                 "classId": cls_id,
                 "className": str(name),
@@ -353,7 +635,10 @@ print(json.dumps({{"ok": True, "images": images}}, ensure_ascii=False))
     run_python_script(&python, &script, None)
 }
 
-fn ai_annotate_sam3_image_json(req: &AiAnnotateImageRequest) -> Result<String, String> {
+fn ai_annotate_sam3_image_json(
+    req: &AiAnnotateImageRequest,
+    sam_compile: bool,
+) -> Result<String, String> {
     let python = verify_python(&req.python_path)?;
     let script = sam3_script(
         &req.model_path,
@@ -372,6 +657,7 @@ fn ai_annotate_sam3_image_json(req: &AiAnnotateImageRequest) -> Result<String, S
         req.sam_max_image_height,
         &req.sam_resize_method,
         0,
+        sam_compile,
     );
     run_python_json_script(&python, &script, None).map_err(classify_python_error)
 }
@@ -379,6 +665,7 @@ fn ai_annotate_sam3_image_json(req: &AiAnnotateImageRequest) -> Result<String, S
 fn ai_annotate_sam3_images_json(
     req: &AiAnnotateBatchRequest,
     sam_prompt_frame_index: u32,
+    sam_compile: bool,
 ) -> Result<String, String> {
     let python = verify_python(&req.python_path)?;
     let script = sam3_script(
@@ -398,6 +685,7 @@ fn ai_annotate_sam3_images_json(
         req.sam_max_image_height,
         &req.sam_resize_method,
         sam_prompt_frame_index,
+        sam_compile,
     );
     run_python_json_script(&python, &script, None).map_err(classify_python_error)
 }
@@ -419,6 +707,7 @@ fn sam3_script(
     max_image_height: u32,
     resize_method: &str,
     prompt_frame_index: u32,
+    sam_compile: bool,
 ) -> String {
     format!(
         r##"import json, os, sys, traceback
@@ -439,6 +728,7 @@ max_image_width = max(64, int({max_image_width}))
 max_image_height = max(64, int({max_image_height}))
 resize_method = {resize_method}.strip().lower() or "shorter_side"
 prompt_frame_index = int({prompt_frame_index})
+sam_compile = bool({sam_compile})
 processor_resolution = 1008
 
 def _parse_click_points(raw):
@@ -466,7 +756,7 @@ print(
     f"prompt_mode={{prompt_mode}} click_points={{len(click_points)}} precision={{precision}} encoder={{encoder}} "
     f"batch=image:{{image_batch_size}}/video:{{video_batch_size}}/interactive:{{interactive_batch_size}} "
     f"pre_resize={{max_image_width}}x{{max_image_height}} resize_method={{resize_method}} "
-    f"prompt_frame={{prompt_frame_index}} processor_resolution={{processor_resolution}}",
+    f"prompt_frame={{prompt_frame_index}} compile={{sam_compile}} processor_resolution={{processor_resolution}}",
     file=sys.stderr,
 )
 if prompt_mode not in ("text", "click"):
@@ -477,8 +767,13 @@ if prompt_mode == "click" and not click_points:
     raise RuntimeError("SAM3 click prompt needs at least one point")
 if prompt_mode == "click" and not any(item[2] for item in click_points):
     raise RuntimeError("SAM3 click prompt needs at least one positive point")
-if encoder and encoder != "vit_b":
-    raise RuntimeError(f"SAM3 low-memory preset only allows encoder=vit_b, got {{encoder}}")
+if encoder and encoder not in ("vit_b", "vit_l", "vit_h"):
+    raise RuntimeError(f"SAM3 encoder must be vit_b, vit_l, or vit_h, got {{encoder}}")
+if encoder in ("vit_l", "vit_h"):
+    print(
+        f"[rustlabel][sam3] encoder={{encoder}} selected; actual architecture is determined by the SAM3 checkpoint/model builder",
+        file=sys.stderr,
+    )
 
 try:
     import importlib.util
@@ -550,9 +845,9 @@ def _build_image_model():
         return kwargs
     if model_path:
         attempts.extend([
-            with_model_options(dict(checkpoint_path=model_path, device=device_name)),
-            with_model_options(dict(ckpt_path=model_path, device=device_name)),
-            with_model_options(dict(checkpoint=model_path, device=device_name)),
+            with_model_options(dict(checkpoint_path=model_path, device=device_name, compile=sam_compile)),
+            with_model_options(dict(ckpt_path=model_path, device=device_name, compile=sam_compile)),
+            with_model_options(dict(checkpoint=model_path, device=device_name, compile=sam_compile)),
             with_model_options(dict(device=device_name)),
         ])
     else:
@@ -565,7 +860,7 @@ def _build_image_model():
             last_error = error
             continue
     try:
-        model = build_sam3_image_model(enable_inst_interactivity=interactive_enabled)
+        model = build_sam3_image_model(enable_inst_interactivity=interactive_enabled, compile=sam_compile)
         if hasattr(model, "to"):
             model = model.to(torch_device)
         return model
@@ -577,11 +872,11 @@ def _build_video_model():
     attempts = []
     if model_path:
         attempts.extend([
-            dict(checkpoint_path=model_path, device=device_name, compile=False),
+            dict(checkpoint_path=model_path, device=device_name, compile=sam_compile),
             dict(checkpoint_path=model_path, device=device_name),
         ])
     else:
-        attempts.append(dict(device=device_name, compile=False))
+        attempts.append(dict(device=device_name, compile=sam_compile))
     last_error = None
     for kwargs in attempts:
         try:
@@ -942,6 +1237,7 @@ else:
         max_image_width = max_image_width.max(64),
         max_image_height = max_image_height.max(64),
         prompt_frame_index = prompt_frame_index,
+        sam_compile = if sam_compile { "True" } else { "False" },
     )
 }
 
@@ -967,14 +1263,214 @@ pub fn detect_image(req: &DetectImageRequest) -> DetectResult {
 os.environ["ULTRALYTICS_TQDM"] = "false"
 os.environ["YOLO_VERBOSE"] = "false"
 from ultralytics import YOLO
-model = YOLO(r'{model_path}')
+raw_model_path = r'{model_path}'
+def _rustlabel_yolo_model_path(path):
+    export_path = _rustlabel_openvino_export_path(path)
+    if export_path:
+        return export_path
+    text = str(path)
+    return text
+def _rustlabel_openvino_export_path(path):
+    text = str(path)
+    lower = text.lower()
+    if lower.endswith(".xml"):
+        parent = os.path.dirname(text)
+        return parent if parent else text
+    if os.path.isdir(text):
+        try:
+            if lower.endswith("_openvino_model") or any(name.lower().endswith(".xml") for name in os.listdir(text)):
+                return text
+        except Exception:
+            return ""
+    parent = os.path.dirname(text)
+    stem = os.path.splitext(os.path.basename(text))[0]
+    candidate = os.path.join(parent, stem + "_openvino_model") if stem else ""
+    if candidate and os.path.isdir(candidate):
+        try:
+            if any(name.lower().endswith(".xml") for name in os.listdir(candidate)):
+                return candidate
+        except Exception:
+            return ""
+    return ""
+def _rustlabel_is_openvino_model(path):
+    return bool(_rustlabel_openvino_export_path(path))
+def _rustlabel_openvino_devices():
+    try:
+        from openvino import Core
+        devices = [str(item).upper() for item in Core().available_devices]
+        print(f"[rustlabel] OpenVINO available_devices={{devices}}", file=sys.stderr)
+        return devices
+    except Exception as error:
+        print(f"[rustlabel] OpenVINO device detection failed: {{error}}.", file=sys.stderr)
+        return []
+def _rustlabel_openvino_priority(requested, devices):
+    text = str(requested).strip().upper()
+    candidates = text.split(":", 1)[1].split(",") if text.startswith("AUTO:") else (["GPU", "NPU", "CPU"] if text == "AUTO" else [text])
+    selected = []
+    for candidate in candidates:
+        token = candidate.strip().upper()
+        if token.startswith("INTEL:"):
+            token = token.split(":", 1)[1].strip().upper()
+        if token in ("IGPU", "DGPU"):
+            token = "GPU"
+        if not token:
+            continue
+        prefix = token.split(".", 1)[0]
+        match = next((device for device in devices if device == token or device.startswith(prefix)), "")
+        if match and match not in selected:
+            selected.append(match)
+    if not selected:
+        print("[rustlabel] OpenVINO requested but no matching Intel device was found.", file=sys.stderr)
+        return "cpu"
+    prefix = selected[0].split(".", 1)[0].lower()
+    return f"intel:{{prefix if prefix in ('gpu', 'npu', 'cpu') else 'cpu'}}"
+def _rustlabel_requested_openvino_device(value):
+    text = str(value).strip()
+    lower = text.lower()
+    if not (lower.startswith("openvino:") or lower.startswith("ov:")):
+        return None
+    requested = text.split(":", 1)[1].strip() or "AUTO:GPU,NPU,CPU"
+    if not _rustlabel_is_openvino_model(raw_model_path):
+        print("[rustlabel] OpenVINO device requested but no same-folder OpenVINO export was found; fallback to CPU. Expected <pt_stem>_openvino_model or a selected .xml file.", file=sys.stderr)
+        return "cpu"
+    return _rustlabel_openvino_priority(requested, _rustlabel_openvino_devices())
 device_value = r'{device}'.strip()
-if device_value.lower() in ("", "auto", "cuda", "nv", "nvidia"):
+openvino_device = _rustlabel_requested_openvino_device(device_value)
+if openvino_device is not None:
+    device_value = openvino_device
+elif device_value.lower() in ("", "auto", "cuda", "nv", "nvidia"):
     try:
         import torch
-        device_value = "0" if torch.cuda.is_available() and torch.cuda.device_count() > 0 else "cpu"
+        if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+            device_value = "0"
+        else:
+            device_value = _rustlabel_requested_openvino_device("openvino:AUTO:GPU,NPU,CPU") or "cpu"
     except Exception:
         device_value = "cpu"
+selected_openvino_model = str(raw_model_path).lower().endswith(".xml") or (os.path.isdir(str(raw_model_path)) and _rustlabel_is_openvino_model(raw_model_path))
+if selected_openvino_model and not str(device_value).lower().startswith("intel:"):
+    device_value = _rustlabel_requested_openvino_device("openvino:AUTO:GPU,NPU,CPU") or "intel:cpu"
+use_openvino_model = str(device_value).lower().startswith("intel:") or selected_openvino_model
+model_path_for_inference = _rustlabel_yolo_model_path(raw_model_path) if use_openvino_model else str(raw_model_path)
+if model_path_for_inference != str(raw_model_path):
+    print(f"[rustlabel] using OpenVINO export model: {{model_path_for_inference}}", file=sys.stderr)
+def _rustlabel_load_openvino_metadata(path):
+    text = str(path)
+    model_dir = text if os.path.isdir(text) else (os.path.dirname(text) if text.lower().endswith(".xml") else "")
+    if not model_dir:
+        return {{}}
+    metadata_path = os.path.join(model_dir, "metadata.yaml")
+    if not os.path.isfile(metadata_path):
+        return {{}}
+    try:
+        try:
+            from ultralytics.utils import yaml_load
+            metadata = yaml_load(metadata_path) or {{}}
+        except Exception:
+            import yaml
+            with open(metadata_path, "r", encoding="utf-8") as file:
+                metadata = yaml.safe_load(file) or {{}}
+        return metadata if isinstance(metadata, dict) else {{}}
+    except Exception as error:
+        print(f"[rustlabel] read OpenVINO metadata.yaml failed: {{error}}", file=sys.stderr)
+        return {{}}
+
+def _rustlabel_load_yolo_model(path):
+    metadata = _rustlabel_load_openvino_metadata(path)
+    task = str(metadata.get("task", "") or "").strip().lower()
+    if task:
+        print(f"[rustlabel] loaded OpenVINO metadata task={{task}} from {{path}}", file=sys.stderr)
+        return YOLO(path, task=task)
+    return YOLO(path)
+
+model = _rustlabel_load_yolo_model(model_path_for_inference)
+
+def _rustlabel_names_from_value(value):
+    names = {{}}
+    if isinstance(value, dict):
+        for key, item in value.items():
+            try:
+                names[int(key)] = str(item)
+            except Exception:
+                pass
+    else:
+        try:
+            for index, item in enumerate(value):
+                names[int(index)] = str(item)
+        except Exception:
+            pass
+    return names
+
+def _rustlabel_openvino_model_dir(path):
+    text = str(path)
+    if os.path.isdir(text):
+        return text
+    if text.lower().endswith(".xml"):
+        return os.path.dirname(text)
+    return ""
+
+def _rustlabel_openvino_metadata_names(path):
+    model_dir = _rustlabel_openvino_model_dir(path)
+    if not model_dir:
+        return {{}}
+    metadata_path = os.path.join(model_dir, "metadata.yaml")
+    if not os.path.isfile(metadata_path):
+        return {{}}
+    try:
+        try:
+            from ultralytics.utils import yaml_load
+            metadata = yaml_load(metadata_path) or {{}}
+        except Exception:
+            import yaml
+            with open(metadata_path, "r", encoding="utf-8") as file:
+                metadata = yaml.safe_load(file) or {{}}
+        names = _rustlabel_names_from_value(metadata.get("names", {{}}))
+        if names:
+            print(f"[rustlabel] loaded OpenVINO metadata names={{len(names)}} from {{metadata_path}}", file=sys.stderr)
+        return names
+    except Exception as error:
+        print(f"[rustlabel] read OpenVINO metadata.yaml failed: {{error}}", file=sys.stderr)
+        return {{}}
+
+_rustlabel_metadata_names = _rustlabel_openvino_metadata_names(model_path_for_inference)
+if _rustlabel_metadata_names:
+    try:
+        model.names = dict(_rustlabel_metadata_names)
+    except Exception:
+        pass
+
+def _rustlabel_result_names(result):
+    raw = getattr(result, "names", None) or getattr(model, "names", {{}}) or {{}}
+    fixed = _rustlabel_names_from_value(raw)
+    fixed.update(_rustlabel_metadata_names)
+    class_ids = []
+    try:
+        for container_name in ("boxes", "obb"):
+            container = getattr(result, container_name, None)
+            cls_values = getattr(container, "cls", None)
+            if cls_values is not None:
+                if hasattr(cls_values, "detach"):
+                    cls_values = cls_values.detach().cpu()
+                if hasattr(cls_values, "tolist"):
+                    cls_values = cls_values.tolist()
+                for value in cls_values:
+                    class_ids.append(int(float(value)))
+    except Exception:
+        pass
+    missing = sorted({{cls_id for cls_id in class_ids if cls_id not in fixed}})
+    if missing:
+        raise RuntimeError(
+            f"OpenVINO metadata.yaml/model.names is missing class name for class id(s): {{missing}}. "
+            f"model={{model_path_for_inference}}"
+        )
+    if class_ids and not fixed:
+        raise RuntimeError(f"OpenVINO class names are empty. model={{model_path_for_inference}}")
+    result.names = fixed
+    return fixed
+
+def _rustlabel_safe_plot(result):
+    _rustlabel_result_names(result)
+    return result.plot()
 
 def _rustlabel_predict(source):
     global device_value
@@ -983,7 +1479,7 @@ def _rustlabel_predict(source):
             conf={conf}, iou={iou}, device=device_value, verbose=False, stream=False)
     except Exception as error:
         if str(device_value).lower() != "cpu":
-            print(f"[rustlabel] CUDA predict failed, fallback to CPU: {{error}}", file=sys.stderr)
+            print(f"[rustlabel] predict failed on device {{device_value}}, fallback to CPU: {{error}}", file=sys.stderr)
             device_value = "cpu"
             return model.predict(source, save=False, imgsz={imgsz},
                 conf={conf}, iou={iou}, device=device_value, verbose=False, stream=False)
@@ -996,7 +1492,7 @@ label_count = 0
 for r in results:
     if r.boxes is not None:
         label_count = len(r.boxes)
-    annotated = r.plot()
+    annotated = _rustlabel_safe_plot(r)
     cv2.imwrite(r'{output_path}', annotated)
 print(json.dumps({{"ok": True, "label_count": label_count}}))
 "##,
@@ -1057,7 +1553,77 @@ os.environ["ULTRALYTICS_TQDM"] = "false"
 os.environ["YOLO_VERBOSE"] = "false"
 from ultralytics import YOLO
 import cv2
-model = YOLO(r'{model_path}')
+raw_model_path = r'{model_path}'
+def _rustlabel_yolo_model_path(path):
+    export_path = _rustlabel_openvino_export_path(path)
+    if export_path:
+        return export_path
+    text = str(path)
+    return text
+def _rustlabel_openvino_export_path(path):
+    text = str(path)
+    lower = text.lower()
+    if lower.endswith(".xml"):
+        parent = os.path.dirname(text)
+        return parent if parent else text
+    if os.path.isdir(text):
+        try:
+            if lower.endswith("_openvino_model") or any(name.lower().endswith(".xml") for name in os.listdir(text)):
+                return text
+        except Exception:
+            return ""
+    parent = os.path.dirname(text)
+    stem = os.path.splitext(os.path.basename(text))[0]
+    candidate = os.path.join(parent, stem + "_openvino_model") if stem else ""
+    if candidate and os.path.isdir(candidate):
+        try:
+            if any(name.lower().endswith(".xml") for name in os.listdir(candidate)):
+                return candidate
+        except Exception:
+            return ""
+    return ""
+def _rustlabel_is_openvino_model(path):
+    return bool(_rustlabel_openvino_export_path(path))
+def _rustlabel_openvino_devices():
+    try:
+        from openvino import Core
+        devices = [str(item).upper() for item in Core().available_devices]
+        print(f"[rustlabel] OpenVINO available_devices={{devices}}", file=sys.stderr)
+        return devices
+    except Exception as error:
+        print(f"[rustlabel] OpenVINO device detection failed: {{error}}.", file=sys.stderr)
+        return []
+def _rustlabel_openvino_priority(requested, devices):
+    text = str(requested).strip().upper()
+    candidates = text.split(":", 1)[1].split(",") if text.startswith("AUTO:") else (["GPU", "NPU", "CPU"] if text == "AUTO" else [text])
+    selected = []
+    for candidate in candidates:
+        token = candidate.strip().upper()
+        if token.startswith("INTEL:"):
+            token = token.split(":", 1)[1].strip().upper()
+        if token in ("IGPU", "DGPU"):
+            token = "GPU"
+        if not token:
+            continue
+        prefix = token.split(".", 1)[0]
+        match = next((device for device in devices if device == token or device.startswith(prefix)), "")
+        if match and match not in selected:
+            selected.append(match)
+    if not selected:
+        print("[rustlabel] OpenVINO requested but no matching Intel device was found.", file=sys.stderr)
+        return "cpu"
+    prefix = selected[0].split(".", 1)[0].lower()
+    return f"intel:{{prefix if prefix in ('gpu', 'npu', 'cpu') else 'cpu'}}"
+def _rustlabel_requested_openvino_device(value):
+    text = str(value).strip()
+    lower = text.lower()
+    if not (lower.startswith("openvino:") or lower.startswith("ov:")):
+        return None
+    requested = text.split(":", 1)[1].strip() or "AUTO:GPU,NPU,CPU"
+    if not _rustlabel_is_openvino_model(raw_model_path):
+        print("[rustlabel] OpenVINO device requested but no same-folder OpenVINO export was found; fallback to CPU. Expected <pt_stem>_openvino_model or a selected .xml file.", file=sys.stderr)
+        return "cpu"
+    return _rustlabel_openvino_priority(requested, _rustlabel_openvino_devices())
 cap = cv2.VideoCapture(r'{input_path}')
 if not cap.isOpened():
     print(json.dumps({{"ok": False, "error": "Cannot open video"}}))
@@ -1075,12 +1641,142 @@ start_frame = int({start_frame})
 if start_frame > 0:
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 device_value = r'{device}'.strip()
-if device_value.lower() in ("", "auto", "cuda", "nv", "nvidia"):
+openvino_device = _rustlabel_requested_openvino_device(device_value)
+if openvino_device is not None:
+    device_value = openvino_device
+elif device_value.lower() in ("", "auto", "cuda", "nv", "nvidia"):
     try:
         import torch
-        device_value = "0" if torch.cuda.is_available() and torch.cuda.device_count() > 0 else "cpu"
+        if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+            device_value = "0"
+        else:
+            device_value = _rustlabel_requested_openvino_device("openvino:AUTO:GPU,NPU,CPU") or "cpu"
     except Exception:
         device_value = "cpu"
+selected_openvino_model = str(raw_model_path).lower().endswith(".xml") or (os.path.isdir(str(raw_model_path)) and _rustlabel_is_openvino_model(raw_model_path))
+if selected_openvino_model and not str(device_value).lower().startswith("intel:"):
+    device_value = _rustlabel_requested_openvino_device("openvino:AUTO:GPU,NPU,CPU") or "intel:cpu"
+use_openvino_model = str(device_value).lower().startswith("intel:") or selected_openvino_model
+model_path_for_inference = _rustlabel_yolo_model_path(raw_model_path) if use_openvino_model else str(raw_model_path)
+if model_path_for_inference != str(raw_model_path):
+    print(f"[rustlabel] using OpenVINO export model: {{model_path_for_inference}}", file=sys.stderr)
+def _rustlabel_load_openvino_metadata(path):
+    text = str(path)
+    model_dir = text if os.path.isdir(text) else (os.path.dirname(text) if text.lower().endswith(".xml") else "")
+    if not model_dir:
+        return {{}}
+    metadata_path = os.path.join(model_dir, "metadata.yaml")
+    if not os.path.isfile(metadata_path):
+        return {{}}
+    try:
+        try:
+            from ultralytics.utils import yaml_load
+            metadata = yaml_load(metadata_path) or {{}}
+        except Exception:
+            import yaml
+            with open(metadata_path, "r", encoding="utf-8") as file:
+                metadata = yaml.safe_load(file) or {{}}
+        return metadata if isinstance(metadata, dict) else {{}}
+    except Exception as error:
+        print(f"[rustlabel] read OpenVINO metadata.yaml failed: {{error}}", file=sys.stderr)
+        return {{}}
+
+def _rustlabel_load_yolo_model(path):
+    metadata = _rustlabel_load_openvino_metadata(path)
+    task = str(metadata.get("task", "") or "").strip().lower()
+    if task:
+        print(f"[rustlabel] loaded OpenVINO metadata task={{task}} from {{path}}", file=sys.stderr)
+        return YOLO(path, task=task)
+    return YOLO(path)
+
+model = _rustlabel_load_yolo_model(model_path_for_inference)
+
+def _rustlabel_names_from_value(value):
+    names = {{}}
+    if isinstance(value, dict):
+        for key, item in value.items():
+            try:
+                names[int(key)] = str(item)
+            except Exception:
+                pass
+    else:
+        try:
+            for index, item in enumerate(value):
+                names[int(index)] = str(item)
+        except Exception:
+            pass
+    return names
+
+def _rustlabel_openvino_model_dir(path):
+    text = str(path)
+    if os.path.isdir(text):
+        return text
+    if text.lower().endswith(".xml"):
+        return os.path.dirname(text)
+    return ""
+
+def _rustlabel_openvino_metadata_names(path):
+    model_dir = _rustlabel_openvino_model_dir(path)
+    if not model_dir:
+        return {{}}
+    metadata_path = os.path.join(model_dir, "metadata.yaml")
+    if not os.path.isfile(metadata_path):
+        return {{}}
+    try:
+        try:
+            from ultralytics.utils import yaml_load
+            metadata = yaml_load(metadata_path) or {{}}
+        except Exception:
+            import yaml
+            with open(metadata_path, "r", encoding="utf-8") as file:
+                metadata = yaml.safe_load(file) or {{}}
+        names = _rustlabel_names_from_value(metadata.get("names", {{}}))
+        if names:
+            print(f"[rustlabel] loaded OpenVINO metadata names={{len(names)}} from {{metadata_path}}", file=sys.stderr)
+        return names
+    except Exception as error:
+        print(f"[rustlabel] read OpenVINO metadata.yaml failed: {{error}}", file=sys.stderr)
+        return {{}}
+
+_rustlabel_metadata_names = _rustlabel_openvino_metadata_names(model_path_for_inference)
+if _rustlabel_metadata_names:
+    try:
+        model.names = dict(_rustlabel_metadata_names)
+    except Exception:
+        pass
+
+def _rustlabel_result_names(result):
+    raw = getattr(result, "names", None) or getattr(model, "names", {{}}) or {{}}
+    fixed = _rustlabel_names_from_value(raw)
+    fixed.update(_rustlabel_metadata_names)
+    class_ids = []
+    try:
+        for container_name in ("boxes", "obb"):
+            container = getattr(result, container_name, None)
+            cls_values = getattr(container, "cls", None)
+            if cls_values is not None:
+                if hasattr(cls_values, "detach"):
+                    cls_values = cls_values.detach().cpu()
+                if hasattr(cls_values, "tolist"):
+                    cls_values = cls_values.tolist()
+                for value in cls_values:
+                    class_ids.append(int(float(value)))
+    except Exception:
+        pass
+    missing = sorted({{cls_id for cls_id in class_ids if cls_id not in fixed}})
+    if missing:
+        raise RuntimeError(
+            f"OpenVINO metadata.yaml/model.names is missing class name for class id(s): {{missing}}. "
+            f"model={{model_path_for_inference}}"
+        )
+    if class_ids and not fixed:
+        raise RuntimeError(f"OpenVINO class names are empty. model={{model_path_for_inference}}")
+    result.names = fixed
+    return fixed
+
+def _rustlabel_safe_plot(result):
+    _rustlabel_result_names(result)
+    return result.plot()
 
 def _rustlabel_predict(source):
     global device_value
@@ -1089,7 +1785,7 @@ def _rustlabel_predict(source):
             conf={conf}, iou={iou}, device=device_value, verbose=False, stream=True)
     except Exception as error:
         if str(device_value).lower() != "cpu":
-            print(f"[rustlabel] CUDA predict failed, fallback to CPU: {{error}}", file=sys.stderr)
+            print(f"[rustlabel] predict failed on device {{device_value}}, fallback to CPU: {{error}}", file=sys.stderr)
             device_value = "cpu"
             return model.predict(source, save=False, imgsz={imgsz},
                 conf={conf}, iou={iou}, device=device_value, verbose=False, stream=True)
@@ -1150,7 +1846,7 @@ try:
             if r.boxes is not None:
                 label_count = max(label_count, len(r.boxes))
             speed = getattr(r, "speed", {{}}) or {{}}
-            annotated = r.plot()
+            annotated = _rustlabel_safe_plot(r)
         frame_path = os.path.join(frame_dir, f"frame_{{frame_idx:06d}}.png")
         cv2.imwrite(frame_path, annotated)
         frames.append({{
@@ -1243,7 +1939,77 @@ os.environ["YOLO_VERBOSE"] = "false"
 from ultralytics import YOLO
 import cv2
 import numpy as np
-model = YOLO(r'{model_path}')
+raw_model_path = r'{model_path}'
+def _rustlabel_yolo_model_path(path):
+    export_path = _rustlabel_openvino_export_path(path)
+    if export_path:
+        return export_path
+    text = str(path)
+    return text
+def _rustlabel_openvino_export_path(path):
+    text = str(path)
+    lower = text.lower()
+    if lower.endswith(".xml"):
+        parent = os.path.dirname(text)
+        return parent if parent else text
+    if os.path.isdir(text):
+        try:
+            if lower.endswith("_openvino_model") or any(name.lower().endswith(".xml") for name in os.listdir(text)):
+                return text
+        except Exception:
+            return ""
+    parent = os.path.dirname(text)
+    stem = os.path.splitext(os.path.basename(text))[0]
+    candidate = os.path.join(parent, stem + "_openvino_model") if stem else ""
+    if candidate and os.path.isdir(candidate):
+        try:
+            if any(name.lower().endswith(".xml") for name in os.listdir(candidate)):
+                return candidate
+        except Exception:
+            return ""
+    return ""
+def _rustlabel_is_openvino_model(path):
+    return bool(_rustlabel_openvino_export_path(path))
+def _rustlabel_openvino_devices():
+    try:
+        from openvino import Core
+        devices = [str(item).upper() for item in Core().available_devices]
+        print(f"[rustlabel] OpenVINO available_devices={{devices}}", file=sys.stderr)
+        return devices
+    except Exception as error:
+        print(f"[rustlabel] OpenVINO device detection failed: {{error}}.", file=sys.stderr)
+        return []
+def _rustlabel_openvino_priority(requested, devices):
+    text = str(requested).strip().upper()
+    candidates = text.split(":", 1)[1].split(",") if text.startswith("AUTO:") else (["GPU", "NPU", "CPU"] if text == "AUTO" else [text])
+    selected = []
+    for candidate in candidates:
+        token = candidate.strip().upper()
+        if token.startswith("INTEL:"):
+            token = token.split(":", 1)[1].strip().upper()
+        if token in ("IGPU", "DGPU"):
+            token = "GPU"
+        if not token:
+            continue
+        prefix = token.split(".", 1)[0]
+        match = next((device for device in devices if device == token or device.startswith(prefix)), "")
+        if match and match not in selected:
+            selected.append(match)
+    if not selected:
+        print("[rustlabel] OpenVINO requested but no matching Intel device was found.", file=sys.stderr)
+        return "cpu"
+    prefix = selected[0].split(".", 1)[0].lower()
+    return f"intel:{{prefix if prefix in ('gpu', 'npu', 'cpu') else 'cpu'}}"
+def _rustlabel_requested_openvino_device(value):
+    text = str(value).strip()
+    lower = text.lower()
+    if not (lower.startswith("openvino:") or lower.startswith("ov:")):
+        return None
+    requested = text.split(":", 1)[1].strip() or "AUTO:GPU,NPU,CPU"
+    if not _rustlabel_is_openvino_model(raw_model_path):
+        print("[rustlabel] OpenVINO device requested but no same-folder OpenVINO export was found; fallback to CPU. Expected <pt_stem>_openvino_model or a selected .xml file.", file=sys.stderr)
+        return "cpu"
+    return _rustlabel_openvino_priority(requested, _rustlabel_openvino_devices())
 cap = cv2.VideoCapture(r'{input_path}')
 if not cap.isOpened():
     print(json.dumps({{"ok": False, "error": "Cannot open video"}}))
@@ -1258,12 +2024,142 @@ if width <= 0 or height <= 0:
     print(json.dumps({{"ok": False, "error": "Invalid video size"}}))
     sys.exit(1)
 device_value = r'{device}'.strip()
-if device_value.lower() in ("", "auto", "cuda", "nv", "nvidia"):
+openvino_device = _rustlabel_requested_openvino_device(device_value)
+if openvino_device is not None:
+    device_value = openvino_device
+elif device_value.lower() in ("", "auto", "cuda", "nv", "nvidia"):
     try:
         import torch
-        device_value = "0" if torch.cuda.is_available() and torch.cuda.device_count() > 0 else "cpu"
+        if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+            device_value = "0"
+        else:
+            device_value = _rustlabel_requested_openvino_device("openvino:AUTO:GPU,NPU,CPU") or "cpu"
     except Exception:
         device_value = "cpu"
+selected_openvino_model = str(raw_model_path).lower().endswith(".xml") or (os.path.isdir(str(raw_model_path)) and _rustlabel_is_openvino_model(raw_model_path))
+if selected_openvino_model and not str(device_value).lower().startswith("intel:"):
+    device_value = _rustlabel_requested_openvino_device("openvino:AUTO:GPU,NPU,CPU") or "intel:cpu"
+use_openvino_model = str(device_value).lower().startswith("intel:") or selected_openvino_model
+model_path_for_inference = _rustlabel_yolo_model_path(raw_model_path) if use_openvino_model else str(raw_model_path)
+if model_path_for_inference != str(raw_model_path):
+    print(f"[rustlabel] using OpenVINO export model: {{model_path_for_inference}}", file=sys.stderr)
+def _rustlabel_load_openvino_metadata(path):
+    text = str(path)
+    model_dir = text if os.path.isdir(text) else (os.path.dirname(text) if text.lower().endswith(".xml") else "")
+    if not model_dir:
+        return {{}}
+    metadata_path = os.path.join(model_dir, "metadata.yaml")
+    if not os.path.isfile(metadata_path):
+        return {{}}
+    try:
+        try:
+            from ultralytics.utils import yaml_load
+            metadata = yaml_load(metadata_path) or {{}}
+        except Exception:
+            import yaml
+            with open(metadata_path, "r", encoding="utf-8") as file:
+                metadata = yaml.safe_load(file) or {{}}
+        return metadata if isinstance(metadata, dict) else {{}}
+    except Exception as error:
+        print(f"[rustlabel] read OpenVINO metadata.yaml failed: {{error}}", file=sys.stderr)
+        return {{}}
+
+def _rustlabel_load_yolo_model(path):
+    metadata = _rustlabel_load_openvino_metadata(path)
+    task = str(metadata.get("task", "") or "").strip().lower()
+    if task:
+        print(f"[rustlabel] loaded OpenVINO metadata task={{task}} from {{path}}", file=sys.stderr)
+        return YOLO(path, task=task)
+    return YOLO(path)
+
+model = _rustlabel_load_yolo_model(model_path_for_inference)
+
+def _rustlabel_names_from_value(value):
+    names = {{}}
+    if isinstance(value, dict):
+        for key, item in value.items():
+            try:
+                names[int(key)] = str(item)
+            except Exception:
+                pass
+    else:
+        try:
+            for index, item in enumerate(value):
+                names[int(index)] = str(item)
+        except Exception:
+            pass
+    return names
+
+def _rustlabel_openvino_model_dir(path):
+    text = str(path)
+    if os.path.isdir(text):
+        return text
+    if text.lower().endswith(".xml"):
+        return os.path.dirname(text)
+    return ""
+
+def _rustlabel_openvino_metadata_names(path):
+    model_dir = _rustlabel_openvino_model_dir(path)
+    if not model_dir:
+        return {{}}
+    metadata_path = os.path.join(model_dir, "metadata.yaml")
+    if not os.path.isfile(metadata_path):
+        return {{}}
+    try:
+        try:
+            from ultralytics.utils import yaml_load
+            metadata = yaml_load(metadata_path) or {{}}
+        except Exception:
+            import yaml
+            with open(metadata_path, "r", encoding="utf-8") as file:
+                metadata = yaml.safe_load(file) or {{}}
+        names = _rustlabel_names_from_value(metadata.get("names", {{}}))
+        if names:
+            print(f"[rustlabel] loaded OpenVINO metadata names={{len(names)}} from {{metadata_path}}", file=sys.stderr)
+        return names
+    except Exception as error:
+        print(f"[rustlabel] read OpenVINO metadata.yaml failed: {{error}}", file=sys.stderr)
+        return {{}}
+
+_rustlabel_metadata_names = _rustlabel_openvino_metadata_names(model_path_for_inference)
+if _rustlabel_metadata_names:
+    try:
+        model.names = dict(_rustlabel_metadata_names)
+    except Exception:
+        pass
+
+def _rustlabel_result_names(result):
+    raw = getattr(result, "names", None) or getattr(model, "names", {{}}) or {{}}
+    fixed = _rustlabel_names_from_value(raw)
+    fixed.update(_rustlabel_metadata_names)
+    class_ids = []
+    try:
+        for container_name in ("boxes", "obb"):
+            container = getattr(result, container_name, None)
+            cls_values = getattr(container, "cls", None)
+            if cls_values is not None:
+                if hasattr(cls_values, "detach"):
+                    cls_values = cls_values.detach().cpu()
+                if hasattr(cls_values, "tolist"):
+                    cls_values = cls_values.tolist()
+                for value in cls_values:
+                    class_ids.append(int(float(value)))
+    except Exception:
+        pass
+    missing = sorted({{cls_id for cls_id in class_ids if cls_id not in fixed}})
+    if missing:
+        raise RuntimeError(
+            f"OpenVINO metadata.yaml/model.names is missing class name for class id(s): {{missing}}. "
+            f"model={{model_path_for_inference}}"
+        )
+    if class_ids and not fixed:
+        raise RuntimeError(f"OpenVINO class names are empty. model={{model_path_for_inference}}")
+    result.names = fixed
+    return fixed
+
+def _rustlabel_safe_plot(result):
+    _rustlabel_result_names(result)
+    return result.plot()
 
 def _rustlabel_predict(source):
     global device_value
@@ -1272,7 +2168,7 @@ def _rustlabel_predict(source):
             conf={conf}, iou={iou}, device=device_value, verbose=False, stream=False)
     except Exception as error:
         if str(device_value).lower() != "cpu":
-            print(f"[rustlabel] CUDA predict failed, fallback to CPU: {{error}}", file=sys.stderr)
+            print(f"[rustlabel] predict failed on device {{device_value}}, fallback to CPU: {{error}}", file=sys.stderr)
             device_value = "cpu"
             return model.predict(source, save=False, imgsz={imgsz},
                 conf={conf}, iou={iou}, device=device_value, verbose=False, stream=False)
@@ -1366,7 +2262,7 @@ try:
         for r in results:
             if r.boxes is not None:
                 label_count = max(label_count, len(r.boxes))
-            annotated = r.plot()
+            annotated = _rustlabel_safe_plot(r)
         if annotated.shape[1] != width or annotated.shape[0] != height:
             annotated = cv2.resize(annotated, (width, height), interpolation=cv2.INTER_LINEAR)
         encoder.stdin.write(np.ascontiguousarray(annotated).tobytes())

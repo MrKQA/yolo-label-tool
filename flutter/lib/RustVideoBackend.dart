@@ -289,6 +289,21 @@ class _RustVideoBackend {
     );
   }
 
+  static Future<_ModelExportResult> exportYoloModel({
+    required String pythonPath,
+    required String modelPath,
+    required _YoloExportSettings settings,
+  }) {
+    final settingsJson = settings.toJson();
+    return Isolate.run(
+      () => _exportYoloModelSync(
+        pythonPath: pythonPath,
+        modelPath: modelPath,
+        settingsJson: settingsJson,
+      ),
+    );
+  }
+
   static Future<_AiModelClassesResult> aiModelClasses({
     required String pythonPath,
     required String modelPath,
@@ -320,6 +335,7 @@ class _RustVideoBackend {
     int samMaxImageWidth = 1024,
     int samMaxImageHeight = 768,
     String samResizeMethod = 'shorter_side',
+    bool samCompile = false,
   }) {
     return Isolate.run(
       () => _aiAnnotateImageSync(
@@ -344,6 +360,7 @@ class _RustVideoBackend {
         samMaxImageWidth: samMaxImageWidth,
         samMaxImageHeight: samMaxImageHeight,
         samResizeMethod: samResizeMethod,
+        samCompile: samCompile,
       ),
     );
   }
@@ -371,6 +388,7 @@ class _RustVideoBackend {
     int samMaxImageWidth = 1024,
     int samMaxImageHeight = 768,
     String samResizeMethod = 'shorter_side',
+    bool samCompile = false,
   }) {
     return Isolate.run(
       () => _aiAnnotateImagesSync(
@@ -396,6 +414,7 @@ class _RustVideoBackend {
         samMaxImageWidth: samMaxImageWidth,
         samMaxImageHeight: samMaxImageHeight,
         samResizeMethod: samResizeMethod,
+        samCompile: samCompile,
       ),
     );
   }
@@ -527,6 +546,51 @@ class _RustVideoBackend {
         task: '${decoded['task'] ?? ''}',
         folder: '${decoded['folder'] ?? 'hbb'}',
         error: decoded['error']?.toString(),
+      );
+    } finally {
+      bindings.allocator.free(requestPtr);
+    }
+  }
+
+  static _ModelExportResult _exportYoloModelSync({
+    required String pythonPath,
+    required String modelPath,
+    required Map<String, Object> settingsJson,
+  }) {
+    final settings = _YoloExportSettings.fromJson(settingsJson);
+    final bindings = _RustVideoBindings.open();
+    final request = jsonEncode({
+      'pythonPath': pythonPath,
+      'modelPath': modelPath,
+      'format': settings.format,
+      'imgsz': settings.imgsz,
+      'batch': settings.batch,
+      'quantize': settings.quantize,
+      'dynamic': settings.dynamic,
+      'nms': settings.nms,
+      'data': settings.dataPath.trim(),
+      'fraction': settings.fraction,
+      'device': settings.device,
+      'simplify': settings.simplify,
+      'opset': settings.opset,
+    });
+    final requestBytes = Uint8List.fromList(utf8.encode(request));
+    final requestPtr = bindings.allocator.allocate(requestBytes);
+    try {
+      final buffer = bindings.exportModelJson(requestPtr, requestBytes.length);
+      final jsonText = bindings.takeUtf8(buffer);
+      final decoded = jsonDecode(jsonText);
+      if (decoded is! Map<String, dynamic>) {
+        throw StateError('Invalid export response');
+      }
+      if (decoded['ok'] != true) {
+        throw StateError('${decoded['error'] ?? 'Model export failed'}');
+      }
+      return _ModelExportResult(
+        format: '${decoded['format'] ?? settings.format}',
+        outputPath: '${decoded['outputPath'] ?? ''}',
+        stdout: '${decoded['stdout'] ?? ''}',
+        stderr: '${decoded['stderr'] ?? ''}',
       );
     } finally {
       bindings.allocator.free(requestPtr);
@@ -916,6 +980,7 @@ class _RustVideoBackend {
     required int samMaxImageWidth,
     required int samMaxImageHeight,
     required String samResizeMethod,
+    required bool samCompile,
   }) {
     final bindings = _RustVideoBindings.open();
     final request = jsonEncode({
@@ -940,6 +1005,7 @@ class _RustVideoBackend {
       'samMaxImageWidth': samMaxImageWidth,
       'samMaxImageHeight': samMaxImageHeight,
       'samResizeMethod': samResizeMethod,
+      'samCompile': samCompile,
     });
     final requestBytes = Uint8List.fromList(utf8.encode(request));
     final requestPtr = bindings.allocator.allocate(requestBytes);
@@ -991,6 +1057,7 @@ class _RustVideoBackend {
     required int samMaxImageWidth,
     required int samMaxImageHeight,
     required String samResizeMethod,
+    required bool samCompile,
   }) {
     final bindings = _RustVideoBindings.open();
     final request = jsonEncode({
@@ -1016,6 +1083,7 @@ class _RustVideoBackend {
       'samMaxImageWidth': samMaxImageWidth,
       'samMaxImageHeight': samMaxImageHeight,
       'samResizeMethod': samResizeMethod,
+      'samCompile': samCompile,
     });
     final requestBytes = Uint8List.fromList(utf8.encode(request));
     final requestPtr = bindings.allocator.allocate(requestBytes);
@@ -1151,6 +1219,20 @@ class _DetectModelTaskResult {
   final String? error;
 }
 
+class _ModelExportResult {
+  const _ModelExportResult({
+    required this.format,
+    required this.outputPath,
+    required this.stdout,
+    required this.stderr,
+  });
+
+  final String format;
+  final String outputPath;
+  final String stdout;
+  final String stderr;
+}
+
 class _AiModelClass {
   const _AiModelClass({required this.id, required this.name});
 
@@ -1276,6 +1358,10 @@ typedef _AiModelClassesJsonNative =
     _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
 typedef _AiModelClassesJsonDart =
     _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+typedef _ExportModelJsonNative =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef _ExportModelJsonDart =
+    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _AiAnnotateImageJsonNative =
     _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
 typedef _AiAnnotateImageJsonDart =
@@ -1394,6 +1480,10 @@ class _RustVideoBindings {
           .lookupFunction<_AiModelClassesJsonNative, _AiModelClassesJsonDart>(
             'rust_label_ai_model_classes_json',
           ),
+      exportModelJson = library
+          .lookupFunction<_ExportModelJsonNative, _ExportModelJsonDart>(
+            'rust_label_export_model_json',
+          ),
       aiAnnotateImageJson = library
           .lookupFunction<_AiAnnotateImageJsonNative, _AiAnnotateImageJsonDart>(
             'rust_label_ai_annotate_image_json',
@@ -1502,6 +1592,7 @@ class _RustVideoBindings {
   final _DetectJsonDart detectJson;
   final _DetectModelTaskJsonDart detectModelTaskJson;
   final _AiModelClassesJsonDart aiModelClassesJson;
+  final _ExportModelJsonDart exportModelJson;
   final _AiAnnotateImageJsonDart aiAnnotateImageJson;
   final _AiAnnotateImagesJsonDart aiAnnotateImagesJson;
   final _PreloadYoloPythonJsonDart preloadYoloPythonJson;

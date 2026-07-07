@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 use std::env;
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -18,168 +19,13 @@ static ACTIVE_ERROR: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None)
 static ACTIVE_TOTAL_EPOCHS: Lazy<Mutex<u32>> = Lazy::new(|| Mutex::new(0));
 static ACTIVE_STARTED_AT: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
 static ACTIVE_LOG_PATH: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
-static ACTIVE_LAST_LOG_HEARTBEAT: Lazy<Mutex<Option<Instant>>> = Lazy::new(|| Mutex::new(None));
+static ACTIVE_CHILD_PID: Lazy<Mutex<Option<u32>>> = Lazy::new(|| Mutex::new(None));
 
-const TRAINING_CODE: &str = r#"
+const TRAINING_SUBPROCESS_CODE: &str = r#"
 import os
 import sys
-import time
-
-class _RustLabelTee:
-    def __init__(self, original, sink):
-        self.original = original
-        self.sink = sink
-
-    def write(self, text):
-        if not text:
-            return 0
-        try:
-            self.sink.write(text)
-            self.sink.flush()
-        except Exception:
-            pass
-        try:
-            self.original.write(text)
-            self.original.flush()
-        except Exception:
-            pass
-        return len(text)
-
-    def flush(self):
-        try:
-            self.sink.flush()
-        except Exception:
-            pass
-        try:
-            self.original.flush()
-        except Exception:
-            pass
-
-os.makedirs(os.path.dirname(log_path), exist_ok=True)
-_rustlabel_log_stream = open(log_path, "a", encoding="utf-8", buffering=1)
-sys.stdout = _RustLabelTee(sys.stdout, _rustlabel_log_stream)
-sys.stderr = _RustLabelTee(sys.stderr, _rustlabel_log_stream)
-
-python_exe_dir = os.path.dirname(python_path)
-python_root = python_exe_dir
-if os.path.basename(python_exe_dir).lower() == "scripts":
-    python_root = os.path.dirname(python_exe_dir)
-worker_python_path = python_path
-if os.name == "nt":
-    pythonw_path = os.path.join(python_exe_dir, "pythonw.exe")
-    if os.path.isfile(pythonw_path):
-        worker_python_path = pythonw_path
-
-print("[rustlabel] Python training bootstrap")
-print(f"[rustlabel] python_path={python_path}")
-print(f"[rustlabel] worker_python_path={worker_python_path}")
-print(f"[rustlabel] python_root={python_root}")
-print(f"[rustlabel] model_path={model_path}")
-print(f"[rustlabel] data_yaml_path={data_yaml_path}")
-print(f"[rustlabel] project_dir={project_dir}")
-print(f"[rustlabel] experiment_name={experiment_name}")
-print(f"[rustlabel] epochs={epochs}, imgsz={imgsz}, batch={batch}, device={device}, resume={resume}")
-print(
-    "[rustlabel] train params: "
-    f"workers={workers}, amp={amp}, cls_pw={cls_pw}, patience={patience}, "
-    f"lr0={lr0}, momentum={momentum}"
-)
-print(
-    "[rustlabel] augment params: "
-    f"hsv_h={hsv_h}, hsv_s={hsv_s}, hsv_v={hsv_v}, translate={translate}, "
-    f"scale={scale}, shear={shear}, flipud={flipud}, fliplr={fliplr}, "
-    f"degrees={degrees}, perspective={perspective}, bgr={bgr}, mosaic={mosaic}, "
-    f"mixup={mixup}, cutmix={cutmix}, copy_paste={copy_paste}, "
-    f"copy_paste_mode={copy_paste_mode}, auto_augment={auto_augment}, erasing={erasing}"
-)
-print("[rustlabel] loss names: detect/obb => box, cls, dfl; seg => box, seg, cls, dfl; pose => box, pose, kobj, cls, dfl")
-print("[rustlabel] progress format: epoch=... gpu=... box=..., cls=..., dfl=... batch=... size=... progress step=... speed=... elapsed=... eta=...")
-
-site_candidates = [
-    os.path.join(python_root, "Lib", "site-packages"),
-    os.path.join(python_root, "lib", "site-packages"),
-    os.path.join(python_root, "Lib"),
-    python_root,
-]
-for item in reversed(site_candidates):
-    if item and os.path.isdir(item) and item not in sys.path:
-        sys.path.insert(0, item)
-
-path_candidates = [
-    python_exe_dir,
-    python_root,
-    os.path.join(python_root, "Scripts"),
-    os.path.join(python_root, "Library", "bin"),
-    os.path.join(python_root, "DLLs"),
-]
-existing_path = os.environ.get("PATH", "")
-os.environ["PATH"] = os.pathsep.join(
-    [item for item in path_candidates if os.path.isdir(item)] + [existing_path]
-)
-os.environ["ULTRALYTICS_TQDM"] = "false"
-os.environ["CONDA_PREFIX"] = python_root
-os.environ["CONDA_DLL_SEARCH_MODIFICATION_ENABLE"] = "1"
 
 _rustlabel_dll_handles = []
-if hasattr(os, "add_dll_directory"):
-    for item in path_candidates:
-        if item and os.path.isdir(item):
-            try:
-                _rustlabel_dll_handles.append(os.add_dll_directory(item))
-                print(f"[rustlabel] added dll directory={item}")
-            except Exception as error:
-                print(f"[rustlabel] add_dll_directory failed: {item}: {error}")
-
-print(f"[rustlabel] sys.path={sys.path}")
-print(f"[rustlabel] PATH prefix={os.environ.get('PATH', '')[:1000]}")
-
-try:
-    import multiprocessing as _rustlabel_multiprocessing
-    import multiprocessing.spawn as _rustlabel_multiprocessing_spawn
-    sys.executable = worker_python_path
-    if hasattr(sys, "_base_executable"):
-        sys._base_executable = worker_python_path
-    _rustlabel_multiprocessing.freeze_support()
-    _rustlabel_multiprocessing.set_executable(worker_python_path)
-    print(f"[rustlabel] multiprocessing executable={_rustlabel_multiprocessing_spawn.get_executable()}")
-except Exception as error:
-    print(f"[rustlabel] configure multiprocessing executable failed: {error}")
-
-print("[rustlabel] importing ultralytics.YOLO")
-from ultralytics import YOLO
-print("[rustlabel] ultralytics import complete")
-
-_rustlabel_last_progress_log = 0.0
-_rustlabel_batch_index = 0
-_rustlabel_epoch_started_at = 0.0
-_rustlabel_args_cache = None
-
-def _rustlabel_log(message):
-    print(f"[rustlabel] {message}", flush=True)
-
-def _rustlabel_run_dir():
-    if resume:
-        weights_dir = os.path.dirname(model_path)
-        if os.path.basename(weights_dir).lower() == "weights":
-            return os.path.dirname(weights_dir)
-    return os.path.join(project_dir, experiment_name)
-
-def _rustlabel_args_yaml_value(key):
-    global _rustlabel_args_cache
-    if _rustlabel_args_cache is None:
-        _rustlabel_args_cache = {}
-        args_path = os.path.join(_rustlabel_run_dir(), "args.yaml")
-        try:
-            with open(args_path, "r", encoding="utf-8") as file:
-                for raw_line in file:
-                    line = raw_line.split(chr(35), 1)[0].strip()
-                    if not line or ":" not in line:
-                        continue
-                    item_key, item_value = line.split(":", 1)
-                    _rustlabel_args_cache[item_key.strip()] = item_value.strip().strip("'\"")
-        except Exception:
-            pass
-    return _rustlabel_args_cache.get(key)
 
 def _parse_batch(value):
     text = str(value).strip()
@@ -194,406 +40,156 @@ def _rustlabel_stop_callback(trainer):
     if os.path.exists(stop_file):
         raise KeyboardInterrupt("Training stopped by RustLabel")
 
-def _rustlabel_model_task():
+def _rustlabel_configure_environment():
+    python_exe_dir = os.path.dirname(python_path)
+    python_root = python_exe_dir
+    if os.path.basename(python_exe_dir).lower() == "scripts":
+        python_root = os.path.dirname(python_exe_dir)
+    worker_python_path = python_path
+    if os.name == "nt":
+        pythonw_path = os.path.join(python_exe_dir, "pythonw.exe")
+        if os.path.isfile(pythonw_path):
+            worker_python_path = pythonw_path
+
+    site_candidates = [
+        os.path.join(python_root, "Lib", "site-packages"),
+        os.path.join(python_root, "lib", "site-packages"),
+        os.path.join(python_root, "Lib"),
+        python_root,
+    ]
+    for item in reversed(site_candidates):
+        if item and os.path.isdir(item) and item not in sys.path:
+            sys.path.insert(0, item)
+
+    path_candidates = [
+        python_exe_dir,
+        python_root,
+        os.path.join(python_root, "Scripts"),
+        os.path.join(python_root, "Library", "bin"),
+        os.path.join(python_root, "DLLs"),
+    ]
+    existing_path = os.environ.get("PATH", "")
+    os.environ["PATH"] = os.pathsep.join(
+        [item for item in path_candidates if os.path.isdir(item)] + [existing_path]
+    )
+    os.environ["NO_COLOR"] = "1"
+    os.environ["PY_COLORS"] = "0"
+    os.environ["CLICOLOR"] = "0"
+    os.environ["CLICOLOR_FORCE"] = "0"
+    os.environ["FORCE_COLOR"] = "0"
+    os.environ["RICH_NO_COLOR"] = "1"
+    os.environ["TERM"] = "dumb"
+    os.environ.pop("ULTRALYTICS_TQDM", None)
+    os.environ["CONDA_PREFIX"] = python_root
+    os.environ["CONDA_DLL_SEARCH_MODIFICATION_ENABLE"] = "1"
+
+    if hasattr(os, "add_dll_directory"):
+        for item in path_candidates:
+            if item and os.path.isdir(item):
+                try:
+                    _rustlabel_dll_handles.append(os.add_dll_directory(item))
+                except Exception as error:
+                    print(f"[rustlabel] add_dll_directory failed: {item}: {error}", flush=True)
+
+    return python_exe_dir, python_root, worker_python_path
+
+def _rustlabel_configure_multiprocessing(worker_python_path):
     try:
-        return str(getattr(model, "task", "") or "").lower()
-    except Exception:
-        return ""
+        import multiprocessing as _rustlabel_multiprocessing
+        import multiprocessing.spawn as _rustlabel_multiprocessing_spawn
+        sys.executable = worker_python_path
+        if hasattr(sys, "_base_executable"):
+            sys._base_executable = worker_python_path
+        _rustlabel_multiprocessing.freeze_support()
+        _rustlabel_multiprocessing.set_executable(worker_python_path)
+        print(
+            f"[rustlabel] multiprocessing executable={_rustlabel_multiprocessing_spawn.get_executable()}",
+            flush=True,
+        )
+    except Exception as error:
+        print(f"[rustlabel] configure multiprocessing executable failed: {error}", flush=True)
 
-def _rustlabel_loss_names(values):
-    task = _rustlabel_model_task()
-    if len(values) == 3:
-        return ["box", "cls", "dfl"]
-    if len(values) == 4:
-        if task in ("segment", "seg"):
-            return ["box", "seg", "cls", "dfl"]
-        return ["box", "cls", "dfl", "extra"]
-    if len(values) == 5 and task == "pose":
-        return ["box", "pose", "kobj", "cls", "dfl"]
-    return [f"loss{i + 1}" for i in range(len(values))]
+def _rustlabel_main():
+    python_exe_dir, python_root, worker_python_path = _rustlabel_configure_environment()
+    _rustlabel_configure_multiprocessing(worker_python_path)
 
-def _rustlabel_loss_text(trainer):
-    try:
-        loss = getattr(trainer, "tloss", None)
-        if loss is None:
-            return ""
-        if hasattr(loss, "detach"):
-            loss = loss.detach().cpu().tolist()
-        if isinstance(loss, (list, tuple)):
-            values = [float(item) for item in loss]
-            names = _rustlabel_loss_names(values)
-            pairs = ", ".join(
-                f"{name}={value:.4f}" for name, value in zip(names, values)
-            )
-            return f" loss({pairs})"
-        return f" loss(total={float(loss):.4f})"
-    except Exception:
-        return ""
-
-def _rustlabel_loss_named_text(trainer):
-    values = _rustlabel_loss_values(trainer)
-    if not values:
-        return "loss=unknown"
-    names = _rustlabel_loss_names(values)
-    return ", ".join(
-        f"{name}={value:.4f}" for name, value in zip(names, values)
+    print("[rustlabel] Python training subprocess bootstrap", flush=True)
+    print(f"[rustlabel] python_path={python_path}", flush=True)
+    print(f"[rustlabel] worker_python_path={worker_python_path}", flush=True)
+    print(f"[rustlabel] python_root={python_root}", flush=True)
+    print(f"[rustlabel] model_path={model_path}", flush=True)
+    print(f"[rustlabel] data_yaml_path={data_yaml_path}", flush=True)
+    print(f"[rustlabel] project_dir={project_dir}", flush=True)
+    print(f"[rustlabel] experiment_name={experiment_name}", flush=True)
+    print(
+        f"[rustlabel] epochs={epochs}, imgsz={imgsz}, batch={batch}, "
+        f"device={device}, workers={workers}, amp={amp}, resume={resume}",
+        flush=True,
     )
 
-def _rustlabel_loss_values(trainer):
+    print("[rustlabel] importing ultralytics.YOLO", flush=True)
+    from ultralytics import YOLO
+    print("[rustlabel] ultralytics import complete", flush=True)
+
+    print("[rustlabel] loading model", flush=True)
+    model = YOLO(model_path)
+    print("[rustlabel] model loaded", flush=True)
     try:
-        loss = getattr(trainer, "tloss", None)
-        if loss is None:
-            return []
-        if hasattr(loss, "detach"):
-            loss = loss.detach().cpu().tolist()
-        if isinstance(loss, (list, tuple)):
-            return [float(item) for item in loss]
-        return [float(loss)]
-    except Exception:
-        return []
+        model.add_callback("on_train_start", _rustlabel_stop_callback)
+        model.add_callback("on_train_epoch_start", _rustlabel_stop_callback)
+        model.add_callback("on_train_batch_start", _rustlabel_stop_callback)
+        model.add_callback("on_train_batch_end", _rustlabel_stop_callback)
+        model.add_callback("on_train_epoch_end", _rustlabel_stop_callback)
+        model.add_callback("on_fit_epoch_end", _rustlabel_stop_callback)
+    except Exception as error:
+        print(f"[rustlabel] register stop callback failed: {error}", flush=True)
 
-def _rustlabel_epoch_text(trainer):
-    epoch = getattr(trainer, "epoch", None)
-    epochs = getattr(trainer, "epochs", None)
-    if isinstance(epoch, int) and isinstance(epochs, int):
-        return f"{epoch + 1}/{epochs}"
-    if isinstance(epoch, int):
-        return str(epoch + 1)
-    return "?"
+    if cls_pw > 0 and hasattr(model, "cls_pw"):
+        model.cls_pw = cls_pw
 
-def _rustlabel_batch_text(trainer):
-    try:
-        batch_i = getattr(trainer, "batch_i", None)
-        loader = getattr(trainer, "train_loader", None)
-        total = len(loader) if loader is not None else None
-        index = batch_i if isinstance(batch_i, int) else _rustlabel_batch_index - 1
-        if isinstance(batch_i, int) and isinstance(total, int) and total > 0:
-            return f" batch={batch_i + 1}/{total}"
-        if isinstance(index, int) and index >= 0 and isinstance(total, int) and total > 0:
-            return f" batch={index + 1}/{total}"
-        if isinstance(index, int) and index >= 0:
-            return f" batch={index + 1}"
-    except Exception:
-        pass
-    return ""
-
-def _rustlabel_batch_position(trainer):
-    try:
-        batch_i = getattr(trainer, "batch_i", None)
-        loader = getattr(trainer, "train_loader", None)
-        total = len(loader) if loader is not None else None
-        index = batch_i if isinstance(batch_i, int) else _rustlabel_batch_index - 1
-        if not isinstance(index, int) or index < 0:
-            index = 0
-        return index + 1, total if isinstance(total, int) and total > 0 else None
-    except Exception:
-        return max(1, _rustlabel_batch_index), None
-
-def _rustlabel_lr_text(trainer):
-    try:
-        optimizer = getattr(trainer, "optimizer", None)
-        groups = getattr(optimizer, "param_groups", None)
-        if not groups:
-            return ""
-        values = []
-        for group in groups:
-            lr = group.get("lr", None) if isinstance(group, dict) else None
-            if isinstance(lr, (int, float)):
-                values.append(float(lr))
-        if not values:
-            return ""
-        if len(values) == 1:
-            return f" lr={values[0]:.6g}"
-        return " lr=[" + ", ".join(f"{value:.6g}" for value in values) + "]"
-    except Exception:
-        return ""
-
-def _rustlabel_gpu_mem_value():
-    try:
-        import torch
-        if not torch.cuda.is_available():
-            return "0G"
-        reserved = torch.cuda.memory_reserved() / 1024 / 1024 / 1024
-        allocated = torch.cuda.memory_allocated() / 1024 / 1024 / 1024
-        value = max(reserved, allocated)
-        return f"{value:.2f}G"
-    except Exception:
-        return "0G"
-
-def _rustlabel_gpu_text():
-    try:
-        import torch
-        if not torch.cuda.is_available():
-            return ""
-        allocated = torch.cuda.memory_allocated() / 1024 / 1024 / 1024
-        reserved = torch.cuda.memory_reserved() / 1024 / 1024 / 1024
-        return f" gpu_mem={allocated:.2f}G/{reserved:.2f}G"
-    except Exception:
-        return ""
-
-def _rustlabel_batch_size_text(trainer):
-    try:
-        value = getattr(trainer, "batch_size", None)
-        if value is not None:
-            return str(value)
-        args = getattr(trainer, "args", None)
-        value = getattr(args, "batch", None)
-        if value is not None:
-            return str(value)
-        value = _rustlabel_args_yaml_value("batch")
-        if value:
-            return str(value)
-        return str(batch)
-    except Exception:
-        value = _rustlabel_args_yaml_value("batch")
-        return str(value) if value else str(batch)
-
-def _rustlabel_progress_bar(done, total):
-    if not total or total <= 0:
-        return "----------"
-    ratio = max(0.0, min(1.0, done / total))
-    filled = int(round(ratio * 12))
-    return "━" * filled + "─" * (12 - filled)
-
-def _rustlabel_duration_text(seconds):
-    seconds = max(0.0, float(seconds))
-    if seconds >= 3600:
-        hours = int(seconds // 3600)
-        minutes = int((seconds % 3600) // 60)
-        return f"{hours}h{minutes:02d}m"
-    if seconds >= 60:
-        minutes = int(seconds // 60)
-        rest = int(seconds % 60)
-        return f"{minutes}m{rest:02d}s"
-    return f"{seconds:.1f}s"
-
-def _rustlabel_speed_time_text(done, total):
-    if _rustlabel_epoch_started_at <= 0:
-        return "speed=0.0it/s elapsed=0.0s eta=unknown"
-    elapsed = max(0.001, time.time() - _rustlabel_epoch_started_at)
-    speed = done / elapsed
-    if total and total > done and speed > 0:
-        eta = (total - done) / speed
-        eta_text = _rustlabel_duration_text(eta)
+    if resume:
+        print("[rustlabel] calling model.train(resume=True)", flush=True)
+        model.train(resume=True)
     else:
-        eta_text = "0.0s"
-    return (
-        f"speed={speed:.1f}it/s "
-        f"elapsed={_rustlabel_duration_text(elapsed)} "
-        f"eta={eta_text}"
-    )
-
-def _rustlabel_native_progress_text(trainer):
-    done, total = _rustlabel_batch_position(trainer)
-    if total:
-        percent = int(round(max(0.0, min(1.0, done / total)) * 100))
-        batch_text = f"{done}/{total}"
-    else:
-        percent = 0
-        batch_text = str(done)
-    return (
-        f"epoch={_rustlabel_epoch_text(trainer)} "
-        f"gpu={_rustlabel_gpu_mem_value()} "
-        f"{_rustlabel_loss_named_text(trainer)} "
-        f"batch={_rustlabel_batch_size_text(trainer)} "
-        f"size={imgsz}: "
-        f"{percent:3d}% {_rustlabel_progress_bar(done, total)} "
-        f"step={batch_text} {_rustlabel_speed_time_text(done, total)}"
-    )
-
-def _rustlabel_metric_float(value):
-    try:
-        if value is None:
-            return None
-        if hasattr(value, "detach"):
-            value = value.detach().cpu()
-        if hasattr(value, "item"):
-            value = value.item()
-        return float(value)
-    except Exception:
-        return None
-
-def _rustlabel_metric_from_dict(values, keys):
-    if not isinstance(values, dict):
-        return None
-    for key in keys:
-        if key in values:
-            number = _rustlabel_metric_float(values.get(key))
-            if number is not None:
-                return number
-    return None
-
-def _rustlabel_metric_from_object(values, attrs):
-    if values is None:
-        return None
-    for attr in attrs:
-        if hasattr(values, attr):
-            number = _rustlabel_metric_float(getattr(values, attr))
-            if number is not None:
-                return number
-    return None
-
-def _rustlabel_metric_value(metrics, dict_keys, object_attrs):
-    number = _rustlabel_metric_from_dict(metrics, dict_keys)
-    if number is not None:
-        return number
-    number = _rustlabel_metric_from_object(metrics, object_attrs)
-    if number is not None:
-        return number
-    for child_name in ("box", "seg", "obb", "pose"):
-        child = getattr(metrics, child_name, None)
-        number = _rustlabel_metric_from_object(child, object_attrs)
-        if number is not None:
-            return number
-    return None
-
-def _rustlabel_metrics_text(trainer):
-    try:
-        metrics = getattr(trainer, "metrics", None)
-        if not metrics:
-            validator = getattr(trainer, "validator", None)
-            metrics = getattr(validator, "metrics", None)
-        precision = _rustlabel_metric_value(
-            metrics,
-            ["metrics/precision(B)", "metrics/precision(M)", "metrics/precision(O)", "metrics/precision"],
-            ["precision", "mp"],
+        print("[rustlabel] calling model.train(...)", flush=True)
+        model.train(
+            data=data_yaml_path,
+            epochs=epochs,
+            imgsz=imgsz,
+            batch=_parse_batch(batch),
+            device=device,
+            lr0=lr0,
+            momentum=momentum,
+            patience=patience,
+            hsv_h=hsv_h,
+            hsv_s=hsv_s,
+            hsv_v=hsv_v,
+            translate=translate,
+            scale=scale,
+            shear=shear,
+            flipud=flipud,
+            fliplr=fliplr,
+            degrees=degrees,
+            perspective=perspective,
+            bgr=bgr,
+            mosaic=mosaic,
+            mixup=mixup,
+            cutmix=cutmix,
+            copy_paste=copy_paste,
+            copy_paste_mode=copy_paste_mode,
+            auto_augment=auto_augment,
+            erasing=erasing,
+            workers=workers,
+            amp=amp,
+            verbose=True,
+            project=project_dir,
+            name=experiment_name,
+            exist_ok=True,
         )
-        recall = _rustlabel_metric_value(
-            metrics,
-            ["metrics/recall(B)", "metrics/recall(M)", "metrics/recall(O)", "metrics/recall"],
-            ["recall", "mr"],
-        )
-        map50 = _rustlabel_metric_value(
-            metrics,
-            ["metrics/mAP50(B)", "metrics/mAP50(M)", "metrics/mAP50(O)", "metrics/mAP_0.5", "metrics/mAP50"],
-            ["map50"],
-        )
-        map5095 = _rustlabel_metric_value(
-            metrics,
-            ["metrics/mAP50-95(B)", "metrics/mAP50-95(M)", "metrics/mAP50-95(O)", "metrics/mAP_0.5:0.95", "metrics/mAP50-95"],
-            ["map", "map5095", "map50_95"],
-        )
-        pairs = []
-        if precision is not None:
-            pairs.append(f"precision={precision:.4f}")
-        if recall is not None:
-            pairs.append(f"recall={recall:.4f}")
-        if map50 is not None:
-            pairs.append(f"mAP50={map50:.4f}")
-        if map5095 is not None:
-            pairs.append(f"mAP50-95={map5095:.4f}")
-        return " metrics(" + ", ".join(pairs) + ")" if pairs else ""
-    except Exception:
-        return ""
+    print("[rustlabel] training call finished", flush=True)
 
-def _rustlabel_epoch_time_text():
-    if _rustlabel_epoch_started_at <= 0:
-        return ""
-    elapsed = max(0.0, time.time() - _rustlabel_epoch_started_at)
-    return f" epoch_time={elapsed:.1f}s"
-
-def _rustlabel_train_start_callback(trainer):
-    _rustlabel_log("train start callback reached")
-    _rustlabel_stop_callback(trainer)
-
-def _rustlabel_epoch_start_callback(trainer):
-    global _rustlabel_batch_index, _rustlabel_epoch_started_at
-    _rustlabel_batch_index = 0
-    _rustlabel_epoch_started_at = time.time()
-    _rustlabel_log(
-        f"epoch {_rustlabel_epoch_text(trainer)} start"
-        f"{_rustlabel_lr_text(trainer)}"
-    )
-    _rustlabel_stop_callback(trainer)
-
-def _rustlabel_progress_callback(trainer):
-    global _rustlabel_last_progress_log
-    _rustlabel_stop_callback(trainer)
-    now = time.time()
-    if now - _rustlabel_last_progress_log < 1.0:
-        return
-    _rustlabel_last_progress_log = now
-    _rustlabel_log(_rustlabel_native_progress_text(trainer))
-
-def _rustlabel_batch_end_callback(trainer):
-    global _rustlabel_batch_index
-    _rustlabel_batch_index += 1
-    _rustlabel_progress_callback(trainer)
-
-def _rustlabel_epoch_end_callback(trainer):
-    _rustlabel_log(
-        f"epoch {_rustlabel_epoch_text(trainer)} end"
-        f"{_rustlabel_loss_text(trainer)}"
-        f"{_rustlabel_metrics_text(trainer)}"
-        f"{_rustlabel_lr_text(trainer)}"
-        f"{_rustlabel_gpu_text()}"
-        f"{_rustlabel_epoch_time_text()}"
-    )
-    _rustlabel_stop_callback(trainer)
-
-def _rustlabel_fit_epoch_end_callback(trainer):
-    _rustlabel_log(
-        f"validation epoch={_rustlabel_epoch_text(trainer)}"
-        f"{_rustlabel_metrics_text(trainer)}"
-        f"{_rustlabel_lr_text(trainer)}"
-        f"{_rustlabel_gpu_text()}"
-    )
-    _rustlabel_stop_callback(trainer)
-
-print("[rustlabel] loading model")
-model = YOLO(model_path)
-print("[rustlabel] model loaded")
-try:
-    model.add_callback("on_train_start", _rustlabel_train_start_callback)
-    model.add_callback("on_train_epoch_start", _rustlabel_epoch_start_callback)
-    model.add_callback("on_train_batch_end", _rustlabel_batch_end_callback)
-    model.add_callback("on_train_epoch_end", _rustlabel_epoch_end_callback)
-    model.add_callback("on_fit_epoch_end", _rustlabel_fit_epoch_end_callback)
-except Exception as error:
-    _rustlabel_log(f"register callbacks failed: {error}")
-
-if cls_pw > 0 and hasattr(model, "cls_pw"):
-    model.cls_pw = cls_pw
-
-if resume:
-    print("[rustlabel] calling model.train(resume=True)")
-    model.train(resume=True)
-else:
-    print("[rustlabel] calling model.train(...)")
-    model.train(
-        data=data_yaml_path,
-        epochs=epochs,
-        imgsz=imgsz,
-        batch=_parse_batch(batch),
-        device=device,
-        lr0=lr0,
-        momentum=momentum,
-        patience=patience,
-        hsv_h=hsv_h,
-        hsv_s=hsv_s,
-        hsv_v=hsv_v,
-        translate=translate,
-        scale=scale,
-        shear=shear,
-        flipud=flipud,
-        fliplr=fliplr,
-        degrees=degrees,
-        perspective=perspective,
-        bgr=bgr,
-        mosaic=mosaic,
-        mixup=mixup,
-        cutmix=cutmix,
-        copy_paste=copy_paste,
-        copy_paste_mode=copy_paste_mode,
-        auto_augment=auto_augment,
-        erasing=erasing,
-        workers=workers,
-        amp=amp,
-        project=project_dir,
-        name=experiment_name,
-        exist_ok=True,
-    )
-print("[rustlabel] training call finished")
+if __name__ == "__main__":
+    _rustlabel_main()
 "#;
 
 #[derive(Debug, Clone)]
@@ -691,7 +287,6 @@ pub fn start_training(mut config: TrainingConfig) -> Result<String, String> {
     *ACTIVE_TOTAL_EPOCHS.lock().unwrap() = config.epochs;
     *ACTIVE_STARTED_AT.lock().unwrap() = Some(Instant::now());
     *ACTIVE_LOG_PATH.lock().unwrap() = Some(log_path.to_string_lossy().into_owned());
-    *ACTIVE_LAST_LOG_HEARTBEAT.lock().unwrap() = None;
     append_log_line(
         &log_path,
         &format!("expected_run_dir={}", run_dir.display()),
@@ -724,13 +319,15 @@ pub fn start_training(mut config: TrainingConfig) -> Result<String, String> {
 }
 
 pub fn preload_yolo_python(python_path: &str) -> Result<String, String> {
-    ini_python::initialize_python(python_path)?;
+    let python_path = ini_python::verify_python_path(python_path)?;
     let log_path = training_log_path().ok();
     if let Some(path) = &log_path {
-        append_log_line(path, "python preload requested");
+        append_log_line(
+            path,
+            &format!("python executable verified without preload: {python_path}"),
+        );
     }
-    preload_training_modules_opt(log_path.as_deref())?;
-    Ok("Python YOLO runtime preloaded".to_string())
+    Ok("Python executable verified without YOLO preload".to_string())
 }
 
 pub fn poll_training_progress() -> Option<TrainingProgress> {
@@ -793,8 +390,6 @@ pub fn poll_training_progress() -> Option<TrainingProgress> {
     } else {
         status
     };
-    append_running_heartbeat(&status, current_epoch, total);
-
     Some(TrainingProgress {
         current_epoch,
         total_epochs: total,
@@ -833,12 +428,25 @@ pub fn stop_training() -> Result<String, String> {
 pub fn shutdown_training(timeout_ms: u64) -> Result<String, String> {
     let message = stop_training()?;
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let mut kill_requested = false;
     loop {
         cleanup_finished_training();
         if ACTIVE_HANDLE.lock().unwrap().is_none() {
             return Ok(format!("{message}; training stopped"));
         }
         if Instant::now() >= deadline {
+            if !kill_requested {
+                if let Some(log_path) = ACTIVE_LOG_PATH.lock().unwrap().clone() {
+                    append_log_line(
+                        Path::new(&log_path),
+                        "training stop timed out; killing subprocess",
+                    );
+                }
+                kill_active_training_child();
+                kill_requested = true;
+                thread::sleep(Duration::from_millis(200));
+                continue;
+            }
             return Ok(format!("{message}; training is still stopping"));
         }
         thread::sleep(Duration::from_millis(100));
@@ -862,7 +470,10 @@ pub fn training_log_tail(max_chars: usize) -> Result<(String, String), String> {
         let total = text.chars().count();
         text.chars().skip(total - max_chars).collect()
     };
-    Ok((path.to_string_lossy().into_owned(), tail))
+    Ok((
+        path.to_string_lossy().into_owned(),
+        sanitize_terminal_text(&tail),
+    ))
 }
 
 pub fn training_log_dates_json() -> Result<String, String> {
@@ -898,6 +509,7 @@ pub fn read_training_log_for_date_json(date: &str) -> Result<String, String> {
     } else {
         String::new()
     };
+    let text = sanitize_terminal_text(&text);
     Ok(format!(
         "{{\"ok\":true,\"date\":\"{}\",\"path\":\"{}\",\"text\":\"{}\"}}",
         json_escape(&date),
@@ -946,31 +558,97 @@ fn run_training_thread(
     stop_file: &Path,
     log_path: &Path,
 ) -> Result<(), String> {
-    append_log_line(log_path, "python runtime configure starting");
-    if let Err(error) = ini_python::configure_python_runtime(&config.python_path) {
-        append_log_line(
-            log_path,
-            &format!("python runtime configure failed: {error}"),
-        );
-        return Err(error);
-    }
-    append_log_line(log_path, "python runtime configured");
-
-    append_log_line(log_path, "python modules preload starting");
-    if let Err(error) = preload_training_modules(log_path) {
-        append_log_line(log_path, &format!("python preload warning: {error}"));
-    }
-
-    run_training_with_embedded_python(config, stop_file, log_path)
+    append_log_line(log_path, "training subprocess prepare starting");
+    run_training_subprocess(config, stop_file, log_path)
 }
 
-fn run_training_with_embedded_python(
+fn run_training_subprocess(
     config: &TrainingConfig,
     stop_file: &Path,
     log_path: &Path,
 ) -> Result<(), String> {
+    let script_path = training_script_path()?;
     let code = training_code_with_locals(config, stop_file, log_path);
-    ini_python::run_python_code(&code)
+    fs::write(&script_path, code)
+        .map_err(|error| format!("write training script {}: {error}", script_path.display()))?;
+    append_log_line(
+        log_path,
+        &format!("training subprocess script={}", script_path.display()),
+    );
+
+    let mut command = Command::new(&config.python_path);
+    command
+        .arg("-u")
+        .arg(&script_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    configure_python_child_environment(&mut command, &config.python_path);
+
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("start training subprocess: {error}"))?;
+    let child_id = child.id();
+    *ACTIVE_CHILD_PID.lock().unwrap() = Some(child_id);
+    append_log_line(log_path, &format!("training subprocess pid={child_id}"));
+
+    let log_write_lock = Arc::new(Mutex::new(()));
+    let stdout_handle = child.stdout.take().map(|pipe| {
+        spawn_child_output_logger(pipe, log_path.to_path_buf(), log_write_lock.clone())
+    });
+    let stderr_handle = child.stderr.take().map(|pipe| {
+        spawn_child_output_logger(pipe, log_path.to_path_buf(), log_write_lock.clone())
+    });
+
+    let wait_result = child
+        .wait()
+        .map_err(|error| format!("wait training subprocess: {error}"));
+    if let Some(handle) = stdout_handle {
+        let _ = handle.join();
+    }
+    if let Some(handle) = stderr_handle {
+        let _ = handle.join();
+    }
+    *ACTIVE_CHILD_PID.lock().unwrap() = None;
+    let _ = fs::remove_file(&script_path);
+
+    let status = wait_result?;
+    if status.success() {
+        append_log_line(log_path, "training subprocess exited successfully");
+        return Ok(());
+    }
+    if stop_file.exists() {
+        append_log_line(
+            log_path,
+            &format!("training subprocess stopped with status={status}"),
+        );
+        return Err("KeyboardInterrupt: Training stopped by RustLabel".to_string());
+    }
+    append_log_line(
+        log_path,
+        &format!("training subprocess failed with status={status}"),
+    );
+    Err(format!("training subprocess failed: {status}"))
+}
+
+fn spawn_child_output_logger<R>(
+    mut reader: R,
+    log_path: PathBuf,
+    write_lock: Arc<Mutex<()>>,
+) -> JoinHandle<()>
+where
+    R: Read + Send + 'static,
+{
+    thread::spawn(move || {
+        let mut buffer = [0_u8; 8192];
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(count) => append_log_bytes(&log_path, &buffer[..count], &write_lock),
+                Err(_) => break,
+            }
+        }
+    })
 }
 
 fn training_code_with_locals(config: &TrainingConfig, stop_file: &Path, log_path: &Path) -> String {
@@ -1050,8 +728,71 @@ fn training_code_with_locals(config: &TrainingConfig, stop_file: &Path, log_path
         finite_python_number(config.cls_pw),
         python_string_literal(&stop_file.to_string_lossy()),
         python_string_literal(&log_path.to_string_lossy()),
-        TRAINING_CODE
+        TRAINING_SUBPROCESS_CODE
     )
+}
+
+fn training_script_path() -> Result<PathBuf, String> {
+    let path = env::temp_dir().join(format!(
+        "_rustlabel_train_{}_{}.py",
+        std::process::id(),
+        unix_millis_now().unwrap_or(0)
+    ));
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("create temp script dir {}: {error}", parent.display()))?;
+    }
+    Ok(path)
+}
+
+fn configure_python_child_environment(command: &mut Command, python_path: &str) {
+    let executable = PathBuf::from(python_path);
+    let executable_dir = executable.parent().map(Path::to_path_buf);
+    let env_root = executable_dir
+        .as_ref()
+        .and_then(|dir| {
+            if file_name_eq(dir, "Scripts") {
+                dir.parent().map(Path::to_path_buf)
+            } else {
+                Some(dir.clone())
+            }
+        })
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    let mut path_prefixes = Vec::<PathBuf>::new();
+    if let Some(dir) = executable_dir {
+        path_prefixes.push(dir);
+    }
+    path_prefixes.extend([
+        env_root.clone(),
+        env_root.join("Scripts"),
+        env_root.join("Library").join("bin"),
+        env_root.join("DLLs"),
+    ]);
+    path_prefixes.retain(|path| path.exists());
+    if let Some(existing_path) = env::var_os("PATH") {
+        path_prefixes.extend(env::split_paths(&existing_path));
+    }
+    if let Ok(joined) = env::join_paths(dedupe_pathbufs(path_prefixes)) {
+        command.env("PATH", joined);
+    }
+
+    command
+        .env_remove("PYTHONHOME")
+        .env_remove("PYTHONPATH")
+        .env_remove("ULTRALYTICS_TQDM")
+        .env("PYTHONNOUSERSITE", "1")
+        .env("PYTHONUTF8", "1")
+        .env("NO_COLOR", "1")
+        .env("PY_COLORS", "0")
+        .env("CLICOLOR", "0")
+        .env("CLICOLOR_FORCE", "0")
+        .env("FORCE_COLOR", "0")
+        .env("RICH_NO_COLOR", "1")
+        .env("TERM", "dumb")
+        .env("CONDA_PREFIX", &env_root)
+        .env("CONDA_DLL_SEARCH_MODIFICATION_ENABLE", "1")
+        .env("RUSTLABEL_PYTHON_EXE", python_path);
 }
 
 fn python_string_literal(value: &str) -> String {
@@ -1086,27 +827,6 @@ fn finite_python_number(value: f64) -> String {
     }
 }
 
-fn preload_training_modules(log_path: &Path) -> Result<(), String> {
-    let result = ini_python::preload_yolo_modules();
-    match &result {
-        Ok(()) => append_log_line(log_path, "python modules preloaded"),
-        Err(error) => append_log_line(log_path, &format!("python modules preload failed: {error}")),
-    }
-    result
-}
-
-fn preload_training_modules_opt(log_path: Option<&Path>) -> Result<(), String> {
-    let result = ini_python::preload_yolo_modules();
-    match (&result, log_path) {
-        (Ok(()), Some(path)) => append_log_line(path, "python modules preloaded"),
-        (Err(error), Some(path)) => {
-            append_log_line(path, &format!("python modules preload failed: {error}"))
-        }
-        _ => {}
-    }
-    result
-}
-
 fn expected_run_dir(config: &TrainingConfig, project: &Path) -> PathBuf {
     if config.resume {
         if let Some(run_dir) = run_dir_from_checkpoint(&config.model_path) {
@@ -1134,33 +854,6 @@ fn set_status(status: &str, error: Option<String>) {
     *ACTIVE_ERROR.lock().unwrap() = error;
 }
 
-fn append_running_heartbeat(status: &str, current_epoch: u32, total_epochs: u32) {
-    if status != "running" && status != "stopping" {
-        return;
-    }
-    let now = Instant::now();
-    {
-        let mut last = ACTIVE_LAST_LOG_HEARTBEAT.lock().unwrap();
-        if last
-            .map(|value| now.duration_since(value) < Duration::from_secs(10))
-            .unwrap_or(false)
-        {
-            return;
-        }
-        *last = Some(now);
-    }
-    if let Some(path) = ACTIVE_LOG_PATH.lock().unwrap().clone() {
-        append_log_line(
-            Path::new(&path),
-            &format!(
-                "training heartbeat: status={status}, epoch={}/{}; waiting for next trainer callback",
-                current_epoch.max(1),
-                total_epochs.max(current_epoch).max(1)
-            ),
-        );
-    }
-}
-
 fn cleanup_finished_training() {
     let finished = ACTIVE_HANDLE
         .lock()
@@ -1175,8 +868,33 @@ fn cleanup_finished_training() {
         let _ = handle.join();
     }
     *ACTIVE_STOP_FILE.lock().unwrap() = None;
+    *ACTIVE_CHILD_PID.lock().unwrap() = None;
     *ACTIVE_STARTED_AT.lock().unwrap() = None;
-    *ACTIVE_LAST_LOG_HEARTBEAT.lock().unwrap() = None;
+}
+
+fn kill_active_training_child() {
+    let pid = *ACTIVE_CHILD_PID.lock().unwrap();
+    let Some(pid) = pid else {
+        return;
+    };
+    #[cfg(windows)]
+    {
+        let pid_text = pid.to_string();
+        let _ = Command::new("taskkill")
+            .args(["/PID", pid_text.as_str(), "/T", "/F"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    #[cfg(not(windows))]
+    {
+        let pid_text = pid.to_string();
+        let _ = Command::new("kill")
+            .args(["-TERM", pid_text.as_str()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
 }
 
 fn training_log_path() -> Result<PathBuf, String> {
@@ -1200,6 +918,76 @@ fn append_log_line(path: &Path, message: &str) {
             let _ = writeln!(file, "[{timestamp}] {line}");
         }
     }
+}
+
+fn append_log_bytes(path: &Path, bytes: &[u8], write_lock: &Arc<Mutex<()>>) {
+    if bytes.is_empty() {
+        return;
+    }
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let Ok(_guard) = write_lock.lock() else {
+        return;
+    };
+    if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = file.write_all(bytes);
+        let _ = file.flush();
+    }
+}
+
+fn sanitize_terminal_text(input: &str) -> String {
+    enum EscapeState {
+        Normal,
+        Escape,
+        Csi,
+        Osc,
+        OscEscape,
+    }
+
+    let mut output = String::with_capacity(input.len());
+    let mut state = EscapeState::Normal;
+    for ch in input.chars() {
+        match state {
+            EscapeState::Normal => match ch {
+                '\u{1b}' => state = EscapeState::Escape,
+                '\r' => {
+                    if !output.ends_with('\n') {
+                        output.push('\n');
+                    }
+                }
+                '\u{8}' => {}
+                _ => output.push(ch),
+            },
+            EscapeState::Escape => {
+                state = match ch {
+                    '[' => EscapeState::Csi,
+                    ']' => EscapeState::Osc,
+                    _ => EscapeState::Normal,
+                };
+            }
+            EscapeState::Csi => {
+                if ('@'..='~').contains(&ch) {
+                    state = EscapeState::Normal;
+                }
+            }
+            EscapeState::Osc => {
+                if ch == '\u{7}' {
+                    state = EscapeState::Normal;
+                } else if ch == '\u{1b}' {
+                    state = EscapeState::OscEscape;
+                }
+            }
+            EscapeState::OscEscape => {
+                state = if ch == '\\' {
+                    EscapeState::Normal
+                } else {
+                    EscapeState::Osc
+                };
+            }
+        }
+    }
+    output
 }
 
 fn project_directory() -> Result<PathBuf, String> {
@@ -1372,4 +1160,18 @@ fn file_name_eq(path: &Path, expected: &str) -> bool {
     path.file_name()
         .map(|value| value.to_string_lossy().eq_ignore_ascii_case(expected))
         .unwrap_or(false)
+}
+
+fn dedupe_pathbufs(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut result = Vec::<PathBuf>::new();
+    for path in paths {
+        if !result.iter().any(|existing| {
+            existing
+                .to_string_lossy()
+                .eq_ignore_ascii_case(&path.to_string_lossy())
+        }) {
+            result.push(path);
+        }
+    }
+    result
 }

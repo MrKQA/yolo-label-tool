@@ -378,6 +378,105 @@ int _logLevelIndexFromJson(Object? value) {
 
 /// 训练参数偏好，在程序重启后恢复上次选择。
 /// Training parameter preferences restored on app restart.
+class _YoloExportSettings {
+  const _YoloExportSettings({
+    this.format = 'openvino',
+    this.autoExportAfterTraining = false,
+    this.imgsz = 640,
+    this.batch = 1,
+    this.quantize = '',
+    this.dynamic = false,
+    this.nms = false,
+    this.dataPath = '',
+    this.fraction = 1.0,
+    this.device = '',
+    this.simplify = true,
+    this.opset = 0,
+  });
+
+  final String format;
+  final bool autoExportAfterTraining;
+  final int imgsz;
+  final int batch;
+  final String quantize;
+  final bool dynamic;
+  final bool nms;
+  final String dataPath;
+  final double fraction;
+  final String device;
+  final bool simplify;
+  final int opset;
+
+  _YoloExportSettings copyWith({
+    String? format,
+    bool? autoExportAfterTraining,
+    int? imgsz,
+    int? batch,
+    String? quantize,
+    bool? dynamic,
+    bool? nms,
+    String? dataPath,
+    double? fraction,
+    String? device,
+    bool? simplify,
+    int? opset,
+  }) {
+    return _YoloExportSettings(
+      format: format ?? this.format,
+      autoExportAfterTraining:
+          autoExportAfterTraining ?? this.autoExportAfterTraining,
+      imgsz: imgsz ?? this.imgsz,
+      batch: batch ?? this.batch,
+      quantize: quantize ?? this.quantize,
+      dynamic: dynamic ?? this.dynamic,
+      nms: nms ?? this.nms,
+      dataPath: dataPath ?? this.dataPath,
+      fraction: fraction ?? this.fraction,
+      device: device ?? this.device,
+      simplify: simplify ?? this.simplify,
+      opset: opset ?? this.opset,
+    );
+  }
+
+  Map<String, Object> toJson() => {
+    'format': format,
+    'autoExportAfterTraining': autoExportAfterTraining,
+    'imgsz': imgsz,
+    'batch': batch,
+    'quantize': quantize,
+    'dynamic': dynamic,
+    'nms': nms,
+    'dataPath': dataPath,
+    'fraction': fraction,
+    'device': device,
+    'simplify': simplify,
+    'opset': opset,
+  };
+
+  static _YoloExportSettings fromJson(Object? value) {
+    if (value is! Map) {
+      return const _YoloExportSettings();
+    }
+    final format = '${value['format'] ?? 'openvino'}'.toLowerCase();
+    return _YoloExportSettings(
+      format: format == 'onnx' ? 'onnx' : 'openvino',
+      autoExportAfterTraining: value['autoExportAfterTraining'] == true,
+      imgsz: value['imgsz'] is num ? (value['imgsz'] as num).round() : 640,
+      batch: value['batch'] is num ? (value['batch'] as num).round() : 1,
+      quantize: value['quantize'] is String ? value['quantize'] as String : '',
+      dynamic: value['dynamic'] == true,
+      nms: value['nms'] == true,
+      dataPath: value['dataPath'] is String ? value['dataPath'] as String : '',
+      fraction: value['fraction'] is num
+          ? (value['fraction'] as num).toDouble()
+          : 1.0,
+      device: value['device'] is String ? value['device'] as String : '',
+      simplify: value['simplify'] != false,
+      opset: value['opset'] is num ? (value['opset'] as num).round() : 0,
+    );
+  }
+}
+
 class _TrainingPreferences {
   const _TrainingPreferences({
     this.modelPath,
@@ -391,6 +490,7 @@ class _TrainingPreferences {
     required this.selectedDeviceIds,
     this.manualDeviceSelection = false,
     required this.chartColors,
+    this.exportSettings = const _YoloExportSettings(),
   });
 
   final String? modelPath;
@@ -404,6 +504,7 @@ class _TrainingPreferences {
   final List<String> selectedDeviceIds;
   final bool manualDeviceSelection;
   final Map<String, int> chartColors;
+  final _YoloExportSettings exportSettings;
 
   Map<String, Object> toJson() => {
     ...modelPath == null ? const <String, Object>{} : {'modelPath': modelPath!},
@@ -419,6 +520,7 @@ class _TrainingPreferences {
     'selectedDeviceIds': selectedDeviceIds,
     'manualDeviceSelection': manualDeviceSelection,
     'chartColors': chartColors.map((k, v) => MapEntry(k, v)),
+    'exportSettings': exportSettings.toJson(),
   };
 
   static _TrainingPreferences fromJson(Object? value) {
@@ -432,6 +534,7 @@ class _TrainingPreferences {
         selectedDeviceIds: ['cpu'],
         manualDeviceSelection: false,
         chartColors: {},
+        exportSettings: _YoloExportSettings(),
       );
     }
     final params = <String, double>{};
@@ -476,6 +579,7 @@ class _TrainingPreferences {
           : _stringListFromJson(value['selectedDeviceIds']),
       manualDeviceSelection: value['manualDeviceSelection'] == true,
       chartColors: _intMapFromJson(value['chartColors']),
+      exportSettings: _YoloExportSettings.fromJson(value['exportSettings']),
     );
   }
 }

@@ -469,7 +469,7 @@ class _LanguageStrings {
     'ai.sam3PromptRequired': '请先输入 SAM3 文本提示词',
     'ai.sam3ClickRequired': '请先在图片上左键添加 SAM3 正点',
     'ai.sam3ClickCurrentOnly': '当前点击提示图片必须在标注范围内',
-    'ai.sam3RuntimeConfig': 'SAM3 低显存配置',
+    'ai.sam3RuntimeConfig': 'SAM3 配置',
     'ai.sam3Precision': '精度',
     'ai.sam3Encoder': '编码器',
     'ai.sam3BatchImage': '图片 batch',
@@ -479,6 +479,7 @@ class _LanguageStrings {
     'ai.sam3MaxHeight': '预缩放高度',
     'ai.sam3ResizeMethod': '缩放方式',
     'ai.sam3ResizeShorterSide': 'shorter_side',
+    'ai.sam3Compile': 'torch.compile',
     'ai.annotating': 'AI 辅助标注中...',
     'ai.done': 'AI 标注完成',
     'ai.failed': 'AI 标注失败',
@@ -527,6 +528,27 @@ class _LanguageStrings {
     'train.batchRatio': '显存比例',
     'train.batchAuto60Help': '将传递 batch=-1，由 Ultralytics 自动选择约 60% CUDA 显存利用率。',
     'train.noGpuDetected': '未检测到 NVIDIA GPU，当前使用 CPU。',
+    'train.exportSettings': '导出设置',
+    'train.exportFormat': '导出类型',
+    'train.exportNow': '手动导出',
+    'train.autoExportAfterTraining': '训练完成后自动导出',
+    'train.exportDone': '导出完成',
+    'train.exportFailed': '导出失败',
+    'train.exportNoModel': '请先选择可导出的模型',
+    'train.exportDataOnlyInt8': '仅 INT8 量化需要 data.yaml',
+    'train.exportDataMissing': 'INT8 量化需要选择 data.yaml；自动导出会使用本次训练的数据集',
+    'train.exportParam.format': '导出格式。目前支持 OpenVINO 和 ONNX；OpenVINO 适合 Intel 推理，ONNX 适合通用部署。',
+    'train.exportParam.imgsz': '导出模型的输入图像尺寸，通常与训练尺寸一致。',
+    'train.exportParam.batch': '导出模型的 batch 大小。需要可变 batch 时可配合 dynamic 使用。',
+    'train.exportParam.quantize': '量化精度。默认 FP32；FP16 可降低体积和显存；INT8 需要校准数据。',
+    'train.exportParam.fraction': 'INT8 校准时使用的数据集比例，范围 0-1，默认使用全部数据。',
+    'train.exportParam.dynamic': '启用动态输入尺寸或 batch，适合可变输入，但可能影响部分推理后端优化。',
+    'train.exportParam.nms': '将 NMS 后处理合入导出模型，方便端侧直接输出过滤后的预测结果。',
+    'train.exportParam.simplify': 'ONNX 导出后简化计算图，通常可减少冗余节点。',
+    'train.exportParam.opset': 'ONNX opset 版本；留空时由 Ultralytics 自动选择。',
+    'train.exportParam.data': 'INT8 量化校准使用的 data.yaml。手动导出需选择；自动导出使用本次训练的数据集。',
+    'train.exportParam.device': 'ONNX 导出或量化使用的设备，例如 cpu 或 GPU 编号 0。',
+    'train.exportParam.autoExport': '训练完成后按当前设置自动导出模型；INT8 自动导出会使用本次训练的 data.yaml。',
     'train.tuningTitle': '调参说明',
     'train.tuningTips':
         '提升 YOLO 训练效果通常先检查数据质量和标注一致性，再调整 imgsz、batch、lr0、momentum 与增强参数。batch 越大梯度越稳定但更占显存；lr0 控制初始学习速度；momentum 控制更新惯性；imgsz 越大越利于小目标但训练更慢。',
@@ -614,9 +636,10 @@ class _LanguageStrings {
     'detect.device': '设备',
     'detect.deviceAuto': '自动',
     'detect.deviceNvUnavailable': '未检测到 NVIDIA 显卡',
+    'detect.deviceIntelUnavailable': '未检测到 Intel OpenVINO 设备',
     'detect.deviceCpu': 'CPU',
     'detect.deviceHelp':
-        '自动会优先使用 NVIDIA CUDA，检测不到或预测失败会回退 CPU，并显示当前自动选择的硬件；中间项显示检测到的 NVIDIA 显卡型号；CPU 只使用处理器。',
+        '自动优先使用 NVIDIA CUDA，其次使用 OpenVINO 导出的 Intel GPU、NPU、CPU 推理模型，最后回退 CPU；OpenVINO 需要选择 *_openvino_model 或 .xml 模型。',
     'detect.pythonNotConfigured': '请先在设置中配置 Python 环境路径',
     'detect.detectDone': '预测完成',
     'detect.saveDone': '保存完成',
@@ -650,6 +673,7 @@ class _LanguageStrings {
     'detect.scaleOriginal': '原始',
     'detect.volumeWheelHint': '鼠标滚轮调节音量',
     'action.reset': '重置',
+    'action.select': '选择',
     'action.close': '关闭',
     'action.save': '保存',
     'action.cancel': '取消',
@@ -897,8 +921,6 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   bool _topMenuVisible = true;
   bool _videoFullscreenVisible = false;
   bool _zoomLocked = false;
-  String _pythonPreloadInFlightPath = '';
-  String _preloadedPythonPath = '';
   double _zoom = 100;
   Offset _labelViewportOffset = Offset.zero;
   int _selectedImageIndex = 0;
@@ -1600,7 +1622,6 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       'Config loaded: recentFolders=${_recentFolders.length}, recentFiles=${_recentFiles.length}, logLevel=${_logLevel.name}',
       level: _LogLevel.debug,
     );
-    _preloadConfiguredPython(settings);
   }
 
   Future<void> _loadAvailableLanguages() async {
@@ -1649,72 +1670,6 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
         ? ThemeMode.dark
         : ThemeMode.light;
     _ConfigStore.saveSettings(nextSettings);
-    _preloadConfiguredPython(nextSettings);
-  }
-
-  void _preloadConfiguredPython(_AppSettings settings) {
-    final configuredPath = settings.pythonPath.trim();
-    if (configuredPath.isEmpty) {
-      return;
-    }
-    final pythonPath = _resolvePythonExecutable(configuredPath);
-    if (pythonPath == null) {
-      _log(
-        'PYTHON',
-        'YOLO Python preload skipped: configured path does not exist: $configuredPath',
-        level: _LogLevel.warning,
-      );
-      return;
-    }
-    if (_pythonPreloadInFlightPath == pythonPath ||
-        _preloadedPythonPath == pythonPath) {
-      return;
-    }
-    if (_pythonPreloadInFlightPath.isNotEmpty) {
-      _log(
-        'PYTHON',
-        'YOLO Python preload already running for $_pythonPreloadInFlightPath',
-        level: _LogLevel.debug,
-      );
-      return;
-    }
-
-    _pythonPreloadInFlightPath = pythonPath;
-    _log(
-      'PYTHON',
-      'YOLO Python preload started from saved settings: $pythonPath',
-      level: _LogLevel.info,
-    );
-    unawaited(
-      _RustVideoBackend.preloadYoloPython(pythonPath: pythonPath)
-          .then((_) {
-            _preloadedPythonPath = pythonPath;
-            _log(
-              'PYTHON',
-              'YOLO Python preload completed: $pythonPath',
-              level: _LogLevel.info,
-            );
-          })
-          .catchError((Object error) {
-            final errorText = error.toString();
-            _log(
-              'PYTHON',
-              'YOLO Python preload failed; SAM3 uses the configured Python executable separately.',
-              level: _LogLevel.warning,
-            );
-            _logMultiline(
-              'PYTHON',
-              errorText,
-              level: _LogLevel.warning,
-              prefix: 'detail: ',
-            );
-          })
-          .whenComplete(() {
-            if (_pythonPreloadInFlightPath == pythonPath) {
-              _pythonPreloadInFlightPath = '';
-            }
-          }),
-    );
   }
 
   void _setZoom(double value) {
@@ -3051,6 +3006,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
         samMaxImageWidth: config.sam3Runtime.maxImageWidth,
         samMaxImageHeight: config.sam3Runtime.maxImageHeight,
         samResizeMethod: config.sam3Runtime.resizeMethod,
+        samCompile: config.sam3Runtime.compile,
       );
       final displaySize = await _computeImageDisplaySize(image.path);
       final annotations = _sam3PreviewAnnotationsFromResult(
@@ -3384,6 +3340,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
           samMaxImageWidth: config.sam3Runtime.maxImageWidth,
           samMaxImageHeight: config.sam3Runtime.maxImageHeight,
           samResizeMethod: config.sam3Runtime.resizeMethod,
+          samCompile: config.sam3Runtime.compile,
         );
         final displaySize = await _computeImageDisplaySize(image.path);
         added += _applyAiAnnotationResult(
@@ -3420,6 +3377,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
           samMaxImageWidth: config.sam3Runtime.maxImageWidth,
           samMaxImageHeight: config.sam3Runtime.maxImageHeight,
           samResizeMethod: config.sam3Runtime.resizeMethod,
+          samCompile: config.sam3Runtime.compile,
         );
         for (final result in results) {
           final imagePath = result.inputPath.isEmpty ? null : result.inputPath;
@@ -6601,6 +6559,7 @@ class _AiSam3RuntimeConfig {
     this.maxImageWidth = 1024,
     this.maxImageHeight = 768,
     this.resizeMethod = 'shorter_side',
+    this.compile = false,
   });
 
   final String precision;
@@ -6611,6 +6570,7 @@ class _AiSam3RuntimeConfig {
   final int maxImageWidth;
   final int maxImageHeight;
   final String resizeMethod;
+  final bool compile;
 
   _AiSam3RuntimeConfig copyWith({
     String? precision,
@@ -6621,6 +6581,7 @@ class _AiSam3RuntimeConfig {
     int? maxImageWidth,
     int? maxImageHeight,
     String? resizeMethod,
+    bool? compile,
   }) {
     return _AiSam3RuntimeConfig(
       precision: precision ?? this.precision,
@@ -6631,11 +6592,12 @@ class _AiSam3RuntimeConfig {
       maxImageWidth: maxImageWidth ?? this.maxImageWidth,
       maxImageHeight: maxImageHeight ?? this.maxImageHeight,
       resizeMethod: resizeMethod ?? this.resizeMethod,
+      compile: compile ?? this.compile,
     );
   }
 
   String get logSummary =>
-      'precision=$precision, encoder=$encoder, batch=image:$imageBatchSize/video:$videoBatchSize/interactive:$interactiveBatchSize, preResize=${maxImageWidth}x$maxImageHeight, resize=$resizeMethod, processor=1008';
+      'precision=$precision, encoder=$encoder, compile=$compile, batch=image:$imageBatchSize/video:$videoBatchSize/interactive:$interactiveBatchSize, preResize=${maxImageWidth}x$maxImageHeight, resize=$resizeMethod, processor=1008';
 }
 
 class _AiAssistConfig {
@@ -7029,14 +6991,36 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
 
   Widget _modelRow({required bool disabled}) {
     final modelPath = _modelPath;
+    final sam3Selected = _backend == _AiAssistBackend.sam3 &&
+        modelPath != null &&
+        modelPath.trim().isNotEmpty;
+    final displayText = sam3Selected ? _fileName(modelPath!) : modelPath;
     return Row(
       children: [
         Expanded(
-          child: Text(
-            modelPath ?? t('ai.noModel'),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
+          child: sam3Selected
+              ? Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        displayText ?? t('ai.noModel'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Icon(
+                      Icons.check_circle,
+                      color: Colors.green,
+                      size: 18,
+                    ),
+                  ],
+                )
+              : Text(
+                  displayText ?? t('ai.noModel'),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
         ),
         const SizedBox(width: 8),
         OutlinedButton.icon(
@@ -7441,6 +7425,7 @@ class _Sam3RuntimeDialogState extends State<_Sam3RuntimeDialog> {
   late String _precision;
   late String _encoder;
   late String _resizeMethod;
+  late bool _compile;
   late final TextEditingController _imageBatchController;
   late final TextEditingController _videoBatchController;
   late final TextEditingController _interactiveBatchController;
@@ -7456,6 +7441,7 @@ class _Sam3RuntimeDialogState extends State<_Sam3RuntimeDialog> {
     _resizeMethod = initial.resizeMethod == 'shorter_side'
         ? initial.resizeMethod
         : 'shorter_side';
+    _compile = initial.compile;
     _imageBatchController = TextEditingController(
       text: initial.imageBatchSize.toString(),
     );
@@ -7499,6 +7485,7 @@ class _Sam3RuntimeDialogState extends State<_Sam3RuntimeDialog> {
         maxImageWidth: _intValue(_maxWidthController, 1024),
         maxImageHeight: _intValue(_maxHeightController, 768),
         resizeMethod: _resizeMethod,
+        compile: _compile,
       ),
     );
   }
@@ -7533,6 +7520,8 @@ class _Sam3RuntimeDialogState extends State<_Sam3RuntimeDialog> {
                 decoration: InputDecoration(labelText: t('ai.sam3Encoder')),
                 items: const [
                   DropdownMenuItem(value: 'vit_b', child: Text('vit_b')),
+                  DropdownMenuItem(value: 'vit_l', child: Text('vit_l')),
+                  DropdownMenuItem(value: 'vit_h', child: Text('vit_h')),
                 ],
                 onChanged: (value) {
                   if (value != null) {
@@ -7556,6 +7545,15 @@ class _Sam3RuntimeDialogState extends State<_Sam3RuntimeDialog> {
                   if (value != null) {
                     setState(() => _resizeMethod = value);
                   }
+                },
+              ),
+              const SizedBox(height: 12),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(t('ai.sam3Compile')),
+                value: _compile,
+                onChanged: (value) {
+                  setState(() => _compile = value);
                 },
               ),
               const SizedBox(height: 12),
