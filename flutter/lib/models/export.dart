@@ -1,3 +1,47 @@
+class DatasetExportConfig {
+  const DatasetExportConfig({
+    required this.skipEmpty,
+    required this.exportImages,
+    required this.trainRatio,
+    required this.valRatio,
+    required this.testRatio,
+    required this.folderName,
+    required this.trainAfterExport,
+  });
+
+  final bool skipEmpty;
+  final bool exportImages;
+  final double trainRatio;
+  final double valRatio;
+  final double testRatio;
+  final String folderName;
+  final bool trainAfterExport;
+}
+
+class DatasetExportResult {
+  const DatasetExportResult({
+    required this.dataYamlPath,
+    required this.outputPath,
+    required this.imageCount,
+    required this.annotationCount,
+    required this.trainCount,
+    required this.valCount,
+    required this.testCount,
+    required this.exportImages,
+    required this.skipEmpty,
+  });
+
+  final String dataYamlPath;
+  final String outputPath;
+  final int imageCount;
+  final int annotationCount;
+  final int trainCount;
+  final int valCount;
+  final int testCount;
+  final bool exportImages;
+  final bool skipEmpty;
+}
+
 class YoloExportSettings {
   const YoloExportSettings({
     this.format = 'openvino',

@@ -2,9 +2,9 @@ part of '../../main.dart';
 
 extension _WorkspaceShellExportActions on _WorkspaceShellState {
   Future<void> _showExportDialog() async {
-    final config = await showDialog<_ExportConfig>(
+    final config = await showDialog<DatasetExportConfig>(
       context: context,
-      builder: (context) => _ExportDialog(exportPath: _appSettings.exportPath),
+      builder: (context) => ExportDialog(exportPath: _appSettings.exportPath),
     );
     if (config == null || !mounted) return;
     final importedDataset = _importedDataset;
@@ -47,7 +47,7 @@ extension _WorkspaceShellExportActions on _WorkspaceShellState {
   }
 
   Future<bool?> _confirmOverwriteImportedDataset() async {
-    return _showOverwriteImportedDatasetDialog(context);
+    return showOverwriteImportedDatasetDialog(context);
   }
 
   Future<Size> _computeImageDisplaySize(String imagePath) async {
@@ -65,12 +65,12 @@ extension _WorkspaceShellExportActions on _WorkspaceShellState {
     return displaySize;
   }
 
-  Future<String?> _exportAnnotations(_ExportConfig config) async {
+  Future<String?> _exportAnnotations(DatasetExportConfig config) async {
     _log(
       'EXPORT',
       'Export started: ${config.folderName} (train=${config.trainRatio.toStringAsFixed(0)}% val=${config.valRatio.toStringAsFixed(0)}% test=${config.testRatio.toStringAsFixed(0)}%)',
     );
-    final result = await _exportAnnotationsToNewDataset(
+    final result = await exportAnnotationsToNewDataset(
       config: config,
       exportRoot: _appSettings.exportPath,
       images: _images,
@@ -99,14 +99,14 @@ extension _WorkspaceShellExportActions on _WorkspaceShellState {
   }
 
   Future<String?> _exportImportedDataset(
-    _ExportConfig config,
+    DatasetExportConfig config,
     ImportedDataset dataset,
   ) async {
     _log(
       'EXPORT',
       'Overwrite imported dataset started: yaml=${dataset.dataYamlPath}',
     );
-    final result = await _overwriteImportedDatasetExport(
+    final result = await overwriteImportedDatasetExport(
       config: config,
       dataset: dataset,
       images: _images,

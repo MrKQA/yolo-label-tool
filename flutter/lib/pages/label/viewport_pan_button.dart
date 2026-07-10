@@ -1,9 +1,13 @@
 // Viewport pan button for the label page image canvas.
 
-part of '../../main.dart';
+import 'dart:async';
 
-class _ViewportPanButton extends StatefulWidget {
-  const _ViewportPanButton({
+import 'package:flutter/material.dart';
+
+import '../../theme/theme_helpers.dart';
+
+class ViewportPanButton extends StatefulWidget {
+  const ViewportPanButton({
     required this.icon,
     required this.tooltip,
     required this.onPressed,
@@ -16,14 +20,14 @@ class _ViewportPanButton extends StatefulWidget {
   final VoidCallback? onRepeat;
 
   @override
-  State<_ViewportPanButton> createState() => _ViewportPanButtonState();
+  State<ViewportPanButton> createState() => _ViewportPanButtonState();
 }
 
-class _ViewportPanButtonState extends State<_ViewportPanButton> {
+class _ViewportPanButtonState extends State<ViewportPanButton> {
   Timer? _repeatTimer;
 
   @override
-  void didUpdateWidget(covariant _ViewportPanButton oldWidget) {
+  void didUpdateWidget(covariant ViewportPanButton oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.onPressed == null) {
       _stopRepeating();
@@ -56,6 +60,7 @@ class _ViewportPanButtonState extends State<_ViewportPanButton> {
   @override
   Widget build(BuildContext context) {
     final enabled = widget.onPressed != null;
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return Tooltip(
       message: widget.tooltip,
       child: SizedBox.square(
@@ -67,12 +72,12 @@ class _ViewportPanButtonState extends State<_ViewportPanButton> {
           onLongPressEnd: (_) => _stopRepeating(),
           onLongPressCancel: _stopRepeating,
           child: Material(
-            color: _controlColor(
-              context,
+            color: appControlColor(
+              dark,
             ).withValues(alpha: enabled ? 0.92 : 0.52),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8),
-              side: BorderSide(color: _borderColor(context)),
+              side: BorderSide(color: appBorderColor(dark)),
             ),
             elevation: enabled ? 3 : 0,
             child: Center(
@@ -80,8 +85,8 @@ class _ViewportPanButtonState extends State<_ViewportPanButton> {
                 widget.icon,
                 size: 22,
                 color: enabled
-                    ? _primaryTextColor(context)
-                    : _primaryTextColor(context).withValues(alpha: 0.32),
+                    ? appTextColor(dark)
+                    : appTextColor(dark).withValues(alpha: 0.32),
               ),
             ),
           ),

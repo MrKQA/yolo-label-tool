@@ -1,10 +1,18 @@
 // AI toolbar for the label page.
 
-part of '../../main.dart';
+import 'package:flutter/material.dart';
+
+import '../../models/annotation.dart';
+import '../../services/i18n.dart';
+import '../../theme/dimensions.dart';
+import '../../theme/theme_helpers.dart';
+import '../../widgets/label/tool_spec.dart';
+import 'annotation_list_panel.dart';
+import 'class_manager.dart';
 
 /// Right-side AI/annotation toolbar with tools and class management.
-class _AiToolbar extends StatelessWidget {
-  const _AiToolbar({
+class AiToolbar extends StatelessWidget {
+  const AiToolbar({
     required this.activeTool,
     required this.activeClassId,
     required this.labelClasses,
@@ -48,26 +56,27 @@ class _AiToolbar extends StatelessWidget {
   final VoidCallback onAiConfigPressed;
 
   static const _tools = [
-    _ToolSpec('select', Icons.near_me_outlined, 'tool.select'),
-    _ToolSpec('ai_config', Icons.auto_awesome, 'label.aiConfig'),
-    _ToolSpec('copy', Icons.copy_outlined, 'tool.copy'),
-    _ToolSpec('paste', Icons.content_paste_outlined, 'tool.paste'),
-    _ToolSpec('undo', Icons.undo, 'tool.undo'),
-    _ToolSpec('redo', Icons.redo, 'tool.redo'),
-    _ToolSpec('delete', Icons.delete_outline, 'tool.delete'),
-    _ToolSpec('export', Icons.file_download_outlined, 'tool.export'),
+    ToolSpec('select', Icons.near_me_outlined, 'tool.select'),
+    ToolSpec('ai_config', Icons.auto_awesome, 'label.aiConfig'),
+    ToolSpec('copy', Icons.copy_outlined, 'tool.copy'),
+    ToolSpec('paste', Icons.content_paste_outlined, 'tool.paste'),
+    ToolSpec('undo', Icons.undo, 'tool.undo'),
+    ToolSpec('redo', Icons.redo, 'tool.redo'),
+    ToolSpec('delete', Icons.delete_outline, 'tool.delete'),
+    ToolSpec('export', Icons.file_download_outlined, 'tool.export'),
   ];
 
   @override
   Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     final showAnnotations =
         selectedAnnotationId != null || activeTool == 'annotations';
     return Container(
-      width: _toolbarWidth,
+      width: toolbarWidth,
       clipBehavior: Clip.hardEdge,
       decoration: BoxDecoration(
-        color: _panelColor(context),
-        border: Border(left: BorderSide(color: _borderColor(context))),
+        color: appPanelColor(dark),
+        border: Border(left: BorderSide(color: appBorderColor(dark))),
       ),
       child: Column(
         children: [
@@ -108,7 +117,7 @@ class _AiToolbar extends StatelessWidget {
           const SizedBox(height: 14),
           if (showAnnotations)
             Expanded(
-              child: _AnnotationListPanel(
+              child: AnnotationListPanel(
                 annotations: annotations,
                 labelClasses: labelClasses,
                 selectedAnnotationId: selectedAnnotationId,
@@ -136,7 +145,7 @@ class _AiToolbar extends StatelessWidget {
               ),
             const Divider(height: 16),
             Expanded(
-              child: _ClassManager(
+              child: ClassManager(
                 activeClassId: activeClassId,
                 labelClasses: labelClasses,
                 showClassLabels: showClassLabels,
@@ -166,19 +175,20 @@ class _ToolButton extends StatelessWidget {
     required this.onPressed,
   });
 
-  final _ToolSpec tool;
+  final ToolSpec tool;
   final bool selected;
   final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final dark = Theme.of(context).brightness == Brightness.dark;
     final background = selected
         ? colorScheme.primaryContainer
-        : _controlColor(context);
+        : appControlColor(dark);
     final foreground = selected
         ? colorScheme.onPrimaryContainer
-        : _primaryTextColor(context);
+        : appTextColor(dark);
 
     return Tooltip(
       message: t(tool.label),
@@ -187,7 +197,7 @@ class _ToolButton extends StatelessWidget {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(6),
           side: BorderSide(
-            color: selected ? colorScheme.primary : _borderColor(context),
+            color: selected ? colorScheme.primary : appBorderColor(dark),
           ),
         ),
         child: InkWell(

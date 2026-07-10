@@ -6,32 +6,31 @@
 // 提供面向查看的 AnnotationConfig.db 表浏览器。所有查询都走 Rust 白名单接口，
 // 不执行用户输入 SQL，避免误删或破坏标注数据。
 
-part of '../main.dart';
+import 'dart:async';
+import 'dart:math' as math;
 
-const _databaseTableSpecs = [
-  _DatabaseTableSpec('projects', Icons.account_tree_outlined),
-  _DatabaseTableSpec('images', Icons.image_outlined),
-  _DatabaseTableSpec('classes', Icons.palette_outlined),
-  _DatabaseTableSpec('annotations', Icons.edit_note),
-  _DatabaseTableSpec('collaboration_permissions', Icons.verified_user_outlined),
-  _DatabaseTableSpec('app_config', Icons.tune_outlined),
-  _DatabaseTableSpec('app_logs', Icons.article_outlined),
-  _DatabaseTableSpec('training_terminal_logs', Icons.terminal),
-];
+import 'package:flutter/material.dart';
+
+import '../services/config_store.dart';
+import '../services/i18n.dart';
+import '../theme/theme_helpers.dart';
+import '../widgets/database/database_detail_widgets.dart';
+import '../widgets/database/database_sidebar.dart';
+import '../widgets/database/database_table_panel.dart';
 
 const _databaseDetailPanelDefaultWidth = 330.0;
 const _databaseDetailPanelMinWidth = 260.0;
 const _databaseDetailPanelMaxWidth = 640.0;
 const _databaseMainTableMinWidth = 520.0;
 
-class _DatabasePage extends StatefulWidget {
-  const _DatabasePage();
+class DatabasePage extends StatefulWidget {
+  const DatabasePage({super.key});
 
   @override
-  State<_DatabasePage> createState() => _DatabasePageState();
+  State<DatabasePage> createState() => _DatabasePageState();
 }
 
-class _DatabasePageState extends State<_DatabasePage> {
+class _DatabasePageState extends State<DatabasePage> {
   final TextEditingController _sqlController = TextEditingController(
     text: 'SELECT * FROM projects LIMIT 100;',
   );
@@ -213,7 +212,7 @@ class _DatabasePageState extends State<_DatabasePage> {
       _activeAction = 'browse';
       _pageIndex = 0;
       if (table != 'training_terminal_logs') {
-        _sqlController.text = _defaultSqlForTable(table);
+        _sqlController.text = defaultSqlForDatabaseTable(table);
       }
       if (table != 'annotations') {
         _annotationImageFilterId = null;
@@ -230,7 +229,7 @@ class _DatabasePageState extends State<_DatabasePage> {
       _trainingLogText = '';
       _sqlStatus = '';
       if (action == 'sql' && _activeTable != 'training_terminal_logs') {
-        _sqlController.text = _defaultSqlForTable(_activeTable);
+        _sqlController.text = defaultSqlForDatabaseTable(_activeTable);
       }
     });
     await _reload();
@@ -315,7 +314,7 @@ class _DatabasePageState extends State<_DatabasePage> {
   Future<void> _deleteVisibleLogRange() async {
     final dates = _rows
         .map((row) => row['date'] ?? row['log_date'] ?? '')
-        .where((date) => _dateFromString(date) != null)
+        .where((date) => databaseDateFromString(date) != null)
         .toSet()
         .toList()
       ..sort();
@@ -323,8 +322,8 @@ class _DatabasePageState extends State<_DatabasePage> {
     if (range == null) {
       return;
     }
-    final startDate = _dateString(range.start);
-    final endDate = _dateString(range.end);
+    final startDate = databaseDateString(range.start);
+    final endDate = databaseDateString(range.end);
     final deleted = _activeTable == 'training_terminal_logs'
         ? await ConfigStore.deleteTrainingLogsByDateRange(startDate, endDate)
         : ConfigStore.deleteLogsByDateRange(startDate, endDate);
@@ -334,7 +333,7 @@ class _DatabasePageState extends State<_DatabasePage> {
 
   Future<DateTimeRange?> _pickDateRange(List<String> dates) async {
     final parsedDates = dates
-        .map(_dateFromString)
+        .map(databaseDateFromString)
         .whereType<DateTime>()
         .toList(growable: false);
     if (parsedDates.isEmpty) {
@@ -410,12 +409,13 @@ class _DatabasePageState extends State<_DatabasePage> {
 
   @override
   Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     final dbPath = '${_overview?['dbPath'] ?? ConfigStore.databaseFile.path}';
     final cleanupText =
         '${t('database.cleanedImages')}: ${_overview?['cleanupDeletedImages'] ?? 0}  '
         '${t('database.cleanedProjects')}: ${_overview?['cleanupDeletedProjects'] ?? 0}';
     return Container(
-      color: _workspaceColor(context),
+      color: appWorkspaceColor(dark),
       padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -493,7 +493,7 @@ class _DatabasePageState extends State<_DatabasePage> {
                       duration: const Duration(milliseconds: 180),
                       curve: Curves.easeOut,
                       width: tableBrowserExpanded ? 260 : 44,
-                      child: _DatabaseExplorerSidebar(
+                      child: DatabaseExplorerSidebar(
                         overview: _overview,
                         activeTable: _activeTable,
                         expanded: tableBrowserExpanded,
@@ -504,7 +504,7 @@ class _DatabasePageState extends State<_DatabasePage> {
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: _DatabaseTablePanel(
+                      child: DatabaseTablePanel(
                         activeAction: _activeAction,
                         activeTable: _activeTable,
                         selectedProjectId: _selectedProjectId,
@@ -554,7 +554,7 @@ class _DatabasePageState extends State<_DatabasePage> {
                     ),
                     if (showDetailPanel) ...[
                       const SizedBox(width: 8),
-                      _DatabaseDetailResizeHandle(
+                      DatabaseDetailResizeHandle(
                         onDrag: (deltaX) => _resizeDetailPanel(
                           deltaX,
                           maxDetailPanelWidth,
@@ -563,7 +563,7 @@ class _DatabasePageState extends State<_DatabasePage> {
                       const SizedBox(width: 8),
                       SizedBox(
                         width: detailPanelWidth,
-                        child: _DatabaseRowDetailPanel(
+                        child: DatabaseRowDetailPanel(
                           activeTable: _activeTable,
                           row: _selectedRow,
                           trainingLogText: _trainingLogText,

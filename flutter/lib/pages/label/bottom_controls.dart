@@ -1,10 +1,14 @@
 // Bottom controls for the label page.
 
-part of '../../main.dart';
+import 'package:flutter/material.dart';
+
+import '../../services/i18n.dart';
+import '../../theme/dimensions.dart';
+import '../../theme/theme_helpers.dart';
 
 /// Bottom annotation controls for zoom, theme, and shortcut settings.
-class _BottomControls extends StatelessWidget {
-  const _BottomControls({
+class BottomControls extends StatelessWidget {
+  const BottomControls({
     required this.zoom,
     required this.zoomLocked,
     required this.darkMode,
@@ -26,11 +30,12 @@ class _BottomControls extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return Container(
-      height: _bottomBarHeight,
+      height: bottomBarHeight,
       decoration: BoxDecoration(
-        color: _panelColor(context),
-        border: Border(top: BorderSide(color: _borderColor(context))),
+        color: appPanelColor(dark),
+        border: Border(top: BorderSide(color: appBorderColor(dark))),
       ),
       child: ListView(
         scrollDirection: Axis.horizontal,
@@ -140,6 +145,7 @@ class _ZoomValue extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return Padding(
       padding: const EdgeInsets.only(right: 10),
       child: SizedBox(
@@ -147,8 +153,8 @@ class _ZoomValue extends StatelessWidget {
         height: 42,
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: _controlColor(context),
-            border: Border.all(color: _borderColor(context)),
+            color: appControlColor(dark),
+            border: Border.all(color: appBorderColor(dark)),
             borderRadius: BorderRadius.circular(6),
           ),
           child: Center(

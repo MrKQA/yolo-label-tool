@@ -2,7 +2,6 @@
 
 part of '../main.dart';
 
-const _videoExtensions = {'mp4', 'avi', 'mov', 'mkv', 'webm', 'wmv', 'flv'};
 const _detectDeviceOptions = ['auto', 'nv', 'intel', 'cpu'];
 const _mediaTypeGroup = XTypeGroup(
   label: 'Image or video',
@@ -66,7 +65,7 @@ class _DetectVideoSession extends ChangeNotifier {
       selectedInput != null && isImagePath(selectedInput!);
 
   bool get selectedInputIsVideo =>
-      selectedInput != null && _isVideoPath(selectedInput!);
+      selectedInput != null && isVideoPath(selectedInput!);
 
   bool get canSaveResult => predictVideo || predictAll || selectedInputIsImage;
 
@@ -188,7 +187,7 @@ class _DetectVideoSession extends ChangeNotifier {
     if (folder == null) {
       return;
     }
-    final items = _mediaFilesInDirectory(folder);
+    final items = mediaFilesInDirectory(folder);
     _log(
       'BROWSE',
       'Media folder selected: $folder, items=${items.length}',
@@ -268,7 +267,7 @@ class _DetectVideoSession extends ChangeNotifier {
     final predictionPreview =
         predictVideo || predictAll || predictionOutputPath != null;
     if (input == null ||
-        !_isVideoPath(input) ||
+        !isVideoPath(input) ||
         (!playVideo && !predictionPreview)) {
       return;
     }
@@ -858,7 +857,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
     _confController = TextEditingController(
       text: _session.detectConf.toStringAsFixed(2),
     );
-    _autoFallbackDeviceLabel = _detectPrimaryProcessorName();
+    _autoFallbackDeviceLabel = detectPrimaryProcessorName();
     unawaited(_loadInferenceDeviceOptions());
     _session.predictAll = false;
     _session.addListener(_handleSessionChanged);
@@ -1054,7 +1053,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
       _showDetectMessage(t('detect.noImageTargets'));
       return;
     }
-    if (!save && targets.any(_isVideoPath)) {
+    if (!save && targets.any(isVideoPath)) {
       _session.playVideo = false;
       _session.predictVideo = true;
       await _session._resetVideoController();
@@ -1080,7 +1079,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
         if (!mounted) {
           return;
         }
-        final isVideo = _isVideoPath(target);
+        final isVideo = isVideoPath(target);
         _session.videoStatus =
             '${t('detect.predicting')} ${completed + 1}/${targets.length}: '
             '${fileName(target)}';
@@ -1255,7 +1254,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
 
   String _detectOutputName(String input, {required bool save}) {
     final stem = baseNameWithoutExtension(input);
-    final extension = _isVideoPath(input) ? (save ? '.mp4' : '.json') : '.jpg';
+    final extension = isVideoPath(input) ? (save ? '.mp4' : '.json') : '.jpg';
     final suffix = save ? 'pred' : 'preview_${_pathHash(input)}';
     return '${stem}_$suffix$extension';
   }
@@ -1310,7 +1309,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
 
   void _requestPredictionSeek(int frameNumber) {
     if (_session.selectedInput == null ||
-        !_isVideoPath(_session.selectedInput!)) {
+        !isVideoPath(_session.selectedInput!)) {
       return;
     }
     final targetFrame = math.max(0, frameNumber);
@@ -1458,7 +1457,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
     if (!switchingToPrediction ||
         hasCachedPrediction ||
         selectedInput == null ||
-        !_isVideoPath(selectedInput) ||
+        !isVideoPath(selectedInput) ||
         _session.predicting) {
       return;
     }
@@ -1490,7 +1489,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
     final key = event.logicalKey;
     final predictionPreviewActive =
         _session.predicting ||
-        _isPredictionManifestPath(_session.predictionOutputPath ?? '');
+        isPredictionManifestPath(_session.predictionOutputPath ?? '');
     if (predictionPreviewActive &&
         (widget.shortcutConfig.matches(ShortcutAction.videoFastForward, key) ||
             widget.shortcutConfig.matches(ShortcutAction.videoRewind, key))) {
@@ -1520,7 +1519,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
     final autoFallbackLabel = _nvidiaDeviceOptions.firstOrNullValue?.label ??
         (hasOpenVinoDevice ? intelDeviceLabel : _autoFallbackDeviceLabel);
     final autoDeviceLabel =
-        '${t('detect.deviceAuto')} | ${_friendlyDeviceLabel(autoFallbackLabel)}';
+        '${t('detect.deviceAuto')} | ${friendlyDeviceLabel(autoFallbackLabel)}';
     return SizedBox.expand(
       child: Row(
         children: [

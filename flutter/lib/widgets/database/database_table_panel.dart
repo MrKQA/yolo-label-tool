@@ -1,7 +1,11 @@
-part of '../../main.dart';
+import 'package:flutter/material.dart';
 
-class _DatabaseTablePanel extends StatefulWidget {
-  const _DatabaseTablePanel({
+import '../../services/i18n.dart';
+import '../../theme/theme_helpers.dart';
+import 'database_detail_widgets.dart';
+
+class DatabaseTablePanel extends StatefulWidget {
+  const DatabaseTablePanel({
     required this.activeAction,
     required this.activeTable,
     required this.selectedProjectId,
@@ -50,10 +54,10 @@ class _DatabaseTablePanel extends StatefulWidget {
   final VoidCallback? onDeleteLogRange;
 
   @override
-  State<_DatabaseTablePanel> createState() => _DatabaseTablePanelState();
+  State<DatabaseTablePanel> createState() => _DatabaseTablePanelState();
 }
 
-class _DatabaseTablePanelState extends State<_DatabaseTablePanel> {
+class _DatabaseTablePanelState extends State<DatabaseTablePanel> {
   final ScrollController _horizontalController = ScrollController();
   final ScrollController _verticalController = ScrollController();
 
@@ -89,14 +93,15 @@ class _DatabaseTablePanelState extends State<_DatabaseTablePanel> {
 
   @override
   Widget build(BuildContext context) {
-    return _DatabasePanel(
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return DatabasePanel(
       child: Column(
         children: [
           _DatabaseActionTabs(
             activeAction: activeAction,
             onActionSelected: onActionSelected,
           ),
-          Divider(height: 1, color: _borderColor(context)),
+          Divider(height: 1, color: appBorderColor(dark)),
           if (activeAction == 'browse')
             _DatabaseBrowseToolbar(
               projects: projects,
@@ -122,7 +127,7 @@ class _DatabaseTablePanelState extends State<_DatabaseTablePanel> {
                       ? Icons.terminal
                       : activeAction == 'structure'
                       ? Icons.schema_outlined
-                      : _tableIcon(activeTable),
+                      : databaseTableIcon(activeTable),
                   size: 20,
                 ),
                 const SizedBox(width: 8),
@@ -142,7 +147,7 @@ class _DatabaseTablePanelState extends State<_DatabaseTablePanel> {
               ],
             ),
           ),
-          Divider(height: 1, color: _borderColor(context)),
+          Divider(height: 1, color: appBorderColor(dark)),
           Expanded(
             child: rows.isEmpty
                 ? Center(child: Text(t('database.noRows')))
@@ -187,7 +192,7 @@ class _DatabaseTablePanelState extends State<_DatabaseTablePanel> {
                                   cells: [
                                     for (final column in columns)
                                       DataCell(
-                                        _DatabaseValueCell(
+                                        DatabaseValueCell(
                                           column: column,
                                           value: rows[index][column] ?? '',
                                         ),
@@ -238,12 +243,13 @@ class _DatabasePaginationBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       height: 46,
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
-        color: _panelColor(context),
-        border: Border(top: BorderSide(color: _borderColor(context))),
+        color: appPanelColor(dark),
+        border: Border(top: BorderSide(color: appBorderColor(dark))),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.end,
@@ -339,6 +345,7 @@ class _DatabaseBrowseToolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     final selected = selectedProjectId != null &&
             projects.any((project) => project['id'] == selectedProjectId)
         ? selectedProjectId
@@ -346,10 +353,10 @@ class _DatabaseBrowseToolbar extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
-        color: _isDarkMode(context)
+        color: dark
             ? const Color(0xFF1B1038)
             : const Color(0xFFF8FAFC),
-        border: Border(bottom: BorderSide(color: _borderColor(context))),
+        border: Border(bottom: BorderSide(color: appBorderColor(dark))),
       ),
       child: Wrap(
         spacing: 8,
@@ -426,13 +433,14 @@ class _DatabaseSqlEditor extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: _isDarkMode(context)
+        color: dark
             ? const Color(0xFF120A25)
             : const Color(0xFFF8FAFC),
-        border: Border(bottom: BorderSide(color: _borderColor(context))),
+        border: Border(bottom: BorderSide(color: appBorderColor(dark))),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

@@ -2176,7 +2176,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                               key: _trainPageKey,
                               settings: _appSettings,
                             ),
-                            _CropPage(exportPath: _appSettings.exportPath),
+                            CropPage(exportPath: _appSettings.exportPath),
                             _CollaborationPage(
                               mode: _collaborationMode,
                               hostId: _collaborationHostId,
@@ -2207,7 +2207,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                               shortcutConfig: _shortcutConfig,
                               session: _detectVideoSession,
                             ),
-                            const _DatabasePage(),
+                            const DatabasePage(),
                           ],
                         ),
                       ),
@@ -2215,7 +2215,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                   ),
                 ),
                 if (labelPage)
-                  _BottomControls(
+                  BottomControls(
                     zoom: _zoom,
                     zoomLocked: _zoomLocked,
                     darkMode: _darkMode,
@@ -2291,14 +2291,14 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                 ),
               ),
             if (_importingDataset)
-              const Positioned.fill(child: _ImportBlockingOverlay()),
+              const Positioned.fill(child: ImportBlockingOverlay()),
             if (_aiAnnotating)
               Positioned.fill(
-                child: _ImportBlockingOverlay(message: t('ai.annotating')),
+                child: ImportBlockingOverlay(message: t('ai.annotating')),
               ),
             if (_collaborationReconnecting)
               Positioned.fill(
-                child: _CollaborationReconnectOverlay(
+                child: CollaborationReconnectOverlay(
                   attempts: _collaborationReconnectAttempts,
                   onCancel: this._cancelCollaborationReconnect,
                 ),

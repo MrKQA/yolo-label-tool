@@ -36,7 +36,7 @@ class _DetectPlaybackSurface extends StatelessWidget {
                         gaplessPlayback: true,
                       ),
                     )
-                  : _isPredictionManifestPath(input)
+                  : isPredictionManifestPath(input)
                   ? _PredictedFrameSequencePanel(
                       manifestPath: input,
                       predicting: session.predicting,

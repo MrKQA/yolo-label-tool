@@ -1588,7 +1588,7 @@ class _TrainPageState extends State<_TrainPage> {
           ),
           if (_datasetLoading)
             Positioned.fill(
-              child: _ImportBlockingOverlay(message: t('train.loadingDataset')),
+              child: ImportBlockingOverlay(message: t('train.loadingDataset')),
             ),
         ],
       ),

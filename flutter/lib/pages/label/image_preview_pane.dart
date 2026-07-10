@@ -1,9 +1,21 @@
 // Image preview pane for the label page.
 
-part of '../../main.dart';
+import 'dart:io';
+import 'dart:math' as math;
 
-class _ImagePreviewPane extends StatefulWidget {
-  const _ImagePreviewPane({
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../../models/annotation.dart';
+import '../../services/i18n.dart';
+import '../../services/path_utils.dart';
+import '../../theme/colors.dart';
+import '../../theme/dimensions.dart';
+import '../../theme/theme_helpers.dart';
+
+class ImagePreviewPane extends StatefulWidget {
+  const ImagePreviewPane({
+    super.key,
     required this.images,
     required this.selectedIndex,
     required this.labelClasses,
@@ -20,10 +32,10 @@ class _ImagePreviewPane extends StatefulWidget {
   final Future<void> Function(TapDownDetails details, int? index) onContextMenu;
 
   @override
-  State<_ImagePreviewPane> createState() => _ImagePreviewPaneState();
+  State<ImagePreviewPane> createState() => _ImagePreviewPaneState();
 }
 
-class _ImagePreviewPaneState extends State<_ImagePreviewPane> {
+class _ImagePreviewPaneState extends State<ImagePreviewPane> {
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _indexController = TextEditingController();
   final TextEditingController _filterController = TextEditingController();
@@ -54,7 +66,7 @@ class _ImagePreviewPaneState extends State<_ImagePreviewPane> {
   }
 
   @override
-  void didUpdateWidget(covariant _ImagePreviewPane oldWidget) {
+  void didUpdateWidget(covariant ImagePreviewPane oldWidget) {
     super.didUpdateWidget(oldWidget);
     _normalizeFilter();
     _syncIndexText();
@@ -416,7 +428,7 @@ class _ImagePreviewPaneState extends State<_ImagePreviewPane> {
 
   double _previewTileExtent(BuildContext context) {
     final previewWidth = (MediaQuery.sizeOf(context).width * 0.22)
-        .clamp(_previewPaneMinWidth, _previewPaneWidth)
+        .clamp(previewPaneMinWidth, previewPaneWidth)
         .toDouble();
     final tileWidth = math.max(80.0, previewWidth - 20);
     final imageHeight = math.max(72.0, (tileWidth - 12) * 0.75);
@@ -425,10 +437,11 @@ class _ImagePreviewPaneState extends State<_ImagePreviewPane> {
 
   @override
   Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     final entries = _filteredEntries();
     final total = entries.length;
     final previewWidth = (MediaQuery.sizeOf(context).width * 0.22)
-        .clamp(_previewPaneMinWidth, _previewPaneWidth)
+        .clamp(previewPaneMinWidth, previewPaneWidth)
         .toDouble();
     final tileExtent = _previewTileExtent(context);
 
@@ -438,8 +451,8 @@ class _ImagePreviewPaneState extends State<_ImagePreviewPane> {
       child: Container(
         width: previewWidth,
         decoration: BoxDecoration(
-          color: _panelColor(context),
-          border: Border(right: BorderSide(color: _borderColor(context))),
+          color: appPanelColor(dark),
+          border: Border(right: BorderSide(color: appBorderColor(dark))),
         ),
         child: Column(
           children: [
@@ -574,6 +587,7 @@ class _PreviewTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final dark = Theme.of(context).brightness == Brightness.dark;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -583,12 +597,12 @@ class _PreviewTile extends StatelessWidget {
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: selected
-                ? (_isDarkMode(context)
-                      ? _darkControlBackground
+                ? (dark
+                      ? appDarkControlBackground
                       : const Color(0xFFEFF6FF))
-                : _panelColor(context),
+                : appPanelColor(dark),
             border: Border.all(
-              color: selected ? colorScheme.primary : _borderColor(context),
+              color: selected ? colorScheme.primary : appBorderColor(dark),
               width: selected ? 2 : 1,
             ),
             borderRadius: BorderRadius.circular(6),

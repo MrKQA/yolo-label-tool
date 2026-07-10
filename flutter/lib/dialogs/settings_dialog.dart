@@ -1,27 +1,41 @@
-// ignore_for_file: file_names
+import 'dart:convert';
+import 'dart:io';
 
-part of '../main.dart';
+import 'package:file_selector/file_selector.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../models/config.dart';
+import '../services/config_store.dart';
+import '../services/i18n.dart';
+import '../services/logger.dart';
+import '../services/python_environment.dart';
 
 /// 设置弹窗，保存 Python 路径、训练输出路径，并显示缓存大小。
 /// Settings dialog for Python path, training output path, and cache size.
-class _SettingsDialog extends StatefulWidget {
-  const _SettingsDialog({
+class SettingsDialog extends StatefulWidget {
+  const SettingsDialog({
+    super.key,
     required this.initialSettings,
     required this.cacheSizeBytes,
     required this.onSave,
     required this.onClearCache,
+    required this.logger,
+    required this.onLogLevelChanged,
   });
 
   final AppSettings initialSettings;
   final int cacheSizeBytes;
   final ValueChanged<AppSettings> onSave;
   final Future<int> Function() onClearCache;
+  final AppLogger logger;
+  final ValueChanged<int> onLogLevelChanged;
 
   @override
-  State<_SettingsDialog> createState() => _SettingsDialogState();
+  State<SettingsDialog> createState() => _SettingsDialogState();
 }
 
-class _SettingsDialogState extends State<_SettingsDialog> {
+class _SettingsDialogState extends State<SettingsDialog> {
   late final TextEditingController _pythonController;
   late final TextEditingController _outputController;
   late final TextEditingController _exportController;
@@ -47,7 +61,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     );
     _lastCheckedPythonPath = _pythonController.text.trim();
     _logLevelIndex = widget.initialSettings.logLevelIndex
-        .clamp(0, _LogLevel.values.length - 1)
+        .clamp(0, AppLogLevel.values.length - 1)
         .toInt();
     _cacheSizeBytes = widget.cacheSizeBytes;
   }
@@ -104,10 +118,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     final generation = ++_pythonCheckGeneration;
     final executable = resolvePythonExecutable(selectedPath);
     if (executable == null) {
-      _log(
+      widget.logger.log(
         'SETTINGS',
         'Python environment check failed: executable not found for $selectedPath',
-        level: _LogLevel.warning,
+        level: AppLogLevel.warning,
       );
       setState(() {
         _lastCheckedPythonPath = selectedPath;
@@ -119,10 +133,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       });
       return;
     }
-    _log(
+    widget.logger.log(
       'SETTINGS',
       'Python environment check started: $executable',
-      level: _LogLevel.debug,
+      level: AppLogLevel.debug,
     );
     if (updateController && _pythonController.text.trim() != executable) {
       _lastCheckedPythonPath = executable;
@@ -141,10 +155,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       _checkingPython = false;
       _pythonCheck = check;
     });
-    _log(
+    widget.logger.log(
       'SETTINGS',
       'Python environment check ${check.valid ? 'passed' : 'failed'}: $executable, ${check.message}',
-      level: check.valid ? _LogLevel.info : _LogLevel.warning,
+      level: check.valid ? AppLogLevel.info : AppLogLevel.warning,
     );
   }
 
@@ -194,7 +208,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         collaborationUserId: widget.initialSettings.collaborationUserId,
       ),
     );
-    _setLogLevel(_logLevelFromIndex(_logLevelIndex), writeLog: true);
+    widget.onLogLevelChanged(_logLevelIndex);
     Navigator.of(context).pop();
   }
 

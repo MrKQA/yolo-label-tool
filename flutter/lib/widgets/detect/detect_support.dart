@@ -1,6 +1,10 @@
-part of '../../main.dart';
+import 'dart:io';
 
-List<String> _mediaFilesInDirectory(String folderPath) {
+import '../../services/path_utils.dart';
+
+const videoExtensions = {'mp4', 'avi', 'mov', 'mkv', 'webm', 'wmv', 'flv'};
+
+List<String> mediaFilesInDirectory(String folderPath) {
   final directory = Directory(folderPath);
   if (!directory.existsSync()) {
     return [];
@@ -10,17 +14,17 @@ List<String> _mediaFilesInDirectory(String folderPath) {
           .listSync()
           .whereType<File>()
           .map((file) => file.path)
-          .where((path) => isImagePath(path) || _isVideoPath(path))
+          .where((path) => isImagePath(path) || isVideoPath(path))
           .toList()
         ..sort(naturalPathCompare);
   return files;
 }
 
-String _friendlyDeviceLabel(String label) {
+String friendlyDeviceLabel(String label) {
   return label.replaceFirst(RegExp(r'^GPU\s+\d+\s+-\s+'), '').trim();
 }
 
-String _detectPrimaryProcessorName() {
+String detectPrimaryProcessorName() {
   final identifier = Platform.environment['PROCESSOR_IDENTIFIER']?.trim();
   if (identifier != null && identifier.isNotEmpty) {
     return identifier;
@@ -32,14 +36,14 @@ String _detectPrimaryProcessorName() {
   return 'CPU';
 }
 
-bool _isVideoPath(String path) {
+bool isVideoPath(String path) {
   final dotIndex = path.lastIndexOf('.');
   if (dotIndex < 0 || dotIndex == path.length - 1) {
     return false;
   }
-  return _videoExtensions.contains(path.substring(dotIndex + 1).toLowerCase());
+  return videoExtensions.contains(path.substring(dotIndex + 1).toLowerCase());
 }
 
-bool _isPredictionManifestPath(String path) {
+bool isPredictionManifestPath(String path) {
   return path.toLowerCase().endsWith('.json') && File(path).existsSync();
 }

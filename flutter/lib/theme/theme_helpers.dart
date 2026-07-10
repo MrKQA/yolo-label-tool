@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import 'colors.dart';
 
+const appFontFamily = 'Microsoft YaHei';
+
 Color appPanelColor(bool dark) => dark ? appDarkPanelBackground : Colors.white;
 
 Color appControlColor(bool dark) =>

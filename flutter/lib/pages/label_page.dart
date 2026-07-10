@@ -122,7 +122,7 @@ class _LabelPage extends StatelessWidget {
     return SizedBox.expand(
       child: Row(
         children: [
-          _ImagePreviewPane(
+          ImagePreviewPane(
             images: images,
             selectedIndex: selectedImageIndex,
             labelClasses: labelClasses,
@@ -167,7 +167,7 @@ class _LabelPage extends StatelessWidget {
             ),
           ),
           RepaintBoundary(
-            child: _AiToolbar(
+            child: AiToolbar(
               activeTool: activeTool,
               activeClassId: activeClassId,
               labelClasses: labelClasses,
@@ -279,7 +279,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
   String? _loadedImagePath;
   List<Offset> _segDraftPoints = [];
   int? _hoveredCornerIndex;
-  _SegVertexHandle? _hoveredSegVertex;
+  SegVertexHandle? _hoveredSegVertex;
   ui.Image? _decodedImage;
 
   double get _scale => widget.zoom / 100;
@@ -388,7 +388,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     }
   }
 
-  Future<_SampledImage?> _decodeSampleImage(Uint8List bytes) async {
+  Future<SampledImage?> _decodeSampleImage(Uint8List bytes) async {
     try {
       final codec = await ui.instantiateImageCodec(bytes, targetWidth: 64);
       final frame = await codec.getNextFrame();
@@ -400,7 +400,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
         image.dispose();
         return null;
       }
-      return _SampledImage(
+      return SampledImage(
         image: image,
         size: Size(image.width.toDouble(), image.height.toDouble()),
         bytes: byteData.buffer.asUint8List(),
@@ -803,7 +803,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     return false;
   }
 
-  _ResizeHandle? _resizeHandleAt(Offset point) {
+  ResizeHandle? _resizeHandleAt(Offset point) {
     final selected = _selectedAnnotation();
     if (selected == null || selected.mode == AnnotationMode.seg) {
       return null;
@@ -814,13 +814,13 @@ class _ImageCanvasState extends State<_ImageCanvas> {
         : rectToPoints(canvasRect);
     for (var index = 0; index < corners.length; index++) {
       if ((corners[index] - point).distance <= 8 / _scale) {
-        return _ResizeHandle(selected.id, index);
+        return ResizeHandle(selected.id, index);
       }
     }
     return null;
   }
 
-  _SegVertexHandle? _segVertexHandleAt(Offset point) {
+  SegVertexHandle? _segVertexHandleAt(Offset point) {
     final imagePoint = _toImagePoint(point);
     final selected = _selectedAnnotation();
     final candidates = <AnnotationRegion>[
@@ -836,7 +836,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
           : rectToPoints(annotation.rect);
       for (var index = points.length - 1; index >= 0; index--) {
         if ((points[index] - imagePoint).distance <= 8 / _scale) {
-          return _SegVertexHandle(annotation.id, index);
+          return SegVertexHandle(annotation.id, index);
         }
       }
     }
@@ -1279,11 +1279,11 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     }
     return Shortcuts(
       shortcuts: const {
-        SingleActivator(LogicalKeyboardKey.escape): _CancelDraftIntent(),
+        SingleActivator(LogicalKeyboardKey.escape): CancelDraftIntent(),
       },
       child: Actions(
         actions: {
-          _CancelDraftIntent: CallbackAction<_CancelDraftIntent>(
+          CancelDraftIntent: CallbackAction<CancelDraftIntent>(
             onInvoke: (_) {
               if (!_handleEscape()) {
                 widget.onAnnotationSelected(null);
@@ -1335,7 +1335,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
                         fit: StackFit.expand,
                         children: [
                           CustomPaint(
-                            painter: _CanvasGridPainter(_isDarkMode(context)),
+                            painter: CanvasGridPainter(_isDarkMode(context)),
                           ),
                           if (widget.image == null)
                             Center(
@@ -1416,7 +1416,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            _ViewportPanButton(
+                            ViewportPanButton(
                               icon: Icons.keyboard_arrow_left,
                               tooltip: t('viewport.panLeft'),
                               onPressed: canPanHorizontally
@@ -1430,7 +1430,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
                                   : null,
                             ),
                             const SizedBox(width: 8),
-                            _ViewportPanButton(
+                            ViewportPanButton(
                               icon: Icons.keyboard_arrow_right,
                               tooltip: t('viewport.panRight'),
                               onPressed: canPanHorizontally
@@ -1454,7 +1454,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            _ViewportPanButton(
+                            ViewportPanButton(
                               icon: Icons.keyboard_arrow_up,
                               tooltip: t('viewport.panUp'),
                               onPressed: canPanVertically
@@ -1468,7 +1468,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
                                   : null,
                             ),
                             const SizedBox(height: 8),
-                            _ViewportPanButton(
+                            ViewportPanButton(
                               icon: Icons.keyboard_arrow_down,
                               tooltip: t('viewport.panDown'),
                               onPressed: canPanVertically

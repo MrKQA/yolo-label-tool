@@ -1,7 +1,7 @@
-part of '../../main.dart';
+import 'package:flutter/material.dart';
 
-class _CanvasGridPainter extends CustomPainter {
-  const _CanvasGridPainter(this.darkMode);
+class CanvasGridPainter extends CustomPainter {
+  const CanvasGridPainter(this.darkMode);
 
   final bool darkMode;
 
@@ -21,6 +21,6 @@ class _CanvasGridPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _CanvasGridPainter oldDelegate) =>
+  bool shouldRepaint(covariant CanvasGridPainter oldDelegate) =>
       oldDelegate.darkMode != darkMode;
 }

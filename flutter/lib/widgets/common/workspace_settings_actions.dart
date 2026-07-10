@@ -68,11 +68,16 @@ extension _WorkspaceShellSettingsActions on _WorkspaceShellState {
   Future<void> _showSettings() async {
     await showDialog<void>(
       context: context,
-      builder: (context) => _SettingsDialog(
+      builder: (context) => SettingsDialog(
         initialSettings: _appSettings,
         cacheSizeBytes: ConfigStore.cacheSizeInBytes(),
         onSave: _saveAppSettings,
         onClearCache: _clearCacheData,
+        logger: _appLogger,
+        onLogLevelChanged: (index) => _setLogLevel(
+          _logLevelFromIndex(index),
+          writeLog: true,
+        ),
       ),
     );
     if (mounted) {
@@ -89,9 +94,10 @@ extension _WorkspaceShellSettingsActions on _WorkspaceShellState {
 
   Future<void> _showLogViewerDialog() async {
     if (!mounted) return;
-    await _showLogViewerDialogForContext(
+    await showLogViewerDialogForContext(
       context: context,
       onMessage: _showFloatingMessage,
+      flushLogs: _flushLogs,
     );
     if (mounted) {
       _keyboardFocusNode.requestFocus();

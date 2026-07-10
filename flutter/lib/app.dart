@@ -17,7 +17,7 @@ class YoloLabelApp extends StatelessWidget {
               themeMode: themeMode,
               theme: ThemeData(
                 colorScheme: ColorScheme.fromSeed(seedColor: _brandColor),
-                fontFamily: _fontFamily,
+                fontFamily: theme_helpers.appFontFamily,
                 scaffoldBackgroundColor: _workspaceBackground,
                 useMaterial3: true,
               ),
@@ -27,13 +27,13 @@ class YoloLabelApp extends StatelessWidget {
                   brightness: Brightness.dark,
                 ),
                 brightness: Brightness.dark,
-                fontFamily: _fontFamily,
+                fontFamily: theme_helpers.appFontFamily,
                 scaffoldBackgroundColor: _darkAppBackground,
                 dialogTheme: const DialogThemeData(
                   backgroundColor: _darkPanelBackground,
                   titleTextStyle: TextStyle(
                     color: _darkTextColor,
-                    fontFamily: _fontFamily,
+                    fontFamily: theme_helpers.appFontFamily,
                     fontSize: 20,
                     fontWeight: FontWeight.w600,
                   ),

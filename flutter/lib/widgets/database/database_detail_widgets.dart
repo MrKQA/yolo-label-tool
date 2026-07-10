@@ -1,7 +1,25 @@
-part of '../../main.dart';
+import 'package:flutter/material.dart';
 
-class _DatabaseRowDetailPanel extends StatelessWidget {
-  const _DatabaseRowDetailPanel({
+import '../../services/i18n.dart';
+import '../../theme/colors.dart';
+import '../../theme/theme_helpers.dart';
+
+const databaseTableSpecs = [
+  DatabaseTableSpec('projects', Icons.account_tree_outlined),
+  DatabaseTableSpec('images', Icons.image_outlined),
+  DatabaseTableSpec('classes', Icons.palette_outlined),
+  DatabaseTableSpec('annotations', Icons.edit_note),
+  DatabaseTableSpec(
+    'collaboration_permissions',
+    Icons.verified_user_outlined,
+  ),
+  DatabaseTableSpec('app_config', Icons.tune_outlined),
+  DatabaseTableSpec('app_logs', Icons.article_outlined),
+  DatabaseTableSpec('training_terminal_logs', Icons.terminal),
+];
+
+class DatabaseRowDetailPanel extends StatelessWidget {
+  const DatabaseRowDetailPanel({
     required this.activeTable,
     required this.row,
     required this.trainingLogText,
@@ -14,7 +32,8 @@ class _DatabaseRowDetailPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final row = this.row;
-    return _DatabasePanel(
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return DatabasePanel(
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: row == null
@@ -37,10 +56,10 @@ class _DatabaseRowDetailPanel extends StatelessWidget {
                     const SizedBox(height: 8),
                     DecoratedBox(
                       decoration: BoxDecoration(
-                        color: _isDarkMode(context)
+                        color: dark
                             ? const Color(0xFF120A25)
                             : const Color(0xFFF8FAFC),
-                        border: Border.all(color: _borderColor(context)),
+                        border: Border.all(color: appBorderColor(dark)),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Padding(
@@ -65,14 +84,15 @@ class _DatabaseRowDetailPanel extends StatelessWidget {
   }
 }
 
-class _DatabaseDetailResizeHandle extends StatelessWidget {
-  const _DatabaseDetailResizeHandle({required this.onDrag});
+class DatabaseDetailResizeHandle extends StatelessWidget {
+  const DatabaseDetailResizeHandle({required this.onDrag});
 
   final ValueChanged<double> onDrag;
 
   @override
   Widget build(BuildContext context) {
-    final color = _borderColor(context);
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final color = appBorderColor(dark);
     return MouseRegion(
       cursor: SystemMouseCursors.resizeLeftRight,
       child: GestureDetector(
@@ -85,7 +105,7 @@ class _DatabaseDetailResizeHandle extends StatelessWidget {
               width: 3,
               margin: const EdgeInsets.symmetric(vertical: 12),
               decoration: BoxDecoration(
-                color: color.withValues(alpha: _isDarkMode(context) ? 0.9 : 1),
+                color: color.withValues(alpha: dark ? 0.9 : 1),
                 borderRadius: BorderRadius.circular(999),
               ),
             ),
@@ -96,8 +116,8 @@ class _DatabaseDetailResizeHandle extends StatelessWidget {
   }
 }
 
-class _DatabaseValueCell extends StatelessWidget {
-  const _DatabaseValueCell({required this.column, required this.value});
+class DatabaseValueCell extends StatelessWidget {
+  const DatabaseValueCell({required this.column, required this.value});
 
   final String column;
   final String value;
@@ -105,6 +125,7 @@ class _DatabaseValueCell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = column == 'color_hex' ? _colorFromHex(value) : null;
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return ConstrainedBox(
       constraints: const BoxConstraints(minWidth: 90, maxWidth: 220),
       child: Row(
@@ -116,7 +137,7 @@ class _DatabaseValueCell extends StatelessWidget {
               height: 16,
               decoration: BoxDecoration(
                 color: color,
-                border: Border.all(color: _borderColor(context)),
+                border: Border.all(color: appBorderColor(dark)),
                 borderRadius: BorderRadius.circular(3),
               ),
             ),
@@ -136,8 +157,8 @@ class _DatabaseValueCell extends StatelessWidget {
   }
 }
 
-class _DatabaseTreeButton extends StatelessWidget {
-  const _DatabaseTreeButton({
+class DatabaseTreeButton extends StatelessWidget {
+  const DatabaseTreeButton({
     required this.icon,
     required this.label,
     required this.trailing,
@@ -156,12 +177,13 @@ class _DatabaseTreeButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final dark = Theme.of(context).brightness == Brightness.dark;
     final foreground = selected
         ? colorScheme.primary
         : Theme.of(context).colorScheme.onSurface;
     final background = selected
-        ? (_isDarkMode(context)
-              ? _darkControlBackground
+        ? (dark
+              ? appDarkControlBackground
               : const Color(0xFFEFF6FF))
         : Colors.transparent;
     return Padding(
@@ -245,17 +267,18 @@ class _DatabaseInfoRow extends StatelessWidget {
   }
 }
 
-class _DatabasePanel extends StatelessWidget {
-  const _DatabasePanel({required this.child});
+class DatabasePanel extends StatelessWidget {
+  const DatabasePanel({required this.child});
 
   final Widget child;
 
   @override
   Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: _panelColor(context),
-        border: Border.all(color: _borderColor(context)),
+        color: appPanelColor(dark),
+        border: Border.all(color: appBorderColor(dark)),
         borderRadius: BorderRadius.circular(6),
       ),
       child: child,
@@ -263,21 +286,23 @@ class _DatabasePanel extends StatelessWidget {
   }
 }
 
-class _DatabaseTableSpec {
-  const _DatabaseTableSpec(this.name, this.icon);
+class DatabaseTableSpec {
+  const DatabaseTableSpec(this.name, this.icon);
 
   final String name;
   final IconData icon;
 }
 
-IconData _tableIcon(String table) {
-  return _databaseTableSpecs
-      .where((spec) => spec.name == table)
-      .map((spec) => spec.icon)
-      .firstOrNullValue ?? Icons.table_chart_outlined;
+IconData databaseTableIcon(String table) {
+  for (final spec in databaseTableSpecs) {
+    if (spec.name == table) {
+      return spec.icon;
+    }
+  }
+  return Icons.table_chart_outlined;
 }
 
-String _defaultSqlForTable(String table) {
+String defaultSqlForDatabaseTable(String table) {
   if (table == 'training_terminal_logs') {
     return '-- ${t('database.virtualTable')}\nSELECT * FROM projects LIMIT 100;';
   }
@@ -296,7 +321,7 @@ Color? _colorFromHex(String value) {
   return Color(0xFF000000 | rgb);
 }
 
-DateTime? _dateFromString(String value) {
+DateTime? databaseDateFromString(String value) {
   final parts = value.split('-');
   if (parts.length != 3) {
     return null;
@@ -310,7 +335,7 @@ DateTime? _dateFromString(String value) {
   return DateTime(year, month, day);
 }
 
-String _dateString(DateTime date) {
+String databaseDateString(DateTime date) {
   final year = date.year.toString().padLeft(4, '0');
   final month = date.month.toString().padLeft(2, '0');
   final day = date.day.toString().padLeft(2, '0');

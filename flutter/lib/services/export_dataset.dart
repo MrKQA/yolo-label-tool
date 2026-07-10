@@ -1,4 +1,11 @@
-part of '../main.dart';
+import 'dart:io';
+import 'dart:ui' show Size;
+
+import '../models/annotation.dart';
+import '../models/export.dart';
+import '../models/imported_dataset.dart';
+import 'import_dataset.dart';
+import 'path_utils.dart';
 
 class _ExportEntry {
   const _ExportEntry(this.path, this.annotations);
@@ -7,32 +14,8 @@ class _ExportEntry {
   final List<AnnotationRegion> annotations;
 }
 
-class _DatasetExportResult {
-  const _DatasetExportResult({
-    required this.dataYamlPath,
-    required this.outputPath,
-    required this.imageCount,
-    required this.annotationCount,
-    required this.trainCount,
-    required this.valCount,
-    required this.testCount,
-    required this.exportImages,
-    required this.skipEmpty,
-  });
-
-  final String dataYamlPath;
-  final String outputPath;
-  final int imageCount;
-  final int annotationCount;
-  final int trainCount;
-  final int valCount;
-  final int testCount;
-  final bool exportImages;
-  final bool skipEmpty;
-}
-
-Future<_DatasetExportResult?> _exportAnnotationsToNewDataset({
-  required _ExportConfig config,
+Future<DatasetExportResult?> exportAnnotationsToNewDataset({
+  required DatasetExportConfig config,
   required String exportRoot,
   required List<ImageItem> images,
   required List<LabelClass> labelClasses,
@@ -115,7 +98,7 @@ Future<_DatasetExportResult?> _exportAnnotationsToNewDataset({
     );
   }
 
-  return _DatasetExportResult(
+  return DatasetExportResult(
     dataYamlPath: dataYamlPath,
     outputPath: baseDir.path,
     imageCount: entries.length,
@@ -128,8 +111,8 @@ Future<_DatasetExportResult?> _exportAnnotationsToNewDataset({
   );
 }
 
-Future<_DatasetExportResult?> _overwriteImportedDatasetExport({
-  required _ExportConfig config,
+Future<DatasetExportResult?> overwriteImportedDatasetExport({
+  required DatasetExportConfig config,
   required ImportedDataset dataset,
   required List<ImageItem> images,
   required List<LabelClass> labelClasses,
@@ -184,7 +167,7 @@ Future<_DatasetExportResult?> _overwriteImportedDatasetExport({
     '${datasetYamlContent(dataset, grouped, labelClasses)}\n',
   );
 
-  return _DatasetExportResult(
+  return DatasetExportResult(
     dataYamlPath: dataset.dataYamlPath,
     outputPath: dataset.rootPath,
     imageCount: entries.length,
@@ -222,7 +205,7 @@ class _ExportSplitPlan {
 
 _ExportSplitPlan _buildClassBalancedExportSplit(
   List<_ExportEntry> entries,
-  _ExportConfig config,
+  DatasetExportConfig config,
 ) {
   final assigned = <String>{};
   final trainSet = <String>{};

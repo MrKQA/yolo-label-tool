@@ -1,9 +1,14 @@
 // Annotation list panel for the label page.
 
-part of '../../main.dart';
+import 'package:flutter/material.dart';
 
-class _AnnotationListPanel extends StatelessWidget {
-  const _AnnotationListPanel({
+import '../../models/annotation.dart';
+import '../../services/collection_utils.dart';
+import '../../services/i18n.dart';
+import '../../theme/theme_helpers.dart';
+
+class AnnotationListPanel extends StatelessWidget {
+  const AnnotationListPanel({
     required this.annotations,
     required this.labelClasses,
     required this.selectedAnnotationId,
@@ -20,6 +25,7 @@ class _AnnotationListPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     if (annotations.isEmpty) {
       return Center(child: Text(t('label.noAnnotations')));
     }
@@ -41,15 +47,15 @@ class _AnnotationListPanel extends StatelessWidget {
             : Color(annotation.authorColorValue);
         final selectedBorderColor = selected
             ? (authorColor ?? Theme.of(context).colorScheme.primary)
-            : _borderColor(context);
+            : appBorderColor(dark);
         final selectedBackgroundColor = selected && authorColor != null
-            ? authorColor.withValues(alpha: _isDarkMode(context) ? 0.24 : 0.14)
+            ? authorColor.withValues(alpha: dark ? 0.24 : 0.14)
             : Theme.of(context).colorScheme.primaryContainer;
         return Tooltip(
           waitDuration: const Duration(milliseconds: 350),
           message: _annotationCoordinateTooltip(annotation),
           child: Material(
-            color: selected ? selectedBackgroundColor : _controlColor(context),
+            color: selected ? selectedBackgroundColor : appControlColor(dark),
             borderRadius: BorderRadius.circular(6),
             child: InkWell(
               onTap: () => onAnnotationSelected(annotation.id),

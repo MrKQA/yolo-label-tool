@@ -1,7 +1,7 @@
-part of '../../main.dart';
+import 'package:flutter/widgets.dart';
 
-class _ToolSpec {
-  const _ToolSpec(this.id, this.icon, this.label);
+class ToolSpec {
+  const ToolSpec(this.id, this.icon, this.label);
 
   final String id;
   final IconData icon;

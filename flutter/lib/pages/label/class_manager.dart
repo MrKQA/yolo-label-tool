@@ -1,9 +1,13 @@
 // Class manager for the label page.
 
-part of '../../main.dart';
+import 'package:flutter/material.dart';
 
-class _ClassManager extends StatelessWidget {
-  const _ClassManager({
+import '../../models/annotation.dart';
+import '../../services/i18n.dart';
+import '../../theme/theme_helpers.dart';
+
+class ClassManager extends StatelessWidget {
+  const ClassManager({
     required this.activeClassId,
     required this.labelClasses,
     required this.showClassLabels,
@@ -128,10 +132,11 @@ class _ClassTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Material(
-        color: selected ? colorScheme.primaryContainer : _controlColor(context),
+        color: selected ? colorScheme.primaryContainer : appControlColor(dark),
         borderRadius: BorderRadius.circular(6),
         child: InkWell(
           onTap: onSelected,
@@ -140,7 +145,7 @@ class _ClassTile extends StatelessWidget {
             height: 44,
             decoration: BoxDecoration(
               border: Border.all(
-                color: selected ? colorScheme.primary : _borderColor(context),
+                color: selected ? colorScheme.primary : appBorderColor(dark),
               ),
               borderRadius: BorderRadius.circular(6),
             ),

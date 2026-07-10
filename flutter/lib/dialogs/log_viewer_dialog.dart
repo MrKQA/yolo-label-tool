@@ -1,12 +1,16 @@
-part of '../main.dart';
+import 'package:flutter/material.dart';
 
-Future<void> _showLogViewerDialogForContext({
+import '../services/config_store.dart';
+import '../services/i18n.dart';
+
+Future<void> showLogViewerDialogForContext({
   required BuildContext context,
   required ValueChanged<String> onMessage,
+  required VoidCallback flushLogs,
 }) async {
   String dateKey(DateTime value) => value.toIso8601String().substring(0, 10);
 
-  _flushLogs();
+  flushLogs();
   var dates = ConfigStore.logDates();
   String? selectedDate = dates.isEmpty ? null : dates.first;
   String logText = selectedDate == null
@@ -154,7 +158,7 @@ Future<void> _showLogViewerDialogForContext({
                       child: Container(
                         width: double.infinity,
                         padding: const EdgeInsets.all(12),
-                        color: _isDarkMode(context)
+                        color: Theme.of(context).brightness == Brightness.dark
                             ? const Color(0xFF090515)
                             : Colors.black,
                         child: Scrollbar(

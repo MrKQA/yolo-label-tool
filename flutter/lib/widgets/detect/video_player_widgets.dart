@@ -303,7 +303,7 @@ class _VideoPlayerShellState extends State<_VideoPlayerShell> {
 
   Future<void> _sampleShortcutHudColor() async {
     final input = widget.session.selectedInput;
-    if (input == null || !_isVideoPath(input)) {
+    if (input == null || !isVideoPath(input)) {
       return;
     }
     final serial = ++_shortcutHudColorSerial;

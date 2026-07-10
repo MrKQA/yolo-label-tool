@@ -1,7 +1,10 @@
-part of '../../main.dart';
+import 'package:flutter/material.dart';
 
-class _ImportBlockingOverlay extends StatelessWidget {
-  const _ImportBlockingOverlay({this.message});
+import '../../services/i18n.dart';
+import '../../theme/theme_helpers.dart';
+
+class ImportBlockingOverlay extends StatelessWidget {
+  const ImportBlockingOverlay({this.message});
 
   final String? message;
 
@@ -30,7 +33,7 @@ class _ImportBlockingOverlay extends StatelessWidget {
                       fontSize: 18,
                       fontWeight: FontWeight.w600,
                       color: Color(0xFF111827),
-                      fontFamily: _fontFamily,
+                      fontFamily: appFontFamily,
                     ),
                   ),
                 ],
@@ -43,8 +46,8 @@ class _ImportBlockingOverlay extends StatelessWidget {
   }
 }
 
-class _CollaborationReconnectOverlay extends StatelessWidget {
-  const _CollaborationReconnectOverlay({
+class CollaborationReconnectOverlay extends StatelessWidget {
+  const CollaborationReconnectOverlay({
     required this.attempts,
     required this.onCancel,
   });
@@ -54,6 +57,7 @@ class _CollaborationReconnectOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -64,8 +68,8 @@ class _CollaborationReconnectOverlay extends StatelessWidget {
         Center(
           child: DecoratedBox(
             decoration: BoxDecoration(
-              color: _panelColor(context),
-              border: Border.all(color: _borderColor(context)),
+              color: appPanelColor(dark),
+              border: Border.all(color: appBorderColor(dark)),
               borderRadius: BorderRadius.circular(8),
               boxShadow: [
                 BoxShadow(

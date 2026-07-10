@@ -1,7 +1,11 @@
-part of '../../main.dart';
+import 'package:flutter/material.dart';
 
-class _DatabaseExplorerSidebar extends StatelessWidget {
-  const _DatabaseExplorerSidebar({
+import '../../services/i18n.dart';
+import '../../theme/theme_helpers.dart';
+import 'database_detail_widgets.dart';
+
+class DatabaseExplorerSidebar extends StatelessWidget {
+  const DatabaseExplorerSidebar({
     required this.overview,
     required this.activeTable,
     required this.expanded,
@@ -26,7 +30,8 @@ class _DatabaseExplorerSidebar extends StatelessWidget {
         tableCounts['${table['name'] ?? ''}'] = '${table['rows'] ?? 0}';
       }
     }
-    return _DatabasePanel(
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return DatabasePanel(
       child: Column(
         children: [
           SizedBox(
@@ -55,13 +60,13 @@ class _DatabaseExplorerSidebar extends StatelessWidget {
               ],
             ),
           ),
-          Divider(height: 1, color: _borderColor(context)),
+          Divider(height: 1, color: appBorderColor(dark)),
           Expanded(
             child: ListView(
               padding: EdgeInsets.all(expanded ? 10 : 4),
               children: [
-                for (final spec in _databaseTableSpecs)
-                  _DatabaseTreeButton(
+                for (final spec in databaseTableSpecs)
+                  DatabaseTreeButton(
                     icon: spec.icon,
                     label: t('database.table.${spec.name}'),
                     trailing: tableCounts[spec.name] ?? '',

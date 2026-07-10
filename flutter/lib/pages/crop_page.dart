@@ -7,25 +7,33 @@
 // 通过 FFmpeg 批量提取视频帧：硬件解码、进度跟踪、可配置输出格式与画质。
 // =============================================================================
 
-// ignore_for_file: file_names
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:math' as math;
 
-part of '../main.dart';
+import 'package:file_selector/file_selector.dart';
+import 'package:flutter/material.dart';
+
+import '../services/i18n.dart';
+import '../services/path_utils.dart';
+import '../theme/theme_helpers.dart';
 
 const _videoTypeGroup = XTypeGroup(
   label: 'Video',
   extensions: ['mp4', 'avi', 'mov', 'mkv', 'wmv', 'flv', 'webm'],
 );
 
-class _CropPage extends StatefulWidget {
-  const _CropPage({required this.exportPath});
+class CropPage extends StatefulWidget {
+  const CropPage({super.key, required this.exportPath});
 
   final String exportPath;
 
   @override
-  State<_CropPage> createState() => _CropPageState();
+  State<CropPage> createState() => _CropPageState();
 }
 
-class _CropPageState extends State<_CropPage> {
+class _CropPageState extends State<CropPage> {
   final List<XFile> _videos = [];
   final _folderNameController = TextEditingController(text: 'frames');
   int _frameInterval = 0;
@@ -343,9 +351,10 @@ class _CropPageState extends State<_CropPage> {
   @override
   Widget build(BuildContext context) {
     final hasVideos = _videos.isNotEmpty;
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return SizedBox.expand(
       child: Container(
-        color: _workspaceColor(context),
+        color: appWorkspaceColor(dark),
         padding: const EdgeInsets.all(32),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

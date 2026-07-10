@@ -8,11 +8,13 @@
 // data.yaml 生成。
 // =============================================================================
 
-// ignore_for_file: file_names
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
-part of '../main.dart';
+import '../models/export.dart';
+import '../services/i18n.dart';
 
-Future<bool?> _showOverwriteImportedDatasetDialog(BuildContext context) {
+Future<bool?> showOverwriteImportedDatasetDialog(BuildContext context) {
   return showDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
@@ -36,36 +38,16 @@ Future<bool?> _showOverwriteImportedDatasetDialog(BuildContext context) {
   );
 }
 
-class _ExportConfig {
-  const _ExportConfig({
-    required this.skipEmpty,
-    required this.exportImages,
-    required this.trainRatio,
-    required this.valRatio,
-    required this.testRatio,
-    required this.folderName,
-    required this.trainAfterExport,
-  });
-
-  final bool skipEmpty;
-  final bool exportImages;
-  final double trainRatio;
-  final double valRatio;
-  final double testRatio;
-  final String folderName;
-  final bool trainAfterExport;
-}
-
-class _ExportDialog extends StatefulWidget {
-  const _ExportDialog({required this.exportPath});
+class ExportDialog extends StatefulWidget {
+  const ExportDialog({super.key, required this.exportPath});
 
   final String exportPath;
 
   @override
-  State<_ExportDialog> createState() => _ExportDialogState();
+  State<ExportDialog> createState() => _ExportDialogState();
 }
 
-class _ExportDialogState extends State<_ExportDialog> {
+class _ExportDialogState extends State<ExportDialog> {
   bool _skipEmpty = true;
   bool _exportImages = true;
   bool _trainAfterExport = false;
@@ -88,7 +70,7 @@ class _ExportDialogState extends State<_ExportDialog> {
   void _confirm() {
     final name = _folderNameController.text.trim();
     Navigator.of(context).pop(
-      _ExportConfig(
+      DatasetExportConfig(
         skipEmpty: _skipEmpty,
         exportImages: _exportImages,
         trainRatio: (100 - _valPercent - _testPercent).clamp(0, 100) / 100,

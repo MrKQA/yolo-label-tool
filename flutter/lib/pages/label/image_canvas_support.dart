@@ -1,9 +1,12 @@
 // Small support types for the label page image canvas.
 
-part of '../../main.dart';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
-class _SampledImage {
-  const _SampledImage({
+import 'package:flutter/widgets.dart';
+
+class SampledImage {
+  const SampledImage({
     required this.image,
     required this.size,
     required this.bytes,
@@ -14,19 +17,19 @@ class _SampledImage {
   final Uint8List bytes;
 }
 
-class _CancelDraftIntent extends Intent {
-  const _CancelDraftIntent();
+class CancelDraftIntent extends Intent {
+  const CancelDraftIntent();
 }
 
-class _ResizeHandle {
-  const _ResizeHandle(this.annotationId, this.cornerIndex);
+class ResizeHandle {
+  const ResizeHandle(this.annotationId, this.cornerIndex);
 
   final String annotationId;
   final int cornerIndex;
 }
 
-class _SegVertexHandle {
-  const _SegVertexHandle(this.annotationId, this.pointIndex);
+class SegVertexHandle {
+  const SegVertexHandle(this.annotationId, this.pointIndex);
 
   final String annotationId;
   final int pointIndex;
@@ -34,7 +37,7 @@ class _SegVertexHandle {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is _SegVertexHandle &&
+      other is SegVertexHandle &&
           other.annotationId == annotationId &&
           other.pointIndex == pointIndex;
 
