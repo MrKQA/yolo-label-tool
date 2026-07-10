@@ -1,15 +1,22 @@
-part of '../main.dart';
+import 'dart:io';
+import 'dart:math' as math;
+import 'dart:ui';
 
-_ParsedYoloData _parseImportYoloDataYaml(String yamlPath) {
+import '../models/annotation.dart';
+import '../models/imported_dataset.dart';
+import '../theme/colors.dart';
+import 'path_utils.dart';
+
+ParsedYoloData parseImportYoloDataYaml(String yamlPath) {
   final lines = File(yamlPath).readAsLinesSync();
-  final yamlDir = _directoryName(yamlPath);
-  final pathValue = _importYamlScalar(lines, 'path');
+  final yamlDir = directoryName(yamlPath);
+  final pathValue = importYamlScalar(lines, 'path');
   final rootPath = pathValue == null || pathValue.isEmpty
       ? yamlDir
-      : _resolveImportDatasetPath(yamlDir, pathValue);
+      : resolveImportDatasetPath(yamlDir, pathValue);
   final splitSources = <String, List<String>>{};
   final splitImageDirs = <String, String>{};
-  for (final split in _datasetSplits) {
+  for (final split in datasetSplits) {
     final sources = _importYamlStringValues(lines, split);
     splitSources[split] = sources;
     if (sources.isNotEmpty) {
@@ -20,7 +27,7 @@ _ParsedYoloData _parseImportYoloDataYaml(String yamlPath) {
       );
     }
   }
-  return _ParsedYoloData(
+  return ParsedYoloData(
     rootPath: rootPath,
     names: _importYamlNames(lines),
     splitSources: splitSources,
@@ -28,18 +35,18 @@ _ParsedYoloData _parseImportYoloDataYaml(String yamlPath) {
   );
 }
 
-String _datasetYamlContent(
-  _ImportedDataset dataset,
+String datasetYamlContent(
+  ImportedDataset dataset,
   Map<String, Set<String>> grouped,
-  List<_LabelClass> labelClasses,
+  List<LabelClass> labelClasses,
 ) {
   final lines = <String>[
     'path: ${dataset.rootPath.replaceAll('\\', '/')}',
-    'train: ${_pathForDataYaml(dataset.rootPath, dataset.imageDirForSplit('train'))}',
-    'val: ${_pathForDataYaml(dataset.rootPath, dataset.imageDirForSplit('val'))}',
+    'train: ${pathForDataYaml(dataset.rootPath, dataset.imageDirForSplit('train'))}',
+    'val: ${pathForDataYaml(dataset.rootPath, dataset.imageDirForSplit('val'))}',
     if ((grouped['test']?.isNotEmpty ?? false) ||
         dataset.splitImageDirs.containsKey('test'))
-      'test: ${_pathForDataYaml(dataset.rootPath, dataset.imageDirForSplit('test'))}',
+      'test: ${pathForDataYaml(dataset.rootPath, dataset.imageDirForSplit('test'))}',
     '',
     'nc: ${labelClasses.length}',
     'names:',
@@ -49,8 +56,8 @@ String _datasetYamlContent(
   return lines.join('\n');
 }
 
-class _ImportedYoloProject {
-  const _ImportedYoloProject({
+class ImportedYoloProject {
+  const ImportedYoloProject({
     required this.images,
     required this.labelClasses,
     required this.annotationsByImage,
@@ -60,11 +67,11 @@ class _ImportedYoloProject {
     required this.annotationSerial,
   });
 
-  final List<_ImageItem> images;
-  final List<_LabelClass> labelClasses;
-  final Map<String, List<_AnnotationRegion>> annotationsByImage;
+  final List<ImageItem> images;
+  final List<LabelClass> labelClasses;
+  final Map<String, List<AnnotationRegion>> annotationsByImage;
   final Map<String, String> imageSplits;
-  final _ImportedDataset dataset;
+  final ImportedDataset dataset;
   final int classSerial;
   final int annotationSerial;
 
@@ -76,20 +83,20 @@ class _ImportedYoloProject {
   }
 }
 
-Future<_ImportedYoloProject?> _loadImportedYoloProject({
+Future<ImportedYoloProject?> loadImportedYoloProject({
   required String yamlPath,
   required Future<Size> Function(String imagePath) ensureImageDisplaySize,
 }) async {
-  final parsed = _parseImportYoloDataYaml(yamlPath);
-  final imageEntries = <_DatasetImageEntry>[];
-  for (final split in _datasetSplits) {
+  final parsed = parseImportYoloDataYaml(yamlPath);
+  final imageEntries = <DatasetImageEntry>[];
+  for (final split in datasetSplits) {
     final sources = parsed.splitSources[split] ?? const [];
     for (final source in sources) {
       imageEntries.addAll(
-        _imagePathsFromDatasetSource(
+        imagePathsFromDatasetSource(
           parsed.rootPath,
           source,
-        ).map((path) => _DatasetImageEntry(path: path, split: split)),
+        ).map((path) => DatasetImageEntry(path: path, split: split)),
       );
     }
   }
@@ -99,7 +106,7 @@ Future<_ImportedYoloProject?> _loadImportedYoloProject({
     return null;
   }
 
-  final importedClasses = <_LabelClass>[];
+  final importedClasses = <LabelClass>[];
   int ensureClass(int classIndex) {
     while (importedClasses.length <= classIndex) {
       final index = importedClasses.length;
@@ -107,24 +114,24 @@ Future<_ImportedYoloProject?> _loadImportedYoloProject({
           ? parsed.names[index]
           : 'class_$index';
       importedClasses.add(
-        _LabelClass(
+        LabelClass(
           id: index,
           name: name,
           colorValue:
-              _labelColorPalette[index % _labelColorPalette.length].toARGB32(),
+              labelColorPalette[index % labelColorPalette.length].toARGB32(),
         ),
       );
     }
     return importedClasses[classIndex].id;
   }
 
-  final importedAnnotations = <String, List<_AnnotationRegion>>{};
+  final importedAnnotations = <String, List<AnnotationRegion>>{};
   final importedSplits = <String, String>{};
   var annotationSerial = 1;
   for (final entry in uniqueEntries) {
     final displaySize = await ensureImageDisplaySize(entry.path);
-    importedSplits[_pathKey(entry.path)] = entry.split;
-    importedAnnotations[_pathKey(entry.path)] = _readYoloAnnotations(
+    importedSplits[pathKey(entry.path)] = entry.split;
+    importedAnnotations[pathKey(entry.path)] = _readYoloAnnotations(
       imagePath: entry.path,
       imageSize: displaySize,
       ensureClass: ensureClass,
@@ -138,14 +145,14 @@ Future<_ImportedYoloProject?> _loadImportedYoloProject({
     }
   }
 
-  return _ImportedYoloProject(
+  return ImportedYoloProject(
     images: [
-      for (final entry in uniqueEntries) _ImageItem.fromPath(entry.path),
+      for (final entry in uniqueEntries) ImageItem.fromPath(entry.path),
     ],
     labelClasses: importedClasses,
     annotationsByImage: importedAnnotations,
     imageSplits: importedSplits,
-    dataset: _ImportedDataset(
+    dataset: ImportedDataset(
       dataYamlPath: yamlPath,
       rootPath: parsed.rootPath,
       splitImageDirs: parsed.splitImageDirs,
@@ -155,30 +162,30 @@ Future<_ImportedYoloProject?> _loadImportedYoloProject({
   );
 }
 
-List<_DatasetImageEntry> _dedupeDatasetEntries(
-  List<_DatasetImageEntry> entries,
+List<DatasetImageEntry> _dedupeDatasetEntries(
+  List<DatasetImageEntry> entries,
 ) {
   final seen = <String>{};
-  final result = <_DatasetImageEntry>[];
+  final result = <DatasetImageEntry>[];
   for (final entry in entries) {
-    if (seen.add(_pathKey(entry.path))) {
+    if (seen.add(pathKey(entry.path))) {
       result.add(entry);
     }
   }
   return result;
 }
 
-List<String> _imagePathsFromDatasetSource(String rootPath, String source) {
-  final resolved = _resolveImportDatasetSourcePath(rootPath, source);
+List<String> imagePathsFromDatasetSource(String rootPath, String source) {
+  final resolved = resolveImportDatasetSourcePath(rootPath, source);
   final directory = Directory(resolved);
   if (directory.existsSync()) {
     final paths = directory
         .listSync(recursive: true)
         .whereType<File>()
         .map<String>((file) => file.path)
-        .where((path) => _isImagePath(path))
+        .where((path) => isImagePath(path))
         .toList();
-    paths.sort(_naturalPathCompare);
+    paths.sort(naturalPathCompare);
     return paths;
   }
 
@@ -186,34 +193,34 @@ List<String> _imagePathsFromDatasetSource(String rootPath, String source) {
   if (!file.existsSync()) {
     return [];
   }
-  if (_isImagePath(file.path)) {
+  if (isImagePath(file.path)) {
     return [file.path];
   }
 
-  final parent = _directoryName(file.path);
+  final parent = directoryName(file.path);
   final paths = file
       .readAsLinesSync()
       .map((line) => line.trim())
       .where((line) => line.isNotEmpty && !line.startsWith('#'))
-      .map<String>((line) => _resolveImportDatasetSourcePath(parent, line))
-      .where((path) => _isImagePath(path))
+      .map<String>((line) => resolveImportDatasetSourcePath(parent, line))
+      .where((path) => isImagePath(path))
       .where((path) => File(path).existsSync())
       .toList();
-  paths.sort(_naturalPathCompare);
+  paths.sort(naturalPathCompare);
   return paths;
 }
 
-List<_AnnotationRegion> _readYoloAnnotations({
+List<AnnotationRegion> _readYoloAnnotations({
   required String imagePath,
   required Size imageSize,
   required int Function(int classIndex) ensureClass,
   required String Function() nextId,
 }) {
-  final labelFile = File(_labelPathForImagePath(imagePath));
+  final labelFile = File(labelPathForImagePath(imagePath));
   if (!labelFile.existsSync()) {
     return const [];
   }
-  final result = <_AnnotationRegion>[];
+  final result = <AnnotationRegion>[];
   for (final rawLine in labelFile.readAsLinesSync()) {
     final line = rawLine.trim();
     if (line.isEmpty) {
@@ -249,7 +256,7 @@ List<_AnnotationRegion> _readYoloAnnotations({
   return result;
 }
 
-_AnnotationRegion? _annotationFromYoloValues({
+AnnotationRegion? _annotationFromYoloValues({
   required String id,
   required List<double> values,
   required int classId,
@@ -265,9 +272,9 @@ _AnnotationRegion? _annotationFromYoloValues({
     final cy = values[1] * h;
     final bw = values[2] * w;
     final bh = values[3] * h;
-    return _AnnotationRegion.fromRect(
+    return AnnotationRegion.fromRect(
       id: id,
-      mode: _AnnotationMode.hbb,
+      mode: AnnotationMode.hbb,
       rect: Rect.fromCenter(center: Offset(cx, cy), width: bw, height: bh),
       classId: classId,
     ).clampedTo(Rect.fromLTWH(0, 0, w, h));
@@ -284,9 +291,9 @@ _AnnotationRegion? _annotationFromYoloValues({
         math.atan2(points[1].dy - points[0].dy, points[1].dx - points[0].dx) *
         180 /
         math.pi;
-    return _AnnotationRegion(
+    return AnnotationRegion(
       id: id,
-      mode: _AnnotationMode.obb,
+      mode: AnnotationMode.obb,
       rect: Rect.fromCenter(center: center, width: width, height: height),
       classId: classId,
       rotationDegrees: rotation,
@@ -302,14 +309,14 @@ _AnnotationRegion? _annotationFromYoloValues({
       xs.reduce(math.max),
       ys.reduce(math.max),
     );
-    return _AnnotationRegion(
+    return AnnotationRegion(
       id: id,
-      mode: _AnnotationMode.seg,
+      mode: AnnotationMode.seg,
       rect: bounds,
       classId: classId,
       points: [
         for (final point in points)
-          _clampOffset(point, Rect.fromLTWH(0, 0, w, h)),
+          clampOffset(point, Rect.fromLTWH(0, 0, w, h)),
       ],
     );
   }
@@ -328,18 +335,18 @@ List<Offset> _normalizedPairsToPoints(List<double> values, Size imageSize) {
   ];
 }
 
-String _labelPathForImagePath(String imagePath) {
+String labelPathForImagePath(String imagePath) {
   final normalized = imagePath.replaceAll('\\', '/');
   final parts = normalized.split('/');
   for (var i = parts.length - 2; i >= 0; i--) {
     if (parts[i].toLowerCase() == 'images') {
       parts[i] = 'labels';
-      return _replaceExtension(parts.join('\\'), '.txt');
+      return replaceExtension(parts.join('\\'), '.txt');
     }
   }
-  return _joinPath(
-    _directoryName(imagePath),
-    '${_baseNameWithoutExtension(imagePath)}.txt',
+  return joinPath(
+    directoryName(imagePath),
+    '${baseNameWithoutExtension(imagePath)}.txt',
   );
 }
 
@@ -352,7 +359,7 @@ String _labelDirForImageDir(String imageDir, String rootPath, String split) {
       return parts.join('\\');
     }
   }
-  return _joinPath(rootPath, 'labels\\$split');
+  return joinPath(rootPath, 'labels\\$split');
 }
 
 String _firstImageDirectoryForSplit(
@@ -361,15 +368,15 @@ String _firstImageDirectoryForSplit(
   List<String> sources,
 ) {
   for (final source in sources) {
-    final resolved = _resolveImportDatasetSourcePath(rootPath, source);
+    final resolved = resolveImportDatasetSourcePath(rootPath, source);
     if (Directory(resolved).existsSync()) {
       return resolved;
     }
   }
-  return _joinPath(rootPath, 'images\\$split');
+  return joinPath(rootPath, 'images\\$split');
 }
 
-String? _importYamlScalar(List<String> lines, String key) {
+String? importYamlScalar(List<String> lines, String key) {
   for (final rawLine in lines) {
     final line = _stripImportYamlComment(rawLine).trimRight();
     if (!line.startsWith('$key:')) {

@@ -6,9 +6,8 @@ class YoloLabelApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<AppLanguageStrings>(
-      valueListenable: _languageStringsNotifier,
+      valueListenable: languageStringsNotifier,
       builder: (context, language, _) {
-        _appText = language;
         return ValueListenableBuilder<ThemeMode>(
           valueListenable: _themeModeNotifier,
           builder: (context, themeMode, _) {

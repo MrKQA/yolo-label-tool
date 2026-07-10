@@ -27,7 +27,7 @@ class _DetectPlaybackSurface extends StatelessWidget {
             child: Center(
               child: input == null
                   ? Text(t('detect.placeholder'))
-                  : _isImagePath(input)
+                  : isImagePath(input)
                   ? Padding(
                       padding: const EdgeInsets.all(12),
                       child: Image.file(

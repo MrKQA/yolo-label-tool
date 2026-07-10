@@ -1,10 +1,15 @@
-part of '../main.dart';
+import 'package:flutter/material.dart';
 
-void _showTrainingHistoryRecordsDialog({
+import '../models/training.dart';
+import '../services/i18n.dart';
+import '../services/path_utils.dart';
+import '../widgets/train/train_runtime_support.dart';
+
+void showTrainingHistoryRecordsDialog({
   required BuildContext context,
+  required List<TrainingHistoryEntry> history,
   required VoidCallback onEmpty,
 }) {
-  final history = _ConfigStore.loadTrainingHistory().entries;
   if (history.isEmpty) {
     onEmpty();
     return;
@@ -25,20 +30,20 @@ void _showTrainingHistoryRecordsDialog({
               child: ListTile(
                 dense: true,
                 leading: Icon(
-                  entry.action == _TrainingHistoryAction.stop
+                  entry.action == TrainingHistoryAction.stop
                       ? Icons.stop_circle_outlined
                       : Icons.play_circle_outline,
                 ),
                 title: Text(
-                  '${_trainingActionLabel(entry.action)}  '
+                  '${trainingActionLabel(entry.action)}  '
                   '${entry.epoch}/${entry.targetEpochs}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
                 subtitle: Text(
                   '${t('train.historyTimePoint')}: '
-                  '${_formatTrainingHistoryTime(entry.timestamp)}\n'
-                  '${t('path.model')}: ${_fileName(entry.modelPath)}\n'
+                  '${formatTrainingHistoryTime(entry.timestamp)}\n'
+                  '${t('path.model')}: ${fileName(entry.modelPath)}\n'
                   '${t('train.datasetPath')}: ${entry.datasetPath}',
                   maxLines: 3,
                   overflow: TextOverflow.ellipsis,

@@ -1,26 +1,30 @@
-part of '../main.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
-class _ShortcutSettingsDialog extends StatefulWidget {
-  const _ShortcutSettingsDialog({
+import '../models/shortcut.dart';
+import '../services/i18n.dart';
+
+class ShortcutSettingsDialog extends StatefulWidget {
+  const ShortcutSettingsDialog({
     required this.config,
     required this.onShortcutChanged,
     required this.onReset,
   });
 
-  final _ShortcutConfig config;
-  final void Function(_ShortcutAction action, LogicalKeyboardKey key)
+  final ShortcutConfig config;
+  final void Function(ShortcutAction action, LogicalKeyboardKey key)
   onShortcutChanged;
   final VoidCallback onReset;
 
   @override
-  State<_ShortcutSettingsDialog> createState() =>
+  State<ShortcutSettingsDialog> createState() =>
       _ShortcutSettingsDialogState();
 }
 
-class _ShortcutSettingsDialogState extends State<_ShortcutSettingsDialog> {
+class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
   final FocusNode _captureFocusNode = FocusNode(debugLabel: 'shortcut-capture');
-  late _ShortcutConfig _currentConfig;
-  _ShortcutAction? _waitingAction;
+  late ShortcutConfig _currentConfig;
+  ShortcutAction? _waitingAction;
 
   @override
   void initState() {
@@ -56,7 +60,7 @@ class _ShortcutSettingsDialogState extends State<_ShortcutSettingsDialog> {
     return KeyEventResult.handled;
   }
 
-  void _startCapture(_ShortcutAction action) {
+  void _startCapture(ShortcutAction action) {
     setState(() => _waitingAction = action);
     _captureFocusNode.requestFocus();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -69,7 +73,7 @@ class _ShortcutSettingsDialogState extends State<_ShortcutSettingsDialog> {
   @override
   Widget build(BuildContext context) {
     final config = _currentConfig;
-    const scopes = _ShortcutScope.values;
+    const scopes = ShortcutScope.values;
 
     return AlertDialog(
       title: Text(t('shortcut.title')),
@@ -119,7 +123,7 @@ class _ShortcutSettingsDialogState extends State<_ShortcutSettingsDialog> {
           onPressed: () {
             widget.onReset();
             setState(() {
-              _currentConfig = _ShortcutConfig.defaults();
+              _currentConfig = ShortcutConfig.defaults();
               _waitingAction = null;
             });
           },
@@ -142,15 +146,15 @@ class _ShortcutScopePane extends StatelessWidget {
     required this.onPressed,
   });
 
-  final _ShortcutScope scope;
-  final _ShortcutConfig config;
-  final _ShortcutAction? waitingAction;
-  final ValueChanged<_ShortcutAction> onPressed;
+  final ShortcutScope scope;
+  final ShortcutConfig config;
+  final ShortcutAction? waitingAction;
+  final ValueChanged<ShortcutAction> onPressed;
 
   @override
   Widget build(BuildContext context) {
     final actions = [
-      for (final action in _ShortcutAction.values)
+      for (final action in ShortcutAction.values)
         if (action.scope == scope) action,
     ];
     if (actions.isEmpty) {
@@ -217,11 +221,11 @@ class _ShortcutEditRow extends StatelessWidget {
     required this.onPressed,
   });
 
-  final _ShortcutAction action;
+  final ShortcutAction action;
   final String label;
   final String shortcut;
   final bool waiting;
-  final ValueChanged<_ShortcutAction> onPressed;
+  final ValueChanged<ShortcutAction> onPressed;
 
   @override
   Widget build(BuildContext context) {

@@ -1,15 +1,19 @@
-part of '../main.dart';
+import 'dart:ui';
 
-List<_LabelClass> _collaborationClassesFromJson(Object? value) {
+import '../models/annotation.dart';
+import '../theme/colors.dart' as colors;
+import 'path_utils.dart';
+
+List<LabelClass> collaborationClassesFromJson(Object? value) {
   final rawClasses = value;
   if (rawClasses is! List) {
     return const [];
   }
-  final classes = <_LabelClass>[];
+  final classes = <LabelClass>[];
   final seenIds = <int>{};
   for (final rawClass in rawClasses) {
-    final labelClass = _collaborationMap(rawClass);
-    final classId = _collaborationInt(
+    final labelClass = collaborationMap(rawClass);
+    final classId = collaborationInt(
       labelClass,
       'id',
       fallback: classes.length,
@@ -18,17 +22,17 @@ List<_LabelClass> _collaborationClassesFromJson(Object? value) {
       continue;
     }
     classes.add(
-      _LabelClass(
+      LabelClass(
         id: classId,
-        name: _collaborationString(labelClass, 'name').trim().isEmpty
+        name: collaborationString(labelClass, 'name').trim().isEmpty
             ? 'class_${classes.length}'
-            : _collaborationString(labelClass, 'name'),
-        colorValue: _collaborationInt(
+            : collaborationString(labelClass, 'name'),
+        colorValue: collaborationInt(
           labelClass,
           'color',
-          fallback:
-              _labelColorPalette[classes.length % _labelColorPalette.length]
-                  .toARGB32(),
+          fallback: colors
+              .labelColorPalette[classes.length % colors.labelColorPalette.length]
+              .toARGB32(),
         ),
       ),
     );
@@ -36,7 +40,7 @@ List<_LabelClass> _collaborationClassesFromJson(Object? value) {
   return classes;
 }
 
-int _nextClassSerialFor(Iterable<_LabelClass> classes) {
+int nextClassSerialFor(Iterable<LabelClass> classes) {
   var next = 1;
   for (final labelClass in classes) {
     if (labelClass.id >= next) {
@@ -46,8 +50,8 @@ int _nextClassSerialFor(Iterable<_LabelClass> classes) {
   return next;
 }
 
-String _collaborationCacheFileName(String remotePath, String name) {
-  final rawName = name.trim().isEmpty ? _fileName(remotePath) : name.trim();
+String collaborationCacheFileName(String remotePath, String name) {
+  final rawName = name.trim().isEmpty ? fileName(remotePath) : name.trim();
   final safeName = rawName.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_').trim();
   final displayName = safeName.isEmpty ? 'image' : safeName;
   return '${_stableCollaborationHash(remotePath)}_$displayName';
@@ -62,45 +66,47 @@ String _stableCollaborationHash(String value) {
   return hash.toRadixString(16).padLeft(8, '0');
 }
 
-_AnnotationRegion? _collaborationAnnotationFromJson(Object? value) {
-  final data = _collaborationMap(value);
-  final id = _collaborationString(data, 'id');
+AnnotationRegion? collaborationAnnotationFromJson(Object? value) {
+  final data = collaborationMap(value);
+  final id = collaborationString(data, 'id');
   if (id.isEmpty) {
     return null;
   }
-  final mode = _annotationModeFromDatabase(_collaborationString(data, 'mode'));
+  final mode = _collaborationAnnotationModeFromJson(
+    collaborationString(data, 'mode'),
+  );
   final points = <Offset>[];
   final rawPoints = data['points'];
   if (rawPoints is List) {
     for (final rawPoint in rawPoints) {
-      final point = _collaborationMap(rawPoint);
+      final point = collaborationMap(rawPoint);
       points.add(
         Offset(
-          _collaborationDouble(point, 'x'),
-          _collaborationDouble(point, 'y'),
+          collaborationDouble(point, 'x'),
+          collaborationDouble(point, 'y'),
         ),
       );
     }
   }
-  return _AnnotationRegion(
+  return AnnotationRegion(
     id: id,
     mode: mode,
     rect: Rect.fromLTRB(
-      _collaborationDouble(data, 'left'),
-      _collaborationDouble(data, 'top'),
-      _collaborationDouble(data, 'right'),
-      _collaborationDouble(data, 'bottom'),
+      collaborationDouble(data, 'left'),
+      collaborationDouble(data, 'top'),
+      collaborationDouble(data, 'right'),
+      collaborationDouble(data, 'bottom'),
     ),
-    classId: _collaborationInt(data, 'classId', fallback: 0),
-    rotationDegrees: _collaborationDouble(data, 'rotation'),
+    classId: collaborationInt(data, 'classId', fallback: 0),
+    rotationDegrees: collaborationDouble(data, 'rotation'),
     points: points,
-    authorId: _collaborationString(data, 'authorId'),
-    authorName: _collaborationString(data, 'authorName'),
-    authorColorValue: _collaborationInt(data, 'authorColor', fallback: 0),
+    authorId: collaborationString(data, 'authorId'),
+    authorName: collaborationString(data, 'authorName'),
+    authorColorValue: collaborationInt(data, 'authorColor', fallback: 0),
   );
 }
 
-Map<String, dynamic> _collaborationMap(Object? value) {
+Map<String, dynamic> collaborationMap(Object? value) {
   if (value is Map<String, dynamic>) {
     return value;
   }
@@ -110,10 +116,10 @@ Map<String, dynamic> _collaborationMap(Object? value) {
   return const {};
 }
 
-String _collaborationString(Map<String, dynamic> map, String key) =>
+String collaborationString(Map<String, dynamic> map, String key) =>
     '${map[key] ?? ''}';
 
-int _collaborationInt(
+int collaborationInt(
   Map<String, dynamic> map,
   String key, {
   required int fallback,
@@ -125,7 +131,7 @@ int _collaborationInt(
   return int.tryParse('$value') ?? fallback;
 }
 
-bool _collaborationBool(Map<String, dynamic> map, String key) {
+bool collaborationBool(Map<String, dynamic> map, String key) {
   final value = map[key];
   if (value is bool) {
     return value;
@@ -133,7 +139,7 @@ bool _collaborationBool(Map<String, dynamic> map, String key) {
   return '$value'.toLowerCase() == 'true' || '$value' == '1';
 }
 
-double _collaborationDouble(
+double collaborationDouble(
   Map<String, dynamic> map,
   String key, {
   double fallback = 0,
@@ -143,4 +149,12 @@ double _collaborationDouble(
     return value.toDouble();
   }
   return double.tryParse('$value') ?? fallback;
+}
+
+AnnotationMode _collaborationAnnotationModeFromJson(String raw) {
+  return switch (raw.toLowerCase()) {
+    'obb' => AnnotationMode.obb,
+    'seg' => AnnotationMode.seg,
+    _ => AnnotationMode.hbb,
+  };
 }

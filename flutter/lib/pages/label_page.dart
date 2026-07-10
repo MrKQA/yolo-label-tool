@@ -64,21 +64,21 @@ class _LabelPage extends StatelessWidget {
   });
 
   final _BridgeStatus status;
-  final List<_ImageItem> images;
-  final _ImageItem? selectedImage;
+  final List<ImageItem> images;
+  final ImageItem? selectedImage;
   final int selectedImageIndex;
   final bool unauthorized;
   final double zoom;
   final Offset viewportOffset;
   final String activeTool;
-  final _AnnotationMode activeMode;
+  final AnnotationMode activeMode;
   final String imageSplit;
   final int? activeClassId;
-  final List<_LabelClass> labelClasses;
-  final Map<String, List<_AnnotationRegion>> annotationsByImage;
-  final List<_AnnotationRegion> annotations;
-  final List<_Sam3ClickPromptPoint> sam3ClickPrompts;
-  final List<_AnnotationRegion> sam3PreviewAnnotations;
+  final List<LabelClass> labelClasses;
+  final Map<String, List<AnnotationRegion>> annotationsByImage;
+  final List<AnnotationRegion> annotations;
+  final List<Sam3ClickPromptPoint> sam3ClickPrompts;
+  final List<AnnotationRegion> sam3PreviewAnnotations;
   final String? selectedAnnotationId;
   final bool showClassLabels;
   final bool aiPanelVisible;
@@ -90,20 +90,20 @@ class _LabelPage extends StatelessWidget {
   final ValueChanged<Offset> onViewportOffsetChanged;
   final ValueChanged<String> onToolSelected;
   final VoidCallback onSelectMode;
-  final ValueChanged<_AnnotationMode> onModeSelected;
+  final ValueChanged<AnnotationMode> onModeSelected;
   final ValueChanged<String> onImageSplitChanged;
   final Future<int?> Function() onEnsureClass;
   final void Function(Rect rect, int classId) onAnnotationCreated;
   final void Function(List<Offset> points, int classId) onSegAnnotationCreated;
   final ValueChanged<String?> onAnnotationSelected;
-  final ValueChanged<_AnnotationRegion> onAnnotationUpdated;
+  final ValueChanged<AnnotationRegion> onAnnotationUpdated;
   final ValueChanged<String> onAnnotationDeleted;
   final VoidCallback onAnnotationDragStarted;
   final ValueChanged<int> onClassSelected;
   final VoidCallback onClassAdded;
-  final ValueChanged<_LabelClass> onClassEdited;
-  final ValueChanged<_LabelClass> onClassColorChanged;
-  final ValueChanged<_LabelClass> onClassDeleted;
+  final ValueChanged<LabelClass> onClassEdited;
+  final ValueChanged<LabelClass> onClassColorChanged;
+  final ValueChanged<LabelClass> onClassDeleted;
   final void Function(int oldIndex, int newIndex) onClassReordered;
   final VoidCallback onToggleClassLabels;
   final void Function(String annotationId, int classId)
@@ -224,16 +224,16 @@ class _ImageCanvas extends StatefulWidget {
   });
 
   final void Function(Size imageDisplaySize)? onImageDisplaySizeChanged;
-  final _ImageItem? image;
+  final ImageItem? image;
   final bool unauthorized;
   final double zoom;
   final Offset viewportOffset;
   final String activeTool;
-  final _AnnotationMode activeMode;
-  final List<_LabelClass> labelClasses;
-  final List<_AnnotationRegion> annotations;
-  final List<_Sam3ClickPromptPoint> sam3ClickPrompts;
-  final List<_AnnotationRegion> sam3PreviewAnnotations;
+  final AnnotationMode activeMode;
+  final List<LabelClass> labelClasses;
+  final List<AnnotationRegion> annotations;
+  final List<Sam3ClickPromptPoint> sam3ClickPrompts;
+  final List<AnnotationRegion> sam3PreviewAnnotations;
   final String? selectedAnnotationId;
   final bool showClassLabels;
   final ValueChanged<Offset> onViewportOffsetChanged;
@@ -242,7 +242,7 @@ class _ImageCanvas extends StatefulWidget {
   final void Function(Rect rect, int classId) onAnnotationCreated;
   final void Function(List<Offset> points, int classId) onSegAnnotationCreated;
   final ValueChanged<String?> onAnnotationSelected;
-  final ValueChanged<_AnnotationRegion> onAnnotationUpdated;
+  final ValueChanged<AnnotationRegion> onAnnotationUpdated;
   final ValueChanged<String> onAnnotationDeleted;
   final VoidCallback onAnnotationDragStarted;
   final Future<bool> Function(
@@ -442,7 +442,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
   }
 
   Offset _toContentPoint(Offset localPoint) {
-    return _clampOffset(
+    return clampOffset(
       _toUnclampedContentPoint(localPoint),
       _placedImageRect(),
     );
@@ -559,7 +559,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     final localPoint = _toContentPoint(localPosition);
     final nextDraft = Rect.fromPoints(
       start,
-      _clampOffset(_toImagePoint(localPoint), imageBounds),
+      clampOffset(_toImagePoint(localPoint), imageBounds),
     ).intersect(imageBounds);
     if (_draftRect != nextDraft) {
       setState(() => _draftRect = nextDraft);
@@ -673,7 +673,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     _segAutoPointTimer = Timer.periodic(const Duration(milliseconds: 50), (_) {
       if (!mounted ||
           widget.activeTool != 'draw' ||
-          widget.activeMode != _AnnotationMode.seg ||
+          widget.activeMode != AnnotationMode.seg ||
           _segDraftPoints.isEmpty) {
         _stopSegAutoPointTimer();
         return;
@@ -715,7 +715,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     int classId, {
     required bool force,
   }) {
-    final point = _clampOffset(imagePoint, _imageBounds());
+    final point = clampOffset(imagePoint, _imageBounds());
     if (_closeSegDraftIfNeeded(point, classId)) {
       return;
     }
@@ -740,7 +740,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     });
   }
 
-  _AnnotationRegion? _annotationAt(Offset point) {
+  AnnotationRegion? _annotationAt(Offset point) {
     final imagePoint = _toImagePoint(point);
     final hits = widget.annotations
         .where((annotation) => annotation.hitTest(imagePoint))
@@ -761,7 +761,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     return null;
   }
 
-  _AnnotationRegion? _selectedAnnotation() {
+  AnnotationRegion? _selectedAnnotation() {
     final selectedId = widget.selectedAnnotationId;
     if (selectedId == null) {
       return null;
@@ -805,13 +805,13 @@ class _ImageCanvasState extends State<_ImageCanvas> {
 
   _ResizeHandle? _resizeHandleAt(Offset point) {
     final selected = _selectedAnnotation();
-    if (selected == null || selected.mode == _AnnotationMode.seg) {
+    if (selected == null || selected.mode == AnnotationMode.seg) {
       return null;
     }
     final canvasRect = selected.rect.shift(_placedImageRect().topLeft);
-    final corners = selected.mode == _AnnotationMode.obb
-        ? _rotatedCorners(canvasRect, selected.rotationDegrees)
-        : _rectToPoints(canvasRect);
+    final corners = selected.mode == AnnotationMode.obb
+        ? rotatedCorners(canvasRect, selected.rotationDegrees)
+        : rectToPoints(canvasRect);
     for (var index = 0; index < corners.length; index++) {
       if ((corners[index] - point).distance <= 8 / _scale) {
         return _ResizeHandle(selected.id, index);
@@ -823,17 +823,17 @@ class _ImageCanvasState extends State<_ImageCanvas> {
   _SegVertexHandle? _segVertexHandleAt(Offset point) {
     final imagePoint = _toImagePoint(point);
     final selected = _selectedAnnotation();
-    final candidates = <_AnnotationRegion>[
-      if (selected != null && selected.mode == _AnnotationMode.seg) selected,
+    final candidates = <AnnotationRegion>[
+      if (selected != null && selected.mode == AnnotationMode.seg) selected,
       for (final annotation in widget.annotations.reversed)
-        if (annotation.mode == _AnnotationMode.seg &&
+        if (annotation.mode == AnnotationMode.seg &&
             annotation.id != selected?.id)
           annotation,
     ];
     for (final annotation in candidates) {
       final points = annotation.points.length >= 3
           ? annotation.points
-          : _rectToPoints(annotation.rect);
+          : rectToPoints(annotation.rect);
       for (var index = points.length - 1; index >= 0; index--) {
         if ((points[index] - imagePoint).distance <= 8 / _scale) {
           return _SegVertexHandle(annotation.id, index);
@@ -843,17 +843,17 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     return null;
   }
 
-  _AnnotationRegion _updatedSegVertex(
-    _AnnotationRegion annotation,
+  AnnotationRegion _updatedSegVertex(
+    AnnotationRegion annotation,
     int pointIndex,
     Offset point,
   ) {
-    if (annotation.mode != _AnnotationMode.seg) {
+    if (annotation.mode != AnnotationMode.seg) {
       return annotation;
     }
     final points = annotation.points.length >= 3
         ? List<Offset>.of(annotation.points)
-        : _rectToPoints(annotation.rect);
+        : rectToPoints(annotation.rect);
     if (pointIndex < 0 || pointIndex >= points.length) {
       return annotation;
     }
@@ -866,30 +866,30 @@ class _ImageCanvasState extends State<_ImageCanvas> {
       xs.reduce(math.max),
       ys.reduce(math.max),
     );
-    return annotation.copyWith(points: points, rect: _normalizeRect(rect));
+    return annotation.copyWith(points: points, rect: normalizeRect(rect));
   }
 
-  _AnnotationRegion _resizedAnnotation(
-    _AnnotationRegion annotation,
+  AnnotationRegion _resizedAnnotation(
+    AnnotationRegion annotation,
     int cornerIndex,
     Offset point,
   ) {
     final imageSize = _imageDisplayRect();
     final imageBounds = Rect.fromLTWH(0, 0, imageSize.width, imageSize.height);
 
-    if (annotation.mode == _AnnotationMode.obb) {
-      final rotatedCorners = _rotatedCorners(
+    if (annotation.mode == AnnotationMode.obb) {
+      final corners = rotatedCorners(
         annotation.rect,
         annotation.rotationDegrees,
       );
-      final opposite = rotatedCorners[(cornerIndex + 2) % 4];
+      final opposite = corners[(cornerIndex + 2) % 4];
       final newCenter = Offset(
         (point.dx + opposite.dx) / 2,
         (point.dy + opposite.dy) / 2,
       );
       final halfDiagonal = point - newCenter;
       final radians = -annotation.rotationDegrees * math.pi / 180;
-      final unrotated = _rotatePoint(
+      final unrotated = rotatePoint(
         newCenter + halfDiagonal,
         newCenter,
         radians,
@@ -902,16 +902,16 @@ class _ImageCanvasState extends State<_ImageCanvas> {
         width: width,
         height: height,
       );
-      return annotation.copyWith(rect: _normalizeRect(newRect));
+      return annotation.copyWith(rect: normalizeRect(newRect));
     }
 
-    final corners = _rectToPoints(annotation.rect);
+    final corners = rectToPoints(annotation.rect);
     final opposite = corners[(cornerIndex + 2) % 4];
     final rect = Rect.fromPoints(opposite, point).intersect(imageBounds);
     if (rect.width < 4 || rect.height < 4) {
       return annotation;
     }
-    return annotation.copyWith(rect: _normalizeRect(rect));
+    return annotation.copyWith(rect: normalizeRect(rect));
   }
 
   Future<void> _handlePointerDown(PointerDownEvent event) async {
@@ -930,7 +930,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
         (event.buttons == kPrimaryMouseButton ||
             event.buttons == kSecondaryMouseButton)) {
       final imageRect = _placedImageRect();
-      final imagePoint = _clampOffset(
+      final imagePoint = clampOffset(
         _toImagePoint(rawPoint),
         Offset.zero & imageRect.size,
       );
@@ -946,7 +946,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
 
     if (event.buttons == kSecondaryMouseButton) {
       if (widget.activeTool == 'draw' &&
-          widget.activeMode == _AnnotationMode.seg &&
+          widget.activeMode == AnnotationMode.seg &&
           _segDraftPoints.isNotEmpty) {
         _stopSegAutoPointTimer();
         _undoSegDraftPointToStart();
@@ -1008,7 +1008,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     }
 
     if (widget.activeTool == 'draw' &&
-        widget.activeMode == _AnnotationMode.seg) {
+        widget.activeMode == AnnotationMode.seg) {
       final classId = await widget.onEnsureClass();
       if (!mounted || classId == null) {
         return;
@@ -1052,7 +1052,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
 
   Future<void> _showAnnotationContextMenu(
     Offset globalPosition,
-    _AnnotationRegion annotation,
+    AnnotationRegion annotation,
   ) async {
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     final action = await showMenu<String>(
@@ -1063,7 +1063,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
       ),
       items: [
         PopupMenuItem(value: 'delete', child: Text(t('tool.delete'))),
-        if (annotation.mode == _AnnotationMode.obb) ...[
+        if (annotation.mode == AnnotationMode.obb) ...[
           const PopupMenuDivider(),
           PopupMenuItem(
             value: 'rotateLeft',
@@ -1156,7 +1156,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
           _updatedSegVertex(
             current,
             segIndex,
-            _clampOffset(imagePoint, imageBounds),
+            clampOffset(imagePoint, imageBounds),
           ),
         );
       }
@@ -1199,7 +1199,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
       setState(() {
         _draftRect = Rect.fromPoints(
           start,
-          _clampOffset(_toImagePoint(localPoint), imageBounds),
+          clampOffset(_toImagePoint(localPoint), imageBounds),
         ).intersect(imageBounds);
       });
     }
@@ -1233,7 +1233,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     setState(() {
       _draftRect = Rect.fromPoints(
         start,
-        _clampOffset(_toImagePoint(localPoint), imageBounds),
+        clampOffset(_toImagePoint(localPoint), imageBounds),
       ).intersect(imageBounds);
     });
   }
@@ -1517,16 +1517,16 @@ class _AnnotationPainter extends CustomPainter {
   });
 
   final ui.Image? image;
-  final List<_AnnotationRegion> annotations;
-  final List<_AnnotationRegion> sam3PreviewAnnotations;
-  final List<_Sam3ClickPromptPoint> sam3ClickPrompts;
-  final List<_LabelClass> classes;
-  final _AnnotationRegion? selectedAnnotation;
+  final List<AnnotationRegion> annotations;
+  final List<AnnotationRegion> sam3PreviewAnnotations;
+  final List<Sam3ClickPromptPoint> sam3ClickPrompts;
+  final List<LabelClass> classes;
+  final AnnotationRegion? selectedAnnotation;
   final Rect? draftRect;
   final List<Offset> draftSegPoints;
   final Rect imageRect;
   final Offset imageOffset;
-  final _AnnotationMode draftMode;
+  final AnnotationMode draftMode;
   final int? draftClassId;
   final bool showClassLabels;
   final double scale;
@@ -1593,7 +1593,7 @@ class _AnnotationPainter extends CustomPainter {
       final labelClass = _classById(draftClassId);
       _drawAnnotation(
         canvas,
-        _AnnotationRegion.fromRect(
+        AnnotationRegion.fromRect(
           id: 'draft',
           mode: draftMode,
           rect: draft,
@@ -1609,7 +1609,7 @@ class _AnnotationPainter extends CustomPainter {
       final canvasPoints = draftSegPoints.map((p) => p + canvasOrigin).toList();
       _drawDraftSegPolygon(canvas, canvasPoints, color);
       final previewEnd = crosshairPoint;
-      if (draftMode == _AnnotationMode.seg &&
+      if (draftMode == AnnotationMode.seg &&
           previewEnd != null &&
           placedImageRect.contains(previewEnd)) {
         _drawDraftSegPreviewLine(canvas, canvasPoints.last, previewEnd, color);
@@ -1629,7 +1629,7 @@ class _AnnotationPainter extends CustomPainter {
     }
   }
 
-  _LabelClass? _classById(int? id) {
+  LabelClass? _classById(int? id) {
     if (id == null) {
       return null;
     }
@@ -1744,9 +1744,9 @@ class _AnnotationPainter extends CustomPainter {
     canvas.drawCircle(end, 2.2 / scale, Paint()..color = color);
   }
 
-  void _drawSam3PreviewAnnotation(Canvas canvas, _AnnotationRegion annotation) {
+  void _drawSam3PreviewAnnotation(Canvas canvas, AnnotationRegion annotation) {
     final points = annotation.points.isEmpty
-        ? _rectToPoints(annotation.rect)
+        ? rectToPoints(annotation.rect)
         : annotation.points;
     if (points.length < 3) {
       return;
@@ -1825,7 +1825,7 @@ class _AnnotationPainter extends CustomPainter {
 
   void _drawAnnotation(
     Canvas canvas,
-    _AnnotationRegion annotation,
+    AnnotationRegion annotation,
     Color color,
     bool selected,
   ) {
@@ -1835,9 +1835,9 @@ class _AnnotationPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = strokeWidth;
 
-    if (annotation.mode == _AnnotationMode.seg) {
+    if (annotation.mode == AnnotationMode.seg) {
       final points = annotation.points.isEmpty
-          ? _rectToPoints(annotation.rect)
+          ? rectToPoints(annotation.rect)
           : annotation.points;
       final canvasPoints = points
           .map((p) => p + imageRect.topLeft + imageOffset)
@@ -1850,7 +1850,7 @@ class _AnnotationPainter extends CustomPainter {
       return;
     }
 
-    if (annotation.mode == _AnnotationMode.obb) {
+    if (annotation.mode == AnnotationMode.obb) {
       final center = annotation.rect.center + imageRect.topLeft + imageOffset;
       canvas.save();
       canvas.translate(center.dx, center.dy);
@@ -1985,7 +1985,7 @@ class _SelectedAnnotationFilter extends StatelessWidget {
     required this.imageOffset,
   });
 
-  final _AnnotationRegion annotation;
+  final AnnotationRegion annotation;
   final Rect imageRect;
   final Offset imageOffset;
 
@@ -2035,8 +2035,8 @@ class _SelectedAnnotationOverlayPainter extends CustomPainter {
     required this.darkMode,
   });
 
-  final _AnnotationRegion annotation;
-  final List<_LabelClass> classes;
+  final AnnotationRegion annotation;
+  final List<LabelClass> classes;
   final Rect imageRect;
   final Offset imageOffset;
   final double scale;
@@ -2071,7 +2071,7 @@ class _SelectedAnnotationOverlayPainter extends CustomPainter {
       imageRect,
       imageOffset,
     );
-    if (annotation.mode == _AnnotationMode.seg) {
+    if (annotation.mode == AnnotationMode.seg) {
       _drawSegOverlayNodes(canvas, displayPoints);
     } else {
       _drawBoxOverlayHandles(canvas, displayPoints);
@@ -2178,7 +2178,7 @@ class _SelectedAnnotationOverlayPainter extends CustomPainter {
 }
 
 Path _annotationDisplayPath(
-  _AnnotationRegion annotation,
+  AnnotationRegion annotation,
   Rect imageRect,
   Offset imageOffset,
 ) {
@@ -2190,7 +2190,7 @@ Path _annotationDisplayPath(
 }
 
 Path _annotationOutsideDisplayPath(
-  _AnnotationRegion annotation,
+  AnnotationRegion annotation,
   Rect imageRect,
   Offset imageOffset,
 ) {
@@ -2207,30 +2207,30 @@ Path _annotationOutsideDisplayPath(
 }
 
 List<Offset> _annotationDisplayPoints(
-  _AnnotationRegion annotation,
+  AnnotationRegion annotation,
   Rect imageRect,
   Offset imageOffset,
 ) {
   final origin = imageRect.topLeft + imageOffset;
-  if (annotation.mode == _AnnotationMode.seg) {
+  if (annotation.mode == AnnotationMode.seg) {
     final points = annotation.points.length >= 3
         ? annotation.points
-        : _rectToPoints(annotation.rect);
+        : rectToPoints(annotation.rect);
     return [for (final point in points) point + origin];
   }
-  if (annotation.mode == _AnnotationMode.obb) {
+  if (annotation.mode == AnnotationMode.obb) {
     return [
-      for (final point in _rotatedCorners(
+      for (final point in rotatedCorners(
         annotation.rect,
         annotation.rotationDegrees,
       ))
         point + origin,
     ];
   }
-  return [for (final point in _rectToPoints(annotation.rect)) point + origin];
+  return [for (final point in rectToPoints(annotation.rect)) point + origin];
 }
 
-Color _classColorById(List<_LabelClass> classes, int classId) {
+Color _classColorById(List<LabelClass> classes, int classId) {
   return classes.where((item) => item.id == classId).firstOrNullValue?.color ??
       const Color(0xFF2563EB);
 }

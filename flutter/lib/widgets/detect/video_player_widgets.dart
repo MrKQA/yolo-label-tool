@@ -7,7 +7,7 @@ class _VideoFullscreenOverlay extends StatefulWidget {
   });
 
   final _DetectVideoSession session;
-  final _ShortcutConfig shortcutConfig;
+  final ShortcutConfig shortcutConfig;
 
   @override
   State<_VideoFullscreenOverlay> createState() =>
@@ -61,7 +61,7 @@ class _VideoFullscreenOverlayState extends State<_VideoFullscreenOverlay> {
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
-    if (_isEditableTextFocused()) {
+    if (isEditableTextFocused()) {
       return KeyEventResult.ignored;
     }
     if (event is KeyDownEvent &&
@@ -309,7 +309,7 @@ class _VideoPlayerShellState extends State<_VideoPlayerShell> {
     final serial = ++_shortcutHudColorSerial;
     final timestamp = widget.session.positionSeconds;
     try {
-      final bytes = await _RustVideoBackend.decodeFrame(
+      final bytes = await RustBackend.decodeFrame(
         videoPath: input,
         timestampSeconds: timestamp,
         maxWidth: 48,
@@ -585,7 +585,7 @@ class _VideoPlayerShellState extends State<_VideoPlayerShell> {
                                   ),
                                   if (session.selectedInput != null)
                                     Text(
-                                      _fileName(session.selectedInput!),
+                                      fileName(session.selectedInput!),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                     ),
@@ -728,7 +728,7 @@ Future<double?> _averageFrameLuminance(Uint8List pngBytes) async {
 String _videoStatusText({
   required Size size,
   required double nativeDurationSeconds,
-  required _RustVideoInfo? metadata,
+  required RustVideoInfo? metadata,
   required String? metadataError,
 }) {
   final parts = <String>['${size.width.round()}x${size.height.round()}'];

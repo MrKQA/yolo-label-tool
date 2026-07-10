@@ -1,30 +1,55 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:ffi' as ffi;
 import 'dart:io';
-import 'dart:isolate';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:file_selector/file_selector.dart';
-import 'package:fl_chart/fl_chart.dart';
-import 'package:flex_color_picker/flex_color_picker.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
-import 'package:percent_indicator/percent_indicator.dart';
 import 'package:video_player_win/video_player_win.dart' as video_player_win;
 
 import 'src/rust/api.dart';
-import 'src/rust/api/training_mod.dart' show TrainingProgress;
 import 'src/rust/frb_generated.dart';
+import 'dialogs/about_dialog.dart';
+import 'dialogs/color_picker_dialog.dart';
+import 'dialogs/sam3_runtime_dialog.dart';
+import 'dialogs/shortcut_dialog.dart';
+import 'dialogs/training_history_dialog.dart';
+import 'dialogs/yolo_export_settings_dialog.dart';
+import 'models/ai_assist.dart';
+import 'models/annotation.dart';
+import 'models/config.dart';
+import 'models/detection.dart';
+import 'models/export.dart';
+import 'models/imported_dataset.dart';
+import 'models/shortcut.dart';
+import 'models/training.dart';
+import 'services/ai_error_utils.dart';
+import 'services/ai_geometry.dart';
+import 'services/collection_utils.dart';
+import 'services/collaboration_codec.dart';
+import 'services/config_store.dart';
 import 'services/i18n.dart';
+import 'services/input_utils.dart';
+import 'services/image_size.dart';
+import 'services/import_dataset.dart';
 import 'services/logger.dart';
+import 'services/path_utils.dart';
+import 'services/python_environment.dart';
+import 'services/rust_backend.dart';
 import 'services/rust_library_loader.dart';
+import 'services/training_dataset_summary.dart';
 import 'theme/colors.dart' as colors;
 import 'theme/dimensions.dart' as dimensions;
 import 'theme/theme_helpers.dart' as theme_helpers;
+import 'widgets/common/floating_message.dart';
+import 'widgets/train/dataset_summary_panel.dart';
+import 'widgets/train/train_runtime_support.dart';
+import 'widgets/train/training_parameter_panel.dart';
+import 'widgets/train/training_progress_panel.dart';
 
 part 'app.dart';
 part 'pages/label_page.dart';
@@ -41,37 +66,17 @@ part 'pages/detect_video_page.dart';
 part 'pages/crop_page.dart';
 part 'pages/database_page.dart';
 part 'pages/collaboration_page.dart';
-part 'dialogs/about_dialog.dart';
 part 'dialogs/export_dialog.dart';
-part 'dialogs/color_picker_dialog.dart';
 part 'dialogs/log_viewer_dialog.dart';
-part 'dialogs/sam3_runtime_dialog.dart';
 part 'dialogs/settings_dialog.dart';
-part 'dialogs/shortcut_dialog.dart';
-part 'dialogs/training_history_dialog.dart';
-part 'dialogs/yolo_export_settings_dialog.dart';
-part 'models/ai_assist.dart';
-part 'models/annotation.dart';
-part 'models/detection.dart';
-part 'models/imported_dataset.dart';
-part 'models/shortcut.dart';
-part 'models/training.dart';
-part 'services/collection_utils.dart';
 part 'services/annotation_database_codec.dart';
-part 'services/config_store.dart';
-part 'services/ai_geometry.dart';
-part 'services/ai_error_utils.dart';
-part 'services/collaboration_codec.dart';
 part 'services/export_dataset.dart';
-part 'services/import_dataset.dart';
-part 'services/input_utils.dart';
-part 'services/image_size.dart';
-part 'services/path_utils.dart';
-part 'services/rust_backend.dart';
-part 'services/rust_ffi.dart';
-part 'widgets/common/floating_message.dart';
 part 'widgets/common/navigation.dart';
 part 'widgets/common/overlays.dart';
+part 'widgets/common/workspace_annotation_actions.dart';
+part 'widgets/common/workspace_collaboration_actions.dart';
+part 'widgets/common/workspace_export_actions.dart';
+part 'widgets/common/workspace_settings_actions.dart';
 part 'widgets/common/workspace_shell.dart';
 part 'widgets/database/database_detail_widgets.dart';
 part 'widgets/database/database_sidebar.dart';
@@ -86,11 +91,6 @@ part 'widgets/detect/video_player_widgets.dart';
 part 'widgets/label/ai_assist_panel.dart';
 part 'widgets/label/canvas_grid_painter.dart';
 part 'widgets/label/tool_spec.dart';
-part 'widgets/train/dataset_summary_panel.dart';
-part 'widgets/train/train_runtime_support.dart';
-part 'widgets/train/training_parameter_panel.dart';
-part 'widgets/train/training_progress_panel.dart';
-part 'widgets/train/train_widgets.dart';
 
 const _brandColor = colors.appBrandColor;
 const _darkBrandColor = colors.appDarkBrandColor;
@@ -117,7 +117,6 @@ const _aiAssistPanelMinHeight = dimensions.aiAssistPanelMinHeight;
 const _aiAssistPanelMaxWidth = dimensions.aiAssistPanelMaxWidth;
 const _aiAssistPanelMaxHeight = dimensions.aiAssistPanelMaxHeight;
 const _aiAssistPanelMargin = dimensions.aiAssistPanelMargin;
-const _recentHistoryLimit = 20;
 const _recentMenuVisibleCount = 5;
 const _fontFamily = 'Microsoft YaHei';
 const _languageCode = appDefaultLanguageCode;
@@ -165,18 +164,12 @@ final ValueNotifier<ThemeMode> _themeModeNotifier = ValueNotifier(
 String? _rustBackendInitError;
 const RustLibraryLoader _rustLibraryLoader = RustLibraryLoader();
 
-AppLanguageStrings _appText = AppLanguageStrings.fallback();
-final ValueNotifier<AppLanguageStrings> _languageStringsNotifier =
-    ValueNotifier(_appText);
-
 const _imageTypeGroup = XTypeGroup(
   label: 'Images',
   extensions: ['jpg', 'jpeg', 'png', 'bmp', 'webp'],
 );
 const _yamlTypeGroup = XTypeGroup(label: 'YAML', extensions: ['yaml', 'yml']);
-const _datasetSplits = ['train', 'val', 'test'];
 
-const _imageExtensions = {'jpg', 'jpeg', 'png', 'bmp', 'webp'};
 
 // Logging
 // Logs are written to logs/app/ with date-based filenames.
@@ -184,7 +177,7 @@ enum _LogLevel { debug, info, warning, error }
 
 _LogLevel _logLevel = _LogLevel.warning;
 final AppLogger _appLogger = AppLogger(
-  persistLines: (lines) => _ConfigStore.appendLogLines(lines.join('\n')),
+  persistLines: (lines) => ConfigStore.appendLogLines(lines.join('\n')),
 );
 
 void _log(String tag, String message, {_LogLevel level = _LogLevel.info}) {
@@ -227,10 +220,9 @@ Future<void> main() async {
   if (Platform.isWindows) {
     video_player_win.WindowsVideoPlayer.registerWith();
   }
-  _appText = await AppLanguageStrings.load(_languageCode);
-  _languageStringsNotifier.value = _appText;
+  setCurrentLanguageStrings(await AppLanguageStrings.load(_languageCode));
   await _initializeRustBackend();
-  _ConfigStore.ensureDefaultConfig();
+  ConfigStore.ensureDefaultConfig();
   runApp(const YoloLabelApp());
 }
 
@@ -255,12 +247,6 @@ ExternalLibrary? _openRustLibrary() {
   _rustBackendInitError = result.error;
   return result.library;
 }
-
-List<String> _rustLibraryCandidates() {
-  return _rustLibraryLoader.libraryCandidates();
-}
-
-String t(String key) => _appText.text(key);
 
 bool _isDarkMode(BuildContext context) =>
     Theme.of(context).brightness == Brightness.dark;

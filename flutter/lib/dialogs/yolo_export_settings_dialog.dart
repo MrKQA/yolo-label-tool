@@ -1,22 +1,29 @@
-part of '../main.dart';
+import 'package:file_selector/file_selector.dart';
+import 'package:flutter/material.dart';
 
-class _YoloExportSettingsDialog extends StatefulWidget {
-  const _YoloExportSettingsDialog({
+import '../models/detection.dart';
+import '../models/export.dart';
+import '../services/i18n.dart';
+
+const _yamlTypeGroup = XTypeGroup(label: 'YAML', extensions: ['yaml', 'yml']);
+
+class YoloExportSettingsDialog extends StatefulWidget {
+  const YoloExportSettingsDialog({
     required this.initial,
     required this.onManualExport,
   });
 
-  final _YoloExportSettings initial;
-  final Future<_ModelExportResult> Function(_YoloExportSettings settings)
+  final YoloExportSettings initial;
+  final Future<ModelExportResult> Function(YoloExportSettings settings)
   onManualExport;
 
   @override
-  State<_YoloExportSettingsDialog> createState() =>
+  State<YoloExportSettingsDialog> createState() =>
       _YoloExportSettingsDialogState();
 }
 
 class _YoloExportSettingsDialogState
-    extends State<_YoloExportSettingsDialog> {
+    extends State<YoloExportSettingsDialog> {
   late String _format;
   late bool _autoExport;
   late bool _dynamic;
@@ -38,7 +45,7 @@ class _YoloExportSettingsDialogState
     _load(widget.initial);
   }
 
-  void _load(_YoloExportSettings settings) {
+  void _load(YoloExportSettings settings) {
     _format = settings.format == 'onnx' ? 'onnx' : 'openvino';
     _autoExport = settings.autoExportAfterTraining;
     _dynamic = settings.dynamic;
@@ -68,8 +75,8 @@ class _YoloExportSettingsDialogState
     super.dispose();
   }
 
-  _YoloExportSettings _settingsFromFields() {
-    return _YoloExportSettings(
+  YoloExportSettings _settingsFromFields() {
+    return YoloExportSettings(
       format: _format,
       autoExportAfterTraining: _autoExport,
       imgsz: _positiveInt(_imgszController.text, 640),
@@ -134,7 +141,7 @@ class _YoloExportSettingsDialogState
   }
 
   void _reset() {
-    final defaults = const _YoloExportSettings();
+    final defaults = const YoloExportSettings();
     setState(() {
       _format = defaults.format;
       _autoExport = defaults.autoExportAfterTraining;

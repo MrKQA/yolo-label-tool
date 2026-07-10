@@ -1,19 +1,21 @@
 // ignore_for_file: file_names
 
-part of '../../main.dart';
+import 'package:flutter/material.dart';
+
+import '../../theme/theme_helpers.dart';
 
 /// 轻量悬浮提示，用于复制成功等短反馈。
 /// Lightweight floating feedback for short actions such as copy success.
-class _FloatingMessage extends StatefulWidget {
-  const _FloatingMessage({required this.message});
+class FloatingMessage extends StatefulWidget {
+  const FloatingMessage({required this.message});
 
   final String message;
 
   @override
-  State<_FloatingMessage> createState() => _FloatingMessageState();
+  State<FloatingMessage> createState() => _FloatingMessageState();
 }
 
-class _FloatingMessageState extends State<_FloatingMessage>
+class _FloatingMessageState extends State<FloatingMessage>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late final Animation<double> _opacity;
@@ -52,10 +54,14 @@ class _FloatingMessageState extends State<_FloatingMessage>
             opacity: _opacity,
             child: DecoratedBox(
               decoration: BoxDecoration(
-                color: _isDarkMode(context)
+                color: Theme.of(context).brightness == Brightness.dark
                     ? const Color(0xCC30205A)
                     : const Color(0xDDFFFFFF),
-                border: Border.all(color: _borderColor(context)),
+                border: Border.all(
+                  color: appBorderColor(
+                    Theme.of(context).brightness == Brightness.dark,
+                  ),
+                ),
                 borderRadius: BorderRadius.circular(6),
                 boxShadow: const [
                   BoxShadow(
@@ -73,7 +79,9 @@ class _FloatingMessageState extends State<_FloatingMessage>
                 child: Text(
                   widget.message,
                   style: TextStyle(
-                    color: _primaryTextColor(context),
+                    color: appTextColor(
+                      Theme.of(context).brightness == Brightness.dark,
+                    ),
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
                   ),

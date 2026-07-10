@@ -54,7 +54,7 @@ class _DetectVideoSession extends ChangeNotifier {
   String? detectModelPath;
   String? videoStatus;
   String? _controllerPath;
-  _RustVideoInfo? videoInfo;
+  RustVideoInfo? videoInfo;
   video_player_win.WinVideoPlayerController? controller;
   _VideoScaleMode scaleMode = _VideoScaleMode.auto;
   List<String> folderItems = const [];
@@ -63,7 +63,7 @@ class _DetectVideoSession extends ChangeNotifier {
   DateTime? _positionAnchorTime;
 
   bool get selectedInputIsImage =>
-      selectedInput != null && _isImagePath(selectedInput!);
+      selectedInput != null && isImagePath(selectedInput!);
 
   bool get selectedInputIsVideo =>
       selectedInput != null && _isVideoPath(selectedInput!);
@@ -206,7 +206,7 @@ class _DetectVideoSession extends ChangeNotifier {
     List<String>? newFolderItems,
     bool showPreviewPanel = false,
   }) async {
-    final sameInput = _pathKey(path) == _pathKey(selectedInput ?? '');
+    final sameInput = pathKey(path) == pathKey(selectedInput ?? '');
     if (newFolderItems != null) {
       folderItems = newFolderItems;
     }
@@ -230,18 +230,18 @@ class _DetectVideoSession extends ChangeNotifier {
   }
 
   bool _canSaveForInput(String? input) {
-    return predictVideo || predictAll || (input != null && _isImagePath(input));
+    return predictVideo || predictAll || (input != null && isImagePath(input));
   }
 
   String? _cachedPredictionOutput(String input) {
-    final cached = _predictionOutputsByInput[_pathKey(input)];
+    final cached = _predictionOutputsByInput[pathKey(input)];
     if (cached == null) {
       return null;
     }
     if (File(cached).existsSync()) {
       return cached;
     }
-    _predictionOutputsByInput.remove(_pathKey(input));
+    _predictionOutputsByInput.remove(pathKey(input));
     return null;
   }
 
@@ -274,7 +274,7 @@ class _DetectVideoSession extends ChangeNotifier {
     }
     if (controller != null &&
         _controllerPath != null &&
-        _pathKey(_controllerPath!) == _pathKey(input)) {
+        pathKey(_controllerPath!) == pathKey(input)) {
       if (!controller!.value.isPlaying) {
         await controller!.play();
         _markPlaybackStarted();
@@ -302,8 +302,8 @@ class _DetectVideoSession extends ChangeNotifier {
 
     try {
       String? metadataError;
-      final metadataFuture = _RustVideoBackend.loadInfo(input)
-          .then<_RustVideoInfo?>((info) => info)
+      final metadataFuture = RustBackend.loadInfo(input)
+          .then<RustVideoInfo?>((info) => info)
           .catchError((error) {
             metadataError = _shortVideoError(error);
             return null;
@@ -555,7 +555,7 @@ class _DetectVideoSession extends ChangeNotifier {
     }
   }
 
-  Future<void> setPredictMode(bool value, _AppSettings settings) async {
+  Future<void> setPredictMode(bool value, AppSettings settings) async {
     if (value && detectModelPath == null) {
       final model = await _chooseDetectModel(settings);
       if (model == null) {
@@ -581,7 +581,7 @@ class _DetectVideoSession extends ChangeNotifier {
     }
   }
 
-  Future<void> setPredictAllMode(bool value, _AppSettings settings) async {
+  Future<void> setPredictAllMode(bool value, AppSettings settings) async {
     if (value && detectModelPath == null) {
       final model = await _chooseDetectModel(settings);
       if (model == null) {
@@ -609,7 +609,7 @@ class _DetectVideoSession extends ChangeNotifier {
       cachePredictionOutputForInput(input, path);
     }
     showPredictionResult = path != null;
-    if (path != null && _isImagePath(path)) {
+    if (path != null && isImagePath(path)) {
       await FileImage(File(path)).evict();
     }
     await _resetVideoController();
@@ -618,7 +618,7 @@ class _DetectVideoSession extends ChangeNotifier {
   }
 
   void cachePredictionOutputForInput(String input, String? path) {
-    final key = _pathKey(input);
+    final key = pathKey(input);
     if (path == null) {
       _predictionOutputsByInput.remove(key);
     } else {
@@ -630,10 +630,10 @@ class _DetectVideoSession extends ChangeNotifier {
     if (input == null) {
       _predictionOutputsByInput.clear();
     } else {
-      _predictionOutputsByInput.remove(_pathKey(input));
+      _predictionOutputsByInput.remove(pathKey(input));
     }
-    final selectedKey = _pathKey(selectedInput ?? '');
-    final clearCurrent = input == null || _pathKey(input) == selectedKey;
+    final selectedKey = pathKey(selectedInput ?? '');
+    final clearCurrent = input == null || pathKey(input) == selectedKey;
     if (clearCurrent) {
       predictionOutputPath = null;
     }
@@ -669,7 +669,7 @@ class _DetectVideoSession extends ChangeNotifier {
       return false;
     }
     final currentIndex = folderItems.indexWhere(
-      (path) => _pathKey(path) == _pathKey(selectedInput ?? ''),
+      (path) => pathKey(path) == pathKey(selectedInput ?? ''),
     );
     final baseIndex = currentIndex < 0 ? 0 : currentIndex;
     final nextIndex = (baseIndex + delta).clamp(0, folderItems.length - 1);
@@ -694,10 +694,10 @@ class _DetectVideoSession extends ChangeNotifier {
     }
   }
 
-  static Future<String?> _chooseDetectModel(_AppSettings settings) async {
+  static Future<String?> _chooseDetectModel(AppSettings settings) async {
     final initialDirectory = settings.outputPath.isNotEmpty
         ? settings.outputPath
-        : _ConfigStore.defaultRunsDirectory.path;
+        : ConfigStore.defaultRunsDirectory.path;
     Directory(initialDirectory).createSync(recursive: true);
     final file = await openFile(
       initialDirectory: initialDirectory,
@@ -710,12 +710,12 @@ class _DetectVideoSession extends ChangeNotifier {
 
   KeyEventResult handleShortcutKey(
     KeyEvent event,
-    _ShortcutConfig shortcutConfig,
+    ShortcutConfig shortcutConfig,
   ) {
     final key = event.logicalKey;
 
     if (event is KeyUpEvent) {
-      if (shortcutConfig.matches(_ShortcutAction.videoFastForward, key)) {
+      if (shortcutConfig.matches(ShortcutAction.videoFastForward, key)) {
         setPlaybackSpeed(1);
         if (shortcutHud.value?.hold == true) {
           _hideShortcutHud();
@@ -730,7 +730,7 @@ class _DetectVideoSession extends ChangeNotifier {
 
     final repeated = event is KeyRepeatEvent;
     final previewStep = repeated ? 3 : 1;
-    if (shortcutConfig.matches(_ShortcutAction.videoPlayPause, key)) {
+    if (shortcutConfig.matches(ShortcutAction.videoPlayPause, key)) {
       if (event is KeyDownEvent) {
         final willPause = isPlaying;
         togglePause();
@@ -738,7 +738,7 @@ class _DetectVideoSession extends ChangeNotifier {
       }
       return KeyEventResult.handled;
     }
-    if (shortcutConfig.matches(_ShortcutAction.browseFullscreen, key)) {
+    if (shortcutConfig.matches(ShortcutAction.browseFullscreen, key)) {
       if (event is KeyDownEvent) {
         _showShortcutHud(
           fullscreen
@@ -749,7 +749,7 @@ class _DetectVideoSession extends ChangeNotifier {
       }
       return KeyEventResult.handled;
     }
-    if (shortcutConfig.matches(_ShortcutAction.browsePreviousMedia, key)) {
+    if (shortcutConfig.matches(ShortcutAction.browsePreviousMedia, key)) {
       selectRelativeMedia(-previewStep).then((changed) {
         if (!_disposed) {
           _showShortcutHud(
@@ -759,7 +759,7 @@ class _DetectVideoSession extends ChangeNotifier {
       });
       return KeyEventResult.handled;
     }
-    if (shortcutConfig.matches(_ShortcutAction.browseNextMedia, key)) {
+    if (shortcutConfig.matches(ShortcutAction.browseNextMedia, key)) {
       selectRelativeMedia(previewStep).then((changed) {
         if (!_disposed) {
           _showShortcutHud(
@@ -769,20 +769,20 @@ class _DetectVideoSession extends ChangeNotifier {
       });
       return KeyEventResult.handled;
     }
-    if (shortcutConfig.matches(_ShortcutAction.browseVolumeUp, key)) {
+    if (shortcutConfig.matches(ShortcutAction.browseVolumeUp, key)) {
       adjustVolume(0.05);
       return KeyEventResult.handled;
     }
-    if (shortcutConfig.matches(_ShortcutAction.browseVolumeDown, key)) {
+    if (shortcutConfig.matches(ShortcutAction.browseVolumeDown, key)) {
       adjustVolume(-0.05);
       return KeyEventResult.handled;
     }
-    if (shortcutConfig.matches(_ShortcutAction.videoRewind, key)) {
+    if (shortcutConfig.matches(ShortcutAction.videoRewind, key)) {
       stepSeconds(repeated ? -3 : -1);
       _showShortcutHud(repeated ? '-3s' : '-1s');
       return KeyEventResult.handled;
     }
-    if (shortcutConfig.matches(_ShortcutAction.videoFastForward, key)) {
+    if (shortcutConfig.matches(ShortcutAction.videoFastForward, key)) {
       if (repeated) {
         setPlaybackSpeed(3);
         _showShortcutHud('3x', hold: true);
@@ -830,8 +830,8 @@ class _DetectVideoPage extends StatefulWidget {
     required this.session,
   });
 
-  final _AppSettings settings;
-  final _ShortcutConfig shortcutConfig;
+  final AppSettings settings;
+  final ShortcutConfig shortcutConfig;
   final _DetectVideoSession session;
 
   @override
@@ -841,8 +841,8 @@ class _DetectVideoPage extends StatefulWidget {
 class _DetectVideoPageState extends State<_DetectVideoPage> {
   final FocusNode _focusNode = FocusNode(debugLabel: 'detect-video');
   late final TextEditingController _confController;
-  List<_TrainingDeviceOption> _nvidiaDeviceOptions = const [];
-  _OpenVinoDeviceInfo _openVinoInfo = const _OpenVinoDeviceInfo();
+  List<TrainingDeviceOption> _nvidiaDeviceOptions = const [];
+  OpenVinoDeviceInfo _openVinoInfo = const OpenVinoDeviceInfo();
   late final String _autoFallbackDeviceLabel;
   String? _activePredictionCancelPath;
   int? _pendingPredictionStartFrame;
@@ -896,25 +896,25 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
   }
 
   Future<void> _loadInferenceDeviceOptions() async {
-    if (_resolvePythonExecutable(widget.settings.pythonPath.trim()) == null) {
+    if (resolvePythonExecutable(widget.settings.pythonPath.trim()) == null) {
       if (mounted &&
           (_nvidiaDeviceOptions.isNotEmpty ||
               _openVinoInfo.hasDevices ||
               _openVinoInfo.hasError)) {
         setState(() {
           _nvidiaDeviceOptions = const [];
-          _openVinoInfo = const _OpenVinoDeviceInfo();
+          _openVinoInfo = const OpenVinoDeviceInfo();
         });
       }
       return;
     }
     final results = await Future.wait<Object>([
-      _detectNvidiaDevices(),
-      _detectOpenVinoDevices(widget.settings.pythonPath.trim()),
+      detectNvidiaDevices(),
+      detectOpenVinoDevices(widget.settings.pythonPath.trim()),
     ]);
-    final devices = results[0] as List<_TrainingDeviceOption>;
-    final openVinoInfo = results[1] as _OpenVinoDeviceInfo;
-    devices.sort((a, b) => _naturalCompare(a.id, b.id));
+    final devices = results[0] as List<TrainingDeviceOption>;
+    final openVinoInfo = results[1] as OpenVinoDeviceInfo;
+    devices.sort((a, b) => naturalCompare(a.id, b.id));
     if (openVinoInfo.hasDevices) {
       _log(
         'DETECT',
@@ -1074,7 +1074,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
       );
       _log(
         'DETECT',
-        'Detection started: save=$save, currentOnly=$currentOnly, allImages=$allImages, targets=${targets.length}, model=${_fileName(modelPath)}, device=$deviceArgument, deviceSelection=${_session.detectDevice}, imgsz=${_session.detectImageSize}, conf=${_session.detectConf.toStringAsFixed(2)}, outputDir=$outputDir, startFrame=$startFrame',
+        'Detection started: save=$save, currentOnly=$currentOnly, allImages=$allImages, targets=${targets.length}, model=${fileName(modelPath)}, device=$deviceArgument, deviceSelection=${_session.detectDevice}, imgsz=${_session.detectImageSize}, conf=${_session.detectConf.toStringAsFixed(2)}, outputDir=$outputDir, startFrame=$startFrame',
       );
       for (final target in targets) {
         if (!mounted) {
@@ -1083,7 +1083,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
         final isVideo = _isVideoPath(target);
         _session.videoStatus =
             '${t('detect.predicting')} ${completed + 1}/${targets.length}: '
-            '${_fileName(target)}';
+            '${fileName(target)}';
         _session._emit();
         final outputName = _detectOutputName(target, save: save);
         final previewVideo = isVideo && !save;
@@ -1091,16 +1091,16 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
         if (previewVideo) {
           _activePredictionCancelPath = cancelPath;
           _clearCancelFile(cancelPath);
-          final manifestPath = _joinPath(outputDir, outputName);
+          final manifestPath = joinPath(outputDir, outputName);
           _writeEmptyPredictionManifest(manifestPath, startFrame: startFrame);
           _session.cachePredictionOutputForInput(target, manifestPath);
-          if (_pathKey(target) == _pathKey(_session.selectedInput ?? '')) {
+          if (pathKey(target) == pathKey(_session.selectedInput ?? '')) {
             _session.predictVideo = true;
             _session.showPredictionResult = true;
             await _session.setPredictionOutput(manifestPath);
           }
         }
-        final result = await _RustVideoBackend.detect(
+        final result = await RustBackend.detect(
           mode: isVideo ? 'video' : 'image',
           pythonPath: pythonPath,
           modelPath: modelPath,
@@ -1115,8 +1115,8 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
           cancelPath: cancelPath,
           startFrame: previewVideo ? startFrame : 0,
         );
-        if (_pathKey(_activePredictionCancelPath ?? '') ==
-            _pathKey(cancelPath)) {
+        if (pathKey(_activePredictionCancelPath ?? '') ==
+            pathKey(cancelPath)) {
           _activePredictionCancelPath = null;
         }
         if (!mounted) {
@@ -1141,7 +1141,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
           level: _LogLevel.debug,
         );
         _session.cachePredictionOutputForInput(target, result.outputPath);
-        if (_pathKey(target) == _pathKey(_session.selectedInput ?? '')) {
+        if (pathKey(target) == pathKey(_session.selectedInput ?? '')) {
           _session.predictVideo = isVideo;
           _session.showPredictionResult = true;
           await _session.setPredictionOutput(result.outputPath);
@@ -1186,12 +1186,12 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
       return [currentInput];
     }
     final targets = _session.folderItems
-        .where(_isImagePath)
+        .where(isImagePath)
         .toList(growable: false);
     if (targets.isNotEmpty) {
       return targets;
     }
-    return _isImagePath(currentInput) ? [currentInput] : const [];
+    return isImagePath(currentInput) ? [currentInput] : const [];
   }
 
   Future<String> _detectOutputDirectory({
@@ -1201,7 +1201,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
   }) async {
     final root = widget.settings.outputPath.trim().isNotEmpty
         ? widget.settings.outputPath.trim()
-        : _ConfigStore.defaultRunsDirectory.path;
+        : ConfigStore.defaultRunsDirectory.path;
     final directory = save
         ? _nextDetectRunDirectory(
             root,
@@ -1210,18 +1210,18 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
               pythonPath: pythonPath,
             ),
           )
-        : Directory(_joinPath(root, 'detect_preview'));
+        : Directory(joinPath(root, 'detect_preview'));
     directory.createSync(recursive: true);
     return directory.path;
   }
 
   Directory _nextDetectRunDirectory(String root, String taskFolder) {
-    final taskRoot = Directory(_joinPath(root, taskFolder));
+    final taskRoot = Directory(joinPath(root, taskFolder));
     taskRoot.createSync(recursive: true);
     var index = 1;
     while (true) {
       final folderName = index == 1 ? 'detect' : 'detect$index';
-      final candidate = Directory(_joinPath(taskRoot.path, folderName));
+      final candidate = Directory(joinPath(taskRoot.path, folderName));
       if (!candidate.existsSync()) {
         return candidate;
       }
@@ -1240,7 +1240,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
       return 'hbb';
     }
     try {
-      final result = await _RustVideoBackend.detectModelTask(
+      final result = await RustBackend.detectModelTask(
         pythonPath: pythonPath,
         modelPath: modelPath,
       );
@@ -1254,24 +1254,24 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
   }
 
   String _detectOutputName(String input, {required bool save}) {
-    final stem = _baseNameWithoutExtension(input);
+    final stem = baseNameWithoutExtension(input);
     final extension = _isVideoPath(input) ? (save ? '.mp4' : '.json') : '.jpg';
     final suffix = save ? 'pred' : 'preview_${_pathHash(input)}';
     return '${stem}_$suffix$extension';
   }
 
   String _detectCancelPath(String input) {
-    return _joinPath(
+    return joinPath(
       _detectPreviewDirectory(),
-      '${_baseNameWithoutExtension(input)}_${_pathHash(input)}.cancel',
+      '${baseNameWithoutExtension(input)}_${_pathHash(input)}.cancel',
     );
   }
 
   String _detectPreviewDirectory() {
     final root = widget.settings.outputPath.trim().isNotEmpty
         ? widget.settings.outputPath.trim()
-        : _ConfigStore.defaultRunsDirectory.path;
-    final directory = Directory(_joinPath(root, 'detect_preview'));
+        : ConfigStore.defaultRunsDirectory.path;
+    final directory = Directory(joinPath(root, 'detect_preview'));
     directory.createSync(recursive: true);
     return directory.path;
   }
@@ -1345,7 +1345,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
   }
 
   String _pathHash(String input) {
-    return _pathKey(input).hashCode.toUnsigned(32).toRadixString(16);
+    return pathKey(input).hashCode.toUnsigned(32).toRadixString(16);
   }
 
   void _applyConfText() {
@@ -1484,7 +1484,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
-    if (_isEditableTextFocused()) {
+    if (isEditableTextFocused()) {
       return KeyEventResult.ignored;
     }
     final key = event.logicalKey;
@@ -1492,13 +1492,13 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
         _session.predicting ||
         _isPredictionManifestPath(_session.predictionOutputPath ?? '');
     if (predictionPreviewActive &&
-        (widget.shortcutConfig.matches(_ShortcutAction.videoFastForward, key) ||
-            widget.shortcutConfig.matches(_ShortcutAction.videoRewind, key))) {
+        (widget.shortcutConfig.matches(ShortcutAction.videoFastForward, key) ||
+            widget.shortcutConfig.matches(ShortcutAction.videoRewind, key))) {
       return KeyEventResult.handled;
     }
     if (_session.predicting &&
         event is KeyDownEvent &&
-        widget.shortcutConfig.matches(_ShortcutAction.videoPlayPause, key)) {
+        widget.shortcutConfig.matches(ShortcutAction.videoPlayPause, key)) {
       _cancelActivePrediction();
       return KeyEventResult.handled;
     }
@@ -1565,7 +1565,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
                       const SizedBox(height: 12),
                       if (_session.selectedInput != null)
                         Text(
-                          '${t('detect.fileName')}: ${_fileName(_session.selectedInput!)}',
+                          '${t('detect.fileName')}: ${fileName(_session.selectedInput!)}',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),

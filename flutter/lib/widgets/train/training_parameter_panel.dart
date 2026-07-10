@@ -1,7 +1,13 @@
-part of '../../main.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 
-class _TrainingParameterPanel extends StatelessWidget {
-  const _TrainingParameterPanel({
+import '../../models/training.dart';
+import '../../services/i18n.dart';
+import '../../theme/theme_helpers.dart';
+import 'train_runtime_support.dart';
+
+class TrainingParameterPanel extends StatelessWidget {
+  const TrainingParameterPanel({
     required this.parameters,
     required this.stringParameters,
     required this.batchMode,
@@ -26,17 +32,17 @@ class _TrainingParameterPanel extends StatelessWidget {
 
   final Map<String, double> parameters;
   final Map<String, String> stringParameters;
-  final _BatchMode batchMode;
+  final BatchMode batchMode;
   final double batchSize;
   final double batchRatio;
   final bool ampEnabled;
-  final List<_TrainingDeviceOption> deviceOptions;
+  final List<TrainingDeviceOption> deviceOptions;
   final Set<String> selectedDeviceIds;
   final String batchArgument;
   final String deviceArgument;
   final void Function(String key, double value) onChanged;
   final void Function(String key, String value) onStringChanged;
-  final ValueChanged<_BatchMode> onBatchModeChanged;
+  final ValueChanged<BatchMode> onBatchModeChanged;
   final ValueChanged<double> onBatchSizeChanged;
   final ValueChanged<double> onBatchRatioChanged;
   final ValueChanged<bool> onAmpChanged;
@@ -57,7 +63,7 @@ class _TrainingParameterPanel extends StatelessWidget {
           Expanded(
             child: ListView(
               children: [
-                _ParameterSectionTitle(title: t('train.coreParameters')),
+                ParameterSectionTitle(title: t('train.coreParameters')),
                 _BatchParameterEditor(
                   mode: batchMode,
                   batchSize: batchSize,
@@ -85,7 +91,7 @@ class _TrainingParameterPanel extends StatelessWidget {
                     name: entry.key,
                     value: entry.value,
                     options:
-                        _trainingStringParameterOptions[entry.key] ??
+                        trainingStringParameterOptions[entry.key] ??
                         const <String>[],
                     onChanged: (value) => onStringChanged(entry.key, value),
                   ),
@@ -98,7 +104,7 @@ class _TrainingParameterPanel extends StatelessWidget {
                     label: Text(t('action.reset')),
                   ),
                 ),
-                _ParameterSectionTitle(title: t('train.tuningTitle')),
+                ParameterSectionTitle(title: t('train.tuningTitle')),
                 _TrainingTuningTips(),
               ],
             ),
@@ -109,8 +115,8 @@ class _TrainingParameterPanel extends StatelessWidget {
   }
 }
 
-class _ParameterSectionTitle extends StatelessWidget {
-  const _ParameterSectionTitle({required this.title});
+class ParameterSectionTitle extends StatelessWidget {
+  const ParameterSectionTitle({required this.title});
 
   final String title;
 
@@ -134,11 +140,11 @@ class _BatchParameterEditor extends StatelessWidget {
     required this.onBatchRatioChanged,
   });
 
-  final _BatchMode mode;
+  final BatchMode mode;
   final double batchSize;
   final double batchRatio;
   final String argumentValue;
-  final ValueChanged<_BatchMode> onModeChanged;
+  final ValueChanged<BatchMode> onModeChanged;
   final ValueChanged<double> onBatchSizeChanged;
   final ValueChanged<double> onBatchRatioChanged;
 
@@ -146,38 +152,38 @@ class _BatchParameterEditor extends StatelessWidget {
   Widget build(BuildContext context) {
     return Tooltip(
       waitDuration: const Duration(milliseconds: 500),
-      message: _parameterHelp('batch'),
+      message: trainingParameterHelp('batch'),
       child: Padding(
         padding: const EdgeInsets.only(bottom: 14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _ParameterHeader(name: 'batch', value: 'batch=$argumentValue'),
+            ParameterHeader(name: 'batch', value: 'batch=$argumentValue'),
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
                 ChoiceChip(
-                  selected: mode == _BatchMode.fixed,
+                  selected: mode == BatchMode.fixed,
                   label: Text(t('train.batchFixed')),
-                  onSelected: (_) => onModeChanged(_BatchMode.fixed),
+                  onSelected: (_) => onModeChanged(BatchMode.fixed),
                 ),
                 ChoiceChip(
-                  selected: mode == _BatchMode.autoGpu60,
+                  selected: mode == BatchMode.autoGpu60,
                   label: Text(t('train.batchAuto60')),
-                  onSelected: (_) => onModeChanged(_BatchMode.autoGpu60),
+                  onSelected: (_) => onModeChanged(BatchMode.autoGpu60),
                 ),
                 ChoiceChip(
-                  selected: mode == _BatchMode.autoGpuRatio,
+                  selected: mode == BatchMode.autoGpuRatio,
                   label: Text(t('train.batchRatio')),
-                  onSelected: (_) => onModeChanged(_BatchMode.autoGpuRatio),
+                  onSelected: (_) => onModeChanged(BatchMode.autoGpuRatio),
                 ),
               ],
             ),
             const SizedBox(height: 8),
-            if (mode == _BatchMode.fixed)
-              _CompactSlider(
+            if (mode == BatchMode.fixed)
+              CompactSlider(
                 value: batchSize,
                 min: 1,
                 max: 128,
@@ -186,8 +192,8 @@ class _BatchParameterEditor extends StatelessWidget {
                 onChanged: onBatchSizeChanged,
                 integer: true,
               )
-            else if (mode == _BatchMode.autoGpuRatio)
-              _CompactSlider(
+            else if (mode == BatchMode.autoGpuRatio)
+              CompactSlider(
                 value: batchRatio,
                 min: 0.10,
                 max: 0.95,
@@ -214,7 +220,7 @@ class _AmpParameterEditor extends StatelessWidget {
   Widget build(BuildContext context) {
     return Tooltip(
       waitDuration: const Duration(milliseconds: 500),
-      message: _parameterHelp('amp'),
+      message: trainingParameterHelp('amp'),
       child: SwitchListTile(
         contentPadding: EdgeInsets.zero,
         dense: true,
@@ -235,7 +241,7 @@ class _DeviceParameterEditor extends StatelessWidget {
     required this.onChanged,
   });
 
-  final List<_TrainingDeviceOption> options;
+  final List<TrainingDeviceOption> options;
   final Set<String> selectedIds;
   final String argumentValue;
   final void Function(String id, bool selected) onChanged;
@@ -244,13 +250,13 @@ class _DeviceParameterEditor extends StatelessWidget {
   Widget build(BuildContext context) {
     return Tooltip(
       waitDuration: const Duration(milliseconds: 500),
-      message: _parameterHelp('device'),
+      message: trainingParameterHelp('device'),
       child: Padding(
         padding: const EdgeInsets.only(bottom: 14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _ParameterHeader(name: 'device', value: 'device=$argumentValue'),
+            ParameterHeader(name: 'device', value: 'device=$argumentValue'),
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
@@ -285,8 +291,8 @@ class _DeviceParameterEditor extends StatelessWidget {
   }
 }
 
-class _ParameterHeader extends StatelessWidget {
-  const _ParameterHeader({required this.name, required this.value});
+class ParameterHeader extends StatelessWidget {
+  const ParameterHeader({required this.name, required this.value});
 
   final String name;
   final String value;
@@ -295,7 +301,7 @@ class _ParameterHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        SizedBox(width: _parameterNameWidth, child: Text(name)),
+        SizedBox(width: trainingParameterNameWidth, child: Text(name)),
         Expanded(
           child: Text(
             value,
@@ -308,8 +314,8 @@ class _ParameterHeader extends StatelessWidget {
   }
 }
 
-class _CompactSlider extends StatelessWidget {
-  const _CompactSlider({
+class CompactSlider extends StatelessWidget {
+  const CompactSlider({
     required this.value,
     required this.min,
     required this.max,
@@ -466,8 +472,14 @@ class _TrainingTuningTips extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: _controlColor(context),
-        border: Border.all(color: _borderColor(context)),
+        color: appControlColor(
+          Theme.of(context).brightness == Brightness.dark,
+        ),
+        border: Border.all(
+          color: appBorderColor(
+            Theme.of(context).brightness == Brightness.dark,
+          ),
+        ),
         borderRadius: BorderRadius.circular(6),
       ),
       child: Padding(
@@ -481,8 +493,8 @@ class _TrainingTuningTips extends StatelessWidget {
   }
 }
 
-class _ImageSizeParameterEditor extends StatelessWidget {
-  const _ImageSizeParameterEditor({
+class ImageSizeParameterEditor extends StatelessWidget {
+  const ImageSizeParameterEditor({
     required this.value,
     required this.onChanged,
     this.enabled = true,
@@ -494,30 +506,35 @@ class _ImageSizeParameterEditor extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final index = _nearestImageSizeIndex(value);
-    final currentSize = _imageSizeOptions[index];
+    final index = nearestTrainingImageSizeIndex(value);
+    final currentSize = trainingImageSizeOptions[index];
     return Tooltip(
       waitDuration: const Duration(milliseconds: 500),
-      message: _parameterHelp('imgsz'),
+      message: trainingParameterHelp('imgsz'),
       child: Padding(
         padding: const EdgeInsets.only(bottom: 12),
         child: Row(
           children: [
-            const SizedBox(width: _parameterNameWidth, child: Text('imgsz')),
+            const SizedBox(
+              width: trainingParameterNameWidth,
+              child: Text('imgsz'),
+            ),
             Expanded(
               child: Slider(
                 value: index.toDouble(),
                 min: 0,
-                max: (_imageSizeOptions.length - 1).toDouble(),
-                divisions: _imageSizeOptions.length - 1,
+                max: (trainingImageSizeOptions.length - 1).toDouble(),
+                divisions: trainingImageSizeOptions.length - 1,
                 label: currentSize.toString(),
                 onChanged: enabled
                     ? (sliderIndex) {
                         final nextIndex = sliderIndex.round().clamp(
                           0,
-                          _imageSizeOptions.length - 1,
+                          trainingImageSizeOptions.length - 1,
                         );
-                        onChanged(_imageSizeOptions[nextIndex].toDouble());
+                        onChanged(
+                          trainingImageSizeOptions[nextIndex].toDouble(),
+                        );
                       }
                     : null,
               ),
@@ -525,10 +542,10 @@ class _ImageSizeParameterEditor extends StatelessWidget {
             _NumericParameterField(
               value: currentSize.toDouble(),
               label: currentSize.toString(),
-              min: _imageSizeOptions.first.toDouble(),
-              max: _imageSizeOptions.last.toDouble(),
+              min: trainingImageSizeOptions.first.toDouble(),
+              max: trainingImageSizeOptions.last.toDouble(),
               integer: true,
-              normalize: _nearestImageSizeValue,
+              normalize: nearestTrainingImageSizeValue,
               enabled: enabled,
               onSubmitted: onChanged,
             ),
@@ -553,7 +570,7 @@ class _ParameterEditor extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (name == 'imgsz') {
-      return _ImageSizeParameterEditor(value: value, onChanged: onChanged);
+      return ImageSizeParameterEditor(value: value, onChanged: onChanged);
     }
 
     final integerLike = {
@@ -562,18 +579,18 @@ class _ParameterEditor extends StatelessWidget {
       'workers',
       'patience',
     }.contains(name);
-    final min = _minForParameter(name);
-    final max = _maxForParameter(name);
+    final min = minForTrainingParameter(name);
+    final max = maxForTrainingParameter(name);
     final divisions = integerLike ? (max - min).round() : 100;
-    final label = _formatParameterValue(name, value);
+    final label = formatTrainingParameterValue(name, value);
     return Tooltip(
       waitDuration: const Duration(milliseconds: 500),
-      message: _parameterHelp(name),
+      message: trainingParameterHelp(name),
       child: Padding(
         padding: const EdgeInsets.only(bottom: 12),
         child: Row(
           children: [
-            SizedBox(width: _parameterNameWidth, child: Text(name)),
+            SizedBox(width: trainingParameterNameWidth, child: Text(name)),
             Expanded(
               child: Slider(
                 value: value,
@@ -590,7 +607,10 @@ class _ParameterEditor extends StatelessWidget {
               min: min,
               max: max,
               integer: integerLike,
-              normalize: (input) => _normalizeParameterValue(name, input),
+              normalize: (input) => normalizeTrainingParameterValue(
+                name,
+                input,
+              ),
               onSubmitted: onChanged,
             ),
           ],
@@ -618,12 +638,12 @@ class _StringParameterEditor extends StatelessWidget {
     final choices = options.contains(value) ? options : [value, ...options];
     return Tooltip(
       waitDuration: const Duration(milliseconds: 500),
-      message: _parameterHelp(name),
+      message: trainingParameterHelp(name),
       child: Padding(
         padding: const EdgeInsets.only(bottom: 12),
         child: Row(
           children: [
-            SizedBox(width: _parameterNameWidth, child: Text(name)),
+            SizedBox(width: trainingParameterNameWidth, child: Text(name)),
             Expanded(
               child: DropdownButtonFormField<String>(
                 initialValue: value,

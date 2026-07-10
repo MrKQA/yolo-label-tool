@@ -12,9 +12,9 @@ class _SettingsDialog extends StatefulWidget {
     required this.onClearCache,
   });
 
-  final _AppSettings initialSettings;
+  final AppSettings initialSettings;
   final int cacheSizeBytes;
-  final ValueChanged<_AppSettings> onSave;
+  final ValueChanged<AppSettings> onSave;
   final Future<int> Function() onClearCache;
 
   @override
@@ -102,7 +102,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       return;
     }
     final generation = ++_pythonCheckGeneration;
-    final executable = _resolvePythonExecutable(selectedPath);
+    final executable = resolvePythonExecutable(selectedPath);
     if (executable == null) {
       _log(
         'SETTINGS',
@@ -184,7 +184,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
 
   void _save() {
     widget.onSave(
-      _AppSettings(
+      AppSettings(
         pythonPath: _pythonController.text.trim(),
         outputPath: _outputController.text.trim(),
         exportPath: _exportController.text.trim(),
@@ -221,7 +221,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             children: [
               _SettingsReadOnlyRow(
                 label: t('settings.configPath'),
-                value: _ConfigStore.databaseFile.path,
+                value: ConfigStore.databaseFile.path,
               ),
               const SizedBox(height: 12),
               _PathSettingRow(
@@ -462,46 +462,6 @@ class _PythonEnvironmentCheck {
   final bool valid;
   final String executablePath;
   final String message;
-}
-
-String? _resolvePythonExecutable(String selectedPath) {
-  final normalized = selectedPath.trim().replaceAll('/', '\\');
-  if (normalized.isEmpty) {
-    return null;
-  }
-  final selectedFile = File(normalized);
-  if (selectedFile.existsSync() &&
-      _fileName(normalized).toLowerCase().endsWith('.exe')) {
-    return selectedFile.path;
-  }
-  final directory = Directory(normalized);
-  if (!directory.existsSync()) {
-    return null;
-  }
-  final candidates = <String>[
-    '${directory.path}\\python.exe',
-    '${directory.path}\\Scripts\\python.exe',
-    '${directory.path}\\.venv\\Scripts\\python.exe',
-    '${directory.path}\\venv\\Scripts\\python.exe',
-  ];
-  try {
-    for (final entity in directory.listSync()) {
-      if (entity is! Directory) {
-        continue;
-      }
-      candidates.add('${entity.path}\\python.exe');
-      candidates.add('${entity.path}\\Scripts\\python.exe');
-    }
-  } on Object {
-    // Some environment roots contain protected directories; direct candidates
-    // above are enough for the common conda/venv layouts.
-  }
-  for (final candidate in _dedupePaths(candidates)) {
-    if (File(candidate).existsSync()) {
-      return candidate;
-    }
-  }
-  return null;
 }
 
 Future<_PythonEnvironmentCheck> _probePythonEnvironment(

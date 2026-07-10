@@ -11,8 +11,8 @@ class _AnnotationListPanel extends StatelessWidget {
     required this.onAnnotationClassChanged,
   });
 
-  final List<_AnnotationRegion> annotations;
-  final List<_LabelClass> labelClasses;
+  final List<AnnotationRegion> annotations;
+  final List<LabelClass> labelClasses;
   final String? selectedAnnotationId;
   final ValueChanged<String?> onAnnotationSelected;
   final void Function(String annotationId, int classId)
@@ -142,7 +142,7 @@ class _AnnotationListPanel extends StatelessWidget {
   }
 }
 
-String _annotationCoordinateTooltip(_AnnotationRegion annotation) {
+String _annotationCoordinateTooltip(AnnotationRegion annotation) {
   final rect = annotation.rect;
   final lines = [
     '${annotation.mode.label} 图片坐标',
@@ -151,10 +151,10 @@ String _annotationCoordinateTooltip(_AnnotationRegion annotation) {
     'center=(${_coord(rect.center.dx)}, ${_coord(rect.center.dy)})',
     'size=${_coord(rect.width)} x ${_coord(rect.height)}',
   ];
-  if (annotation.mode == _AnnotationMode.obb) {
+  if (annotation.mode == AnnotationMode.obb) {
     lines.add('rotation=${annotation.rotationDegrees.toStringAsFixed(1)}°');
   }
-  if (annotation.mode == _AnnotationMode.seg && annotation.points.isNotEmpty) {
+  if (annotation.mode == AnnotationMode.seg && annotation.points.isNotEmpty) {
     lines.add('points=${annotation.points.length}');
     final previewPoints = annotation.points
         .take(6)

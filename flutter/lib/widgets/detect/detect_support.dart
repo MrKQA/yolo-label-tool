@@ -10,9 +10,9 @@ List<String> _mediaFilesInDirectory(String folderPath) {
           .listSync()
           .whereType<File>()
           .map((file) => file.path)
-          .where((path) => _isImagePath(path) || _isVideoPath(path))
+          .where((path) => isImagePath(path) || _isVideoPath(path))
           .toList()
-        ..sort(_naturalPathCompare);
+        ..sort(naturalPathCompare);
   return files;
 }
 

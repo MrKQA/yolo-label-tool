@@ -28,8 +28,8 @@ class _AiToolbar extends StatelessWidget {
 
   final String activeTool;
   final int? activeClassId;
-  final List<_LabelClass> labelClasses;
-  final List<_AnnotationRegion> annotations;
+  final List<LabelClass> labelClasses;
+  final List<AnnotationRegion> annotations;
   final String? selectedAnnotationId;
   final bool showClassLabels;
   final bool aiPanelVisible;
@@ -37,9 +37,9 @@ class _AiToolbar extends StatelessWidget {
   final ValueChanged<String> onToolSelected;
   final ValueChanged<int> onClassSelected;
   final VoidCallback onClassAdded;
-  final ValueChanged<_LabelClass> onClassEdited;
-  final ValueChanged<_LabelClass> onClassColorChanged;
-  final ValueChanged<_LabelClass> onClassDeleted;
+  final ValueChanged<LabelClass> onClassEdited;
+  final ValueChanged<LabelClass> onClassColorChanged;
+  final ValueChanged<LabelClass> onClassDeleted;
   final void Function(int oldIndex, int newIndex) onClassReordered;
   final VoidCallback onToggleClassLabels;
   final ValueChanged<String?> onAnnotationSelected;

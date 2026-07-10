@@ -1,55 +1,64 @@
-part of '../../main.dart';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:math' as math;
 
-Future<String> _readTrainingLogTail() async {
+import '../../models/training.dart';
+import '../../services/i18n.dart';
+import '../../services/import_dataset.dart';
+import '../../services/path_utils.dart';
+import '../../services/python_environment.dart';
+import '../../services/rust_backend.dart';
+
+Future<String> readTrainingLogTail() async {
   try {
-    return await _RustVideoBackend.trainingLogTail(maxChars: 30 * 1024);
+    return await RustBackend.trainingLogTail(maxChars: 30 * 1024);
   } on Object catch (error) {
     return '${t('logs.readFailed')}: $error';
   }
 }
 
-Future<_TrainingResourceUsage> _readTrainingResourceUsage() async {
+Future<TrainingResourceUsage> readTrainingResourceUsage() async {
   try {
-    return await _RustVideoBackend.trainingResourceUsage();
+    return await RustBackend.trainingResourceUsage();
   } on Object {
-    return const _TrainingResourceUsage();
+    return const TrainingResourceUsage();
   }
 }
 
-String _trainingActionLabel(_TrainingHistoryAction action) {
+String trainingActionLabel(TrainingHistoryAction action) {
   return switch (action) {
-    _TrainingHistoryAction.start => t('train.historyStart'),
-    _TrainingHistoryAction.resume => t('train.historyResume'),
-    _TrainingHistoryAction.stop => t('train.historyStop'),
+    TrainingHistoryAction.start => t('train.historyStart'),
+    TrainingHistoryAction.resume => t('train.historyResume'),
+    TrainingHistoryAction.stop => t('train.historyStop'),
   };
 }
 
-String _formatTrainingHistoryTime(DateTime value) {
+String formatTrainingHistoryTime(DateTime value) {
   String twoDigits(int number) => number.toString().padLeft(2, '0');
   return '${value.year}-${twoDigits(value.month)}-${twoDigits(value.day)} '
       '${twoDigits(value.hour)}:${twoDigits(value.minute)}:${twoDigits(value.second)}';
 }
 
-int? _readTrainingEpochs(File argsYaml) {
+int? readTrainingEpochs(File argsYaml) {
   if (!argsYaml.existsSync()) {
     return null;
   }
-  final value = _importYamlScalar(argsYaml.readAsLinesSync(), 'epochs');
+  final value = importYamlScalar(argsYaml.readAsLinesSync(), 'epochs');
   return value == null ? null : int.tryParse(value);
 }
 
-String? _readTrainingDataPath(File argsYaml, String runDir) {
+String? readTrainingDataPath(File argsYaml, String runDir) {
   if (!argsYaml.existsSync()) {
     return null;
   }
-  final value = _importYamlScalar(argsYaml.readAsLinesSync(), 'data');
+  final value = importYamlScalar(argsYaml.readAsLinesSync(), 'data');
   if (value == null || value.isEmpty) {
     return null;
   }
-  return _resolveImportDatasetPath(runDir, value);
+  return resolveImportDatasetPath(runDir, value);
 }
 
-int? _readLastResultEpoch(File resultsCsv) {
+int? readLastTrainingResultEpoch(File resultsCsv) {
   if (!resultsCsv.existsSync()) {
     return null;
   }
@@ -68,7 +77,7 @@ int? _readLastResultEpoch(File resultsCsv) {
   return lastEpoch;
 }
 
-List<_TrainingMetricPoint> _readTrainingMetricPoints(File resultsCsv) {
+List<TrainingMetricPoint> readTrainingMetricPoints(File resultsCsv) {
   if (!resultsCsv.existsSync()) {
     return const [];
   }
@@ -84,7 +93,7 @@ List<_TrainingMetricPoint> _readTrainingMetricPoints(File resultsCsv) {
     return const [];
   }
 
-  final pointsByEpoch = <int, _TrainingMetricPoint>{};
+  final pointsByEpoch = <int, TrainingMetricPoint>{};
   for (final rawLine in lines.skip(headerIndex + 1)) {
     final line = rawLine.trim();
     if (line.isEmpty || line.toLowerCase().startsWith('epoch')) {
@@ -114,7 +123,7 @@ List<_TrainingMetricPoint> _readTrainingMetricPoints(File resultsCsv) {
     if (!_hasAnyTrainingMetric(metrics)) {
       continue;
     }
-    pointsByEpoch[epoch] = _TrainingMetricPoint(
+    pointsByEpoch[epoch] = TrainingMetricPoint(
       epoch: epoch,
       timestamp: DateTime.now(),
       metrics: metrics,
@@ -123,15 +132,15 @@ List<_TrainingMetricPoint> _readTrainingMetricPoints(File resultsCsv) {
 
   final points = pointsByEpoch.values.toList()
     ..sort((a, b) => a.epoch.compareTo(b.epoch));
-  return _trimTrainingMetricPoints(points);
+  return trimTrainingMetricPoints(points);
 }
 
 List<String> _splitTrainingCsvLine(String line) {
   return line.split(',').map((value) => value.trim()).toList();
 }
 
-_TrainingMetrics _trainingMetricsFromResultsMap(Map<String, double> map) {
-  return _TrainingMetrics(
+TrainingMetrics _trainingMetricsFromResultsMap(Map<String, double> map) {
+  return TrainingMetrics(
     trainLoss: _trainingCsvValue(map, const ['train/box_loss', 'train/loss']),
     valLoss: _trainingCsvValue(map, const ['val/box_loss', 'val/loss']),
     map50: _trainingCsvValue(map, const [
@@ -164,7 +173,7 @@ double? _trainingCsvValue(Map<String, double> map, List<String> keys) {
   return null;
 }
 
-bool _hasAnyTrainingMetric(_TrainingMetrics metrics) {
+bool _hasAnyTrainingMetric(TrainingMetrics metrics) {
   return metrics.trainLoss != null ||
       metrics.valLoss != null ||
       metrics.map50 != null ||
@@ -174,16 +183,16 @@ bool _hasAnyTrainingMetric(_TrainingMetrics metrics) {
       metrics.lr != null;
 }
 
-List<_TrainingMetricPoint> _trimTrainingMetricPoints(
-  List<_TrainingMetricPoint> points,
+List<TrainingMetricPoint> trimTrainingMetricPoints(
+  List<TrainingMetricPoint> points,
 ) {
-  if (points.length <= _trainingChartPointLimit) {
+  if (points.length <= trainingChartPointLimit) {
     return points;
   }
-  return points.sublist(points.length - _trainingChartPointLimit);
+  return points.sublist(points.length - trainingChartPointLimit);
 }
 
-Future<List<_TrainingDeviceOption>> _detectNvidiaDevices() async {
+Future<List<TrainingDeviceOption>> detectNvidiaDevices() async {
   try {
     final result =
         await Process.run('nvidia-smi', [
@@ -211,22 +220,22 @@ Future<List<_TrainingDeviceOption>> _detectNvidiaDevices() async {
           if (id.isEmpty) {
             return null;
           }
-          return _TrainingDeviceOption(
+          return TrainingDeviceOption(
             id: id,
             label: name.isEmpty ? 'GPU $id' : 'GPU $id - $name',
           );
         })
-        .whereType<_TrainingDeviceOption>()
+        .whereType<TrainingDeviceOption>()
         .toList();
   } on Object {
     return const [];
   }
 }
 
-Future<_OpenVinoDeviceInfo> _detectOpenVinoDevices(String pythonPath) async {
-  final executable = _resolvePythonExecutable(pythonPath);
+Future<OpenVinoDeviceInfo> detectOpenVinoDevices(String pythonPath) async {
+  final executable = resolvePythonExecutable(pythonPath);
   if (executable == null) {
-    return const _OpenVinoDeviceInfo(error: 'Python path is not configured');
+    return const OpenVinoDeviceInfo(error: 'Python path is not configured');
   }
   const script = '''
 import json
@@ -244,13 +253,13 @@ except Exception as error:
     final stdout = result.stdout.toString().trim();
     final stderr = result.stderr.toString().trim();
     if (result.exitCode != 0) {
-      return _OpenVinoDeviceInfo(
+      return OpenVinoDeviceInfo(
         rawOutput: stdout,
         error: stderr.isEmpty ? 'exit code ${result.exitCode}' : stderr,
       );
     }
     if (stdout.isEmpty) {
-      return _OpenVinoDeviceInfo(
+      return OpenVinoDeviceInfo(
         error: stderr.isEmpty ? 'empty OpenVINO probe output' : stderr,
       );
     }
@@ -263,20 +272,20 @@ except Exception as error:
         );
     final decoded = jsonDecode(jsonLine);
     if (decoded is! Map<String, dynamic>) {
-      return _OpenVinoDeviceInfo(
+      return OpenVinoDeviceInfo(
         rawOutput: stdout,
         error: 'invalid OpenVINO probe output',
       );
     }
     if (decoded['ok'] != true) {
-      return _OpenVinoDeviceInfo(
+      return OpenVinoDeviceInfo(
         rawOutput: stdout,
         error: '${decoded['error'] ?? 'OpenVINO probe failed'}',
       );
     }
     final rawDevices = decoded['devices'];
     if (rawDevices is! List) {
-      return _OpenVinoDeviceInfo(
+      return OpenVinoDeviceInfo(
         rawOutput: stdout,
         error: 'OpenVINO device list is missing',
       );
@@ -286,14 +295,14 @@ except Exception as error:
         .where((item) => item.isNotEmpty)
         .toSet()
         .toList()
-      ..sort(_naturalCompare);
-    return _OpenVinoDeviceInfo(devices: devices, rawOutput: stdout);
+      ..sort(naturalCompare);
+    return OpenVinoDeviceInfo(devices: devices, rawOutput: stdout);
   } on Object catch (error) {
-    return _OpenVinoDeviceInfo(error: '$error');
+    return OpenVinoDeviceInfo(error: '$error');
   }
 }
 
-double _minForParameter(String name) {
+double minForTrainingParameter(String name) {
   return switch (name) {
     'epochs' => 1,
     'imgsz' => 320,
@@ -304,7 +313,7 @@ double _minForParameter(String name) {
   };
 }
 
-double _maxForParameter(String name) {
+double maxForTrainingParameter(String name) {
   return switch (name) {
     'epochs' => 500,
     'imgsz' => 1280,
@@ -320,11 +329,11 @@ double _maxForParameter(String name) {
   };
 }
 
-int _nearestImageSizeIndex(double value) {
+int nearestTrainingImageSizeIndex(double value) {
   var nearestIndex = 0;
   var nearestDelta = double.infinity;
-  for (var index = 0; index < _imageSizeOptions.length; index += 1) {
-    final delta = (value - _imageSizeOptions[index]).abs();
+  for (var index = 0; index < trainingImageSizeOptions.length; index += 1) {
+    final delta = (value - trainingImageSizeOptions[index]).abs();
     if (delta < nearestDelta) {
       nearestIndex = index;
       nearestDelta = delta;
@@ -333,13 +342,14 @@ int _nearestImageSizeIndex(double value) {
   return nearestIndex;
 }
 
-double _nearestImageSizeValue(double value) {
-  return _imageSizeOptions[_nearestImageSizeIndex(value)].toDouble();
+double nearestTrainingImageSizeValue(double value) {
+  return trainingImageSizeOptions[nearestTrainingImageSizeIndex(value)]
+      .toDouble();
 }
 
-double _normalizeParameterValue(String name, double value) {
+double normalizeTrainingParameterValue(String name, double value) {
   if (name == 'imgsz') {
-    return _nearestImageSizeValue(value);
+    return nearestTrainingImageSizeValue(value);
   }
   if ({'epochs', 'workers', 'patience'}.contains(name)) {
     return value.roundToDouble();
@@ -347,7 +357,7 @@ double _normalizeParameterValue(String name, double value) {
   return value;
 }
 
-String _formatParameterValue(String name, double value) {
+String formatTrainingParameterValue(String name, double value) {
   return switch (name) {
     'epochs' || 'imgsz' || 'workers' || 'patience' => value.round().toString(),
     'lr0' => value.toStringAsFixed(4),
@@ -359,7 +369,7 @@ String _formatParameterValue(String name, double value) {
   };
 }
 
-String _parameterHelp(String name) {
+String trainingParameterHelp(String name) {
   final key = 'train.param.$name';
   return t(key);
 }

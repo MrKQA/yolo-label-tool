@@ -1,17 +1,27 @@
-part of '../../main.dart';
+import 'package:flutter/material.dart';
 
-class _DatasetSummaryPanel extends StatelessWidget {
-  const _DatasetSummaryPanel({required this.summary});
+import '../../models/training.dart';
+import '../../services/i18n.dart';
+import '../../theme/theme_helpers.dart';
 
-  final _DatasetSummary? summary;
+class DatasetSummaryPanel extends StatelessWidget {
+  const DatasetSummaryPanel({required this.summary});
+
+  final DatasetSummary? summary;
 
   @override
   Widget build(BuildContext context) {
     final summary = this.summary;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: _panelColor(context),
-        border: Border.all(color: _borderColor(context)),
+        color: appPanelColor(
+          Theme.of(context).brightness == Brightness.dark,
+        ),
+        border: Border.all(
+          color: appBorderColor(
+            Theme.of(context).brightness == Brightness.dark,
+          ),
+        ),
         borderRadius: BorderRadius.circular(6),
       ),
       child: SizedBox(

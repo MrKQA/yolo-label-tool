@@ -1,6 +1,8 @@
-part of '../main.dart';
+import 'dart:io';
 
-List<String> _imageFilesInDirectory(String folderPath) {
+const _imageExtensions = {'jpg', 'jpeg', 'png', 'bmp', 'webp'};
+
+List<String> imageFilesInDirectory(String folderPath) {
   final directory = Directory(folderPath);
   if (!directory.existsSync()) {
     return [];
@@ -11,24 +13,24 @@ List<String> _imageFilesInDirectory(String folderPath) {
           .listSync()
           .whereType<File>()
           .map((file) => file.path)
-          .where(_isImagePath)
+          .where(isImagePath)
           .toList()
-        ..sort(_naturalPathCompare);
+        ..sort(naturalPathCompare);
 
   return files;
 }
 
 // Natural-sort by filename so 2 comes before 10.
 // Natural-sort by filename so 2 comes before 10, and image02 before image10.
-int _naturalPathCompare(String leftPath, String rightPath) {
-  final result = _naturalCompare(_fileName(leftPath), _fileName(rightPath));
+int naturalPathCompare(String leftPath, String rightPath) {
+  final result = naturalCompare(fileName(leftPath), fileName(rightPath));
   if (result != 0) {
     return result;
   }
-  return _pathKey(leftPath).compareTo(_pathKey(rightPath));
+  return pathKey(leftPath).compareTo(pathKey(rightPath));
 }
 
-int _naturalCompare(String left, String right) {
+int naturalCompare(String left, String right) {
   final leftLower = left.toLowerCase();
   final rightLower = right.toLowerCase();
   var leftIndex = 0;
@@ -101,7 +103,7 @@ String _trimLeadingZeros(String value) {
 
 bool _isAsciiDigit(int codeUnit) => codeUnit >= 48 && codeUnit <= 57;
 
-bool _isImagePath(String path) {
+bool isImagePath(String path) {
   final dotIndex = path.lastIndexOf('.');
   if (dotIndex < 0 || dotIndex == path.length - 1) {
     return false;
@@ -109,30 +111,13 @@ bool _isImagePath(String path) {
   return _imageExtensions.contains(path.substring(dotIndex + 1).toLowerCase());
 }
 
-bool _touchRecent(List<_RecentEntry> items, String value) {
-  final trimmed = value.trim();
-  if (trimmed.isEmpty) {
-    return false;
-  }
-  final key = _pathKey(trimmed);
-  final existingIndex = items.indexWhere((item) => _pathKey(item.path) == key);
-  if (existingIndex >= 0) {
-    items.removeAt(existingIndex);
-  }
-  items.insert(0, _RecentEntry(path: trimmed, timestamp: DateTime.now()));
-  if (items.length > _recentHistoryLimit) {
-    items.removeRange(_recentHistoryLimit, items.length);
-  }
-  return true;
-}
-
-String _fileName(String path) {
+String fileName(String path) {
   final normalized = path.replaceAll('\\', '/');
   final slashIndex = normalized.lastIndexOf('/');
   return slashIndex < 0 ? normalized : normalized.substring(slashIndex + 1);
 }
 
-String _directoryName(String path) {
+String directoryName(String path) {
   final normalized = path.replaceAll('\\', '/');
   final slashIndex = normalized.lastIndexOf('/');
   if (slashIndex < 0) {
@@ -141,14 +126,14 @@ String _directoryName(String path) {
   return normalized.substring(0, slashIndex).replaceAll('/', '\\');
 }
 
-String _baseNameWithoutExtension(String path) {
-  final name = _fileName(path);
+String baseNameWithoutExtension(String path) {
+  final name = fileName(path);
   final dotIndex = name.lastIndexOf('.');
   return dotIndex < 0 ? name : name.substring(0, dotIndex);
 }
 
-void _copyFileOverwrite(String sourcePath, String targetPath) {
-  if (_pathKey(sourcePath) == _pathKey(targetPath)) {
+void copyFileOverwrite(String sourcePath, String targetPath) {
+  if (pathKey(sourcePath) == pathKey(targetPath)) {
     return;
   }
   final target = File(targetPath);
@@ -159,7 +144,7 @@ void _copyFileOverwrite(String sourcePath, String targetPath) {
   File(sourcePath).copySync(targetPath);
 }
 
-String _replaceExtension(String path, String extension) {
+String replaceExtension(String path, String extension) {
   final dotIndex = path.lastIndexOf('.');
   if (dotIndex < 0) {
     return '$path$extension';
@@ -167,16 +152,16 @@ String _replaceExtension(String path, String extension) {
   return path.substring(0, dotIndex) + extension;
 }
 
-String _resolveImportDatasetPath(String rootPath, String value) {
+String resolveImportDatasetPath(String rootPath, String value) {
   final path = value.replaceAll('/', '\\');
   if (_isAbsolutePath(path)) {
     return path;
   }
-  return _joinPath(rootPath, path);
+  return joinPath(rootPath, path);
 }
 
-String _resolveImportDatasetSourcePath(String rootPath, String value) {
-  final direct = _resolveImportDatasetPath(rootPath, value);
+String resolveImportDatasetSourcePath(String rootPath, String value) {
+  final direct = resolveImportDatasetPath(rootPath, value);
   if (_fileSystemPathExists(direct)) {
     return direct;
   }
@@ -201,24 +186,24 @@ String? _resolveRoboflowDatasetSourcePath(String rootPath, String value) {
   if (!strippedAnyParent || normalized.isEmpty) {
     return null;
   }
-  return _resolveImportDatasetPath(rootPath, normalized);
+  return resolveImportDatasetPath(rootPath, normalized);
 }
 
 bool _fileSystemPathExists(String path) {
   return Directory(path).existsSync() || File(path).existsSync();
 }
 
-String _pathForDataYaml(String rootPath, String path) {
+String pathForDataYaml(String rootPath, String path) {
   final root = rootPath.replaceAll('/', '\\');
   final normalized = path.replaceAll('/', '\\');
   final rootWithSlash = root.endsWith('\\') ? root : '$root\\';
-  if (_pathKey(normalized).startsWith(_pathKey(rootWithSlash))) {
+  if (pathKey(normalized).startsWith(pathKey(rootWithSlash))) {
     return normalized.substring(rootWithSlash.length).replaceAll('\\', '/');
   }
   return normalized.replaceAll('\\', '/');
 }
 
-String _joinPath(String left, String right) {
+String joinPath(String left, String right) {
   final normalizedLeft = left.replaceAll('/', '\\');
   final normalizedRight = right.replaceAll('/', '\\');
   if (normalizedLeft.endsWith('\\')) {
@@ -242,20 +227,20 @@ bool _isAsciiLetter(int codeUnit) {
       (codeUnit >= 97 && codeUnit <= 122);
 }
 
-String _pathKey(String path) => path.replaceAll('/', '\\').toLowerCase();
+String pathKey(String path) => path.replaceAll('/', '\\').toLowerCase();
 
-List<String> _stringListFromJson(Object? value) {
+List<String> stringListFromJson(Object? value) {
   if (value is! List) {
     return [];
   }
   return value.whereType<String>().toList();
 }
 
-List<String> _dedupePaths(List<String> values) {
+List<String> dedupePaths(List<String> values) {
   final seen = <String>{};
   final result = <String>[];
   for (final value in values) {
-    if (seen.add(_pathKey(value))) {
+    if (seen.add(pathKey(value))) {
       result.add(value);
     }
   }

@@ -18,14 +18,14 @@ class _ClassManager extends StatelessWidget {
   });
 
   final int? activeClassId;
-  final List<_LabelClass> labelClasses;
+  final List<LabelClass> labelClasses;
   final bool showClassLabels;
   final bool classesEditable;
   final ValueChanged<int> onClassSelected;
   final VoidCallback onClassAdded;
-  final ValueChanged<_LabelClass> onClassEdited;
-  final ValueChanged<_LabelClass> onClassColorChanged;
-  final ValueChanged<_LabelClass> onClassDeleted;
+  final ValueChanged<LabelClass> onClassEdited;
+  final ValueChanged<LabelClass> onClassColorChanged;
+  final ValueChanged<LabelClass> onClassDeleted;
   final void Function(int oldIndex, int newIndex) onClassReordered;
   final VoidCallback onToggleClassLabels;
 
@@ -117,7 +117,7 @@ class _ClassTile extends StatelessWidget {
   });
 
   final int index;
-  final _LabelClass labelClass;
+  final LabelClass labelClass;
   final bool selected;
   final bool editable;
   final VoidCallback onSelected;

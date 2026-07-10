@@ -1,7 +1,15 @@
-part of '../../main.dart';
+import 'dart:math' as math;
 
-class _TrainingProgressPanel extends StatelessWidget {
-  const _TrainingProgressPanel({
+import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter/material.dart';
+import 'package:percent_indicator/percent_indicator.dart';
+
+import '../../models/training.dart';
+import '../../services/i18n.dart';
+import '../../theme/theme_helpers.dart';
+
+class TrainingProgressPanel extends StatelessWidget {
+  const TrainingProgressPanel({
     required this.metrics,
     required this.points,
     required this.colors,
@@ -9,11 +17,11 @@ class _TrainingProgressPanel extends StatelessWidget {
     required this.resourceUsage,
   });
 
-  final _TrainingMetrics metrics;
-  final List<_TrainingMetricPoint> points;
+  final TrainingMetrics metrics;
+  final List<TrainingMetricPoint> points;
   final Map<String, int> colors;
   final void Function(String key) onColorChanged;
-  final _TrainingResourceUsage resourceUsage;
+  final TrainingResourceUsage resourceUsage;
 
   @override
   Widget build(BuildContext context) {
@@ -224,7 +232,7 @@ class _TrainingProgressPanel extends StatelessWidget {
 class _TrainingResourcePanel extends StatelessWidget {
   const _TrainingResourcePanel({required this.usage});
 
-  final _TrainingResourceUsage usage;
+  final TrainingResourceUsage usage;
 
   @override
   Widget build(BuildContext context) {
@@ -356,13 +364,27 @@ Widget _metricChart(
                 show: true,
                 drawVerticalLine: true,
                 getDrawingHorizontalLine: (_) =>
-                    FlLine(color: _borderColor(context), strokeWidth: 1),
+                    FlLine(
+                      color: appBorderColor(
+                        Theme.of(context).brightness == Brightness.dark,
+                      ),
+                      strokeWidth: 1,
+                    ),
                 getDrawingVerticalLine: (_) =>
-                    FlLine(color: _borderColor(context), strokeWidth: 1),
+                    FlLine(
+                      color: appBorderColor(
+                        Theme.of(context).brightness == Brightness.dark,
+                      ),
+                      strokeWidth: 1,
+                    ),
               ),
               borderData: FlBorderData(
                 show: true,
-                border: Border.all(color: _borderColor(context)),
+                border: Border.all(
+                  color: appBorderColor(
+                    Theme.of(context).brightness == Brightness.dark,
+                  ),
+                ),
               ),
               titlesData: FlTitlesData(
                 topTitles: const AxisTitles(
@@ -423,8 +445,8 @@ Widget _metricChart(
   );
 }
 
-class _TrainingTerminalPanel extends StatelessWidget {
-  const _TrainingTerminalPanel({required this.text});
+class TrainingTerminalPanel extends StatelessWidget {
+  const TrainingTerminalPanel({required this.text});
 
   final String text;
 
@@ -434,7 +456,9 @@ class _TrainingTerminalPanel extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
-      color: _isDarkMode(context) ? const Color(0xFF090515) : Colors.black,
+      color: Theme.of(context).brightness == Brightness.dark
+          ? const Color(0xFF090515)
+          : Colors.black,
       child: Scrollbar(
         child: SingleChildScrollView(
           reverse: true,
@@ -466,10 +490,10 @@ class _TrainingChartSeries {
 }
 
 List<_TrainingChartSeries> _buildTrainingSeries(
-  List<_TrainingMetricPoint> points,
+  List<TrainingMetricPoint> points,
   Map<String, int> colors,
 ) {
-  List<FlSpot> spotsFor(double? Function(_TrainingMetrics metrics) getter) {
+  List<FlSpot> spotsFor(double? Function(TrainingMetrics metrics) getter) {
     return [
       for (final point in points)
         if (getter(point.metrics) != null)
@@ -529,7 +553,7 @@ double _trainingChartMaxY(List<_TrainingChartSeries> series) {
   return maxValue * 1.15;
 }
 
-double _trainingChartEpochInterval(List<_TrainingMetricPoint> points) {
+double _trainingChartEpochInterval(List<TrainingMetricPoint> points) {
   if (points.length <= 1) {
     return 1;
   }

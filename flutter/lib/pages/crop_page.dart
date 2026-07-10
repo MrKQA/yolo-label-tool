@@ -84,7 +84,7 @@ class _CropPageState extends State<_CropPage> {
     }
 
     final outputDir = Directory(
-      _joinPath(outputRoot, _sanitizePathPart(folderName)),
+      joinPath(outputRoot, _sanitizePathPart(folderName)),
     )..createSync(recursive: true);
     final decoder = await _detectBestHardwareDecoder(ffmpegPath);
     final ffprobePath = await _findFfprobeExecutable(ffmpegPath);
@@ -105,7 +105,7 @@ class _CropPageState extends State<_CropPage> {
         if (mounted) {
           setState(() {
             _statusMessage =
-                '${t('crop.countingFrames')} ${index + 1}/${_videos.length}: ${_fileName(video.path)}';
+                '${t('crop.countingFrames')} ${index + 1}/${_videos.length}: ${fileName(video.path)}';
           });
         }
         final totalFrames = ffprobePath == null
@@ -151,7 +151,7 @@ class _CropPageState extends State<_CropPage> {
         final plan = plans[index];
         if (mounted) {
           refreshProgress(
-            '${t('crop.extracting')} ${index + 1}/${plans.length}: ${_fileName(plan.video.path)}',
+            '${t('crop.extracting')} ${index + 1}/${plans.length}: ${fileName(plan.video.path)}',
           );
         }
         await _extractOneVideo(
@@ -161,7 +161,7 @@ class _CropPageState extends State<_CropPage> {
           outputPrefix: plan.outputPrefix,
           decoderArgs: decoder.ffmpegArgs,
           onProgress: () => refreshProgress(
-            '${t('crop.extracting')} ${index + 1}/${plans.length}: ${_fileName(plan.video.path)}',
+            '${t('crop.extracting')} ${index + 1}/${plans.length}: ${fileName(plan.video.path)}',
           ),
         );
       }
@@ -241,7 +241,7 @@ class _CropPageState extends State<_CropPage> {
     required VoidCallback onProgress,
   }) async {
     final extension = _outputExtension;
-    final outputPattern = _joinPath(outputDir, '$outputPrefix%06d.$extension');
+    final outputPattern = joinPath(outputDir, '$outputPrefix%06d.$extension');
     final args = [
       '-hide_banner',
       '-y',
@@ -384,7 +384,7 @@ class _CropPageState extends State<_CropPage> {
                     contentPadding: EdgeInsets.zero,
                     leading: Text('${index + 1}'.padLeft(2, '0')),
                     title: Text(
-                      _fileName(_videos[index].path),
+                      fileName(_videos[index].path),
                       overflow: TextOverflow.ellipsis,
                     ),
                     subtitle: Text(
@@ -854,7 +854,7 @@ Future<String?> _findFfprobeExecutable(String ffmpegPath) async {
   }
 
   final sibling = _ffprobeSiblingOf(ffmpegPath);
-  final candidates = _dedupePaths([?sibling, ..._ffprobeCandidates()]);
+  final candidates = dedupePaths([?sibling, ..._ffprobeCandidates()]);
   for (final candidate in candidates) {
     if (File(candidate).existsSync()) {
       return candidate;
@@ -877,28 +877,28 @@ String? _ffprobeSiblingOf(String ffmpegPath) {
     return null;
   }
   final executable = Platform.isWindows ? 'ffprobe.exe' : 'ffprobe';
-  return _joinPath(File(ffmpegPath).parent.path, executable);
+  return joinPath(File(ffmpegPath).parent.path, executable);
 }
 
 List<String> _ffmpegCandidates() {
   final current = Directory.current.path;
   final parent = Directory.current.parent.path;
-  return _dedupePaths([
-    _joinPath(current, 'ffmpeg\\bin\\ffmpeg.exe'),
-    _joinPath(current, 'tools\\ffmpeg\\bin\\ffmpeg.exe'),
-    _joinPath(parent, 'ffmpeg\\bin\\ffmpeg.exe'),
-    _joinPath(parent, 'tools\\ffmpeg\\bin\\ffmpeg.exe'),
+  return dedupePaths([
+    joinPath(current, 'ffmpeg\\bin\\ffmpeg.exe'),
+    joinPath(current, 'tools\\ffmpeg\\bin\\ffmpeg.exe'),
+    joinPath(parent, 'ffmpeg\\bin\\ffmpeg.exe'),
+    joinPath(parent, 'tools\\ffmpeg\\bin\\ffmpeg.exe'),
   ]);
 }
 
 List<String> _ffprobeCandidates() {
   final current = Directory.current.path;
   final parent = Directory.current.parent.path;
-  return _dedupePaths([
-    _joinPath(current, 'ffmpeg\\bin\\ffprobe.exe'),
-    _joinPath(current, 'tools\\ffmpeg\\bin\\ffprobe.exe'),
-    _joinPath(parent, 'ffmpeg\\bin\\ffprobe.exe'),
-    _joinPath(parent, 'tools\\ffmpeg\\bin\\ffprobe.exe'),
+  return dedupePaths([
+    joinPath(current, 'ffmpeg\\bin\\ffprobe.exe'),
+    joinPath(current, 'tools\\ffmpeg\\bin\\ffprobe.exe'),
+    joinPath(parent, 'ffmpeg\\bin\\ffprobe.exe'),
+    joinPath(parent, 'tools\\ffmpeg\\bin\\ffprobe.exe'),
   ]);
 }
 
@@ -1035,7 +1035,7 @@ int _expectedExtractedFrameCount(int totalFrames, int frameInterval) {
 }
 
 String _outputPrefix(int index, String videoPath) {
-  final stem = _sanitizePathPart(_baseNameWithoutExtension(videoPath));
+  final stem = _sanitizePathPart(baseNameWithoutExtension(videoPath));
   final serial = (index + 1).toString().padLeft(3, '0');
   return '${serial}_${stem}_';
 }
@@ -1061,7 +1061,7 @@ int _countExtractedFrames(
     return 0;
   }
   return directory.listSync().whereType<File>().where((file) {
-    final name = _fileName(file.path);
+    final name = fileName(file.path);
     return name.startsWith(outputPrefix) &&
         name.toLowerCase().endsWith('.${extension.toLowerCase()}');
   }).length;
@@ -1079,7 +1079,7 @@ int _countExtractedPlanFrames(
   final prefixes = plans.map((plan) => plan.outputPrefix).toList();
   final suffix = '.${extension.toLowerCase()}';
   return directory.listSync().whereType<File>().where((file) {
-    final name = _fileName(file.path);
+    final name = fileName(file.path);
     final lowerName = name.toLowerCase();
     return lowerName.endsWith(suffix) &&
         prefixes.any((prefix) => name.startsWith(prefix));

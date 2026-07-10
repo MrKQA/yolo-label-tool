@@ -12,10 +12,10 @@ class _ImagePreviewPane extends StatefulWidget {
     required this.onContextMenu,
   });
 
-  final List<_ImageItem> images;
+  final List<ImageItem> images;
   final int selectedIndex;
-  final List<_LabelClass> labelClasses;
-  final Map<String, List<_AnnotationRegion>> annotationsByImage;
+  final List<LabelClass> labelClasses;
+  final Map<String, List<AnnotationRegion>> annotationsByImage;
   final ValueChanged<int> onImageSelected;
   final Future<void> Function(TapDownDetails details, int? index) onContextMenu;
 
@@ -96,9 +96,9 @@ class _ImagePreviewPaneState extends State<_ImagePreviewPane> {
     return entries;
   }
 
-  bool _matchesFilter(_ImageItem image) {
+  bool _matchesFilter(ImageItem image) {
     final annotations =
-        widget.annotationsByImage[_pathKey(image.path)] ?? const [];
+        widget.annotationsByImage[pathKey(image.path)] ?? const [];
     if (_filterValue == _imagePreviewFilterAll) {
       return true;
     }
@@ -223,7 +223,7 @@ class _ImagePreviewPaneState extends State<_ImagePreviewPane> {
     var count = 0;
     for (final image in widget.images) {
       final annotations =
-          widget.annotationsByImage[_pathKey(image.path)] ?? const [];
+          widget.annotationsByImage[pathKey(image.path)] ?? const [];
       if (annotations.isEmpty) {
         count += 1;
       }
@@ -235,7 +235,7 @@ class _ImagePreviewPaneState extends State<_ImagePreviewPane> {
     var count = 0;
     for (final image in widget.images) {
       final annotations =
-          widget.annotationsByImage[_pathKey(image.path)] ?? const [];
+          widget.annotationsByImage[pathKey(image.path)] ?? const [];
       if (annotations.any((annotation) => annotation.classId == classId)) {
         count += 1;
       }
@@ -553,7 +553,7 @@ class _ImagePreviewEntry {
   const _ImagePreviewEntry({required this.index, required this.image});
 
   final int index;
-  final _ImageItem image;
+  final ImageItem image;
 }
 
 /// 单张图片缩略图条目，支持选中和右键菜单。
@@ -566,7 +566,7 @@ class _PreviewTile extends StatelessWidget {
     required this.onContextMenu,
   });
 
-  final _ImageItem image;
+  final ImageItem image;
   final bool selected;
   final VoidCallback onTap;
   final ValueChanged<TapDownDetails> onContextMenu;
@@ -620,7 +620,7 @@ class _PreviewTile extends StatelessWidget {
 class _ImagePreview extends StatelessWidget {
   const _ImagePreview({required this.image});
 
-  final _ImageItem image;
+  final ImageItem image;
 
   @override
   Widget build(BuildContext context) {

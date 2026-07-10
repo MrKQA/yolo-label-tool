@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 const appDefaultLanguageCode = 'zh_cn';
@@ -415,6 +416,18 @@ class AppLanguageStrings {
     'ai.sam3SaveClassName': '类别名称',
     'ai.sam3SaveClassHint': '选择已有类别或输入新类别',
   };
+}
+
+AppLanguageStrings _currentLanguageStrings = AppLanguageStrings.fallback();
+
+final ValueNotifier<AppLanguageStrings> languageStringsNotifier =
+    ValueNotifier(_currentLanguageStrings);
+
+String t(String key) => _currentLanguageStrings.text(key);
+
+void setCurrentLanguageStrings(AppLanguageStrings strings) {
+  _currentLanguageStrings = strings;
+  languageStringsNotifier.value = strings;
 }
 
 typedef LanguageCodeComparator = int Function(String left, String right);

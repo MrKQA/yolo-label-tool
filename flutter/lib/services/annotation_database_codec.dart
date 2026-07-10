@@ -1,12 +1,12 @@
 part of '../main.dart';
 
 String _buildAnnotationDatabasePayload({
-  required List<_ImageItem> images,
-  required List<_LabelClass> labelClasses,
-  required Map<String, List<_AnnotationRegion>> annotationsByImage,
+  required List<ImageItem> images,
+  required List<LabelClass> labelClasses,
+  required Map<String, List<AnnotationRegion>> annotationsByImage,
   required Map<String, String> imageSplits,
   required Map<String, Size> imageDisplaySizes,
-  required _ImportedDataset? importedDataset,
+  required ImportedDataset? importedDataset,
   required _CollaborationMode collaborationMode,
   required _CollaborationPermissions collaborationSelfPermissions,
   required String collaborationAuthorId,
@@ -36,7 +36,7 @@ String _buildAnnotationDatabasePayload({
 
   for (var index = 0; index < images.length; index++) {
     final image = images[index];
-    final imageKey = _pathKey(image.path);
+    final imageKey = pathKey(image.path);
     final size = _imageDisplaySizeForDatabase(imageDisplaySizes, image.path);
     lines.add(
       [
@@ -53,7 +53,7 @@ String _buildAnnotationDatabasePayload({
 
   if (includeAnnotations) {
     for (final image in images) {
-      final imageKey = _pathKey(image.path);
+      final imageKey = pathKey(image.path);
       final annotations = annotationsByImage[imageKey] ?? const [];
       for (final annotation in annotations) {
         final rect = annotation.rect;
@@ -124,18 +124,18 @@ String _buildAnnotationDatabasePayload({
 }
 
 String _annotationDatabaseProjectKey({
-  required _ImportedDataset? importedDataset,
-  required List<_ImageItem> images,
+  required ImportedDataset? importedDataset,
+  required List<ImageItem> images,
 }) {
   final imported = importedDataset;
   if (imported != null) {
-    return 'dataset:${_pathKey(imported.dataYamlPath)}';
+    return 'dataset:${pathKey(imported.dataYamlPath)}';
   }
   if (images.isEmpty) {
     return 'default';
   }
   final directories = {
-    for (final image in images) _pathKey(_directoryName(image.path)),
+    for (final image in images) pathKey(directoryName(image.path)),
   }.toList()..sort();
   if (directories.length == 1) {
     return 'folder:${directories.first}';
@@ -147,7 +147,7 @@ Size _imageDisplaySizeForDatabase(
   Map<String, Size> imageDisplaySizes,
   String path,
 ) {
-  final key = _pathKey(path);
+  final key = pathKey(path);
   return imageDisplaySizes[key] ?? imageDisplaySizes[path] ?? Size.zero;
 }
 
@@ -165,8 +165,8 @@ String _databaseNumber(num value) {
   return value.toStringAsFixed(6);
 }
 
-String _annotationPointsForDatabase(_AnnotationRegion annotation) {
-  final points = annotation.mode == _AnnotationMode.seg
+String _annotationPointsForDatabase(AnnotationRegion annotation) {
+  final points = annotation.mode == AnnotationMode.seg
       ? annotation.points
       : const <Offset>[];
   return points
@@ -192,19 +192,19 @@ List<Offset> _annotationPointsFromDatabase(String raw) {
   return points;
 }
 
-_AnnotationMode _annotationModeFromDatabase(String raw) {
+AnnotationMode _annotationModeFromDatabase(String raw) {
   return switch (raw.toLowerCase()) {
-    'obb' => _AnnotationMode.obb,
-    'seg' => _AnnotationMode.seg,
-    _ => _AnnotationMode.hbb,
+    'obb' => AnnotationMode.obb,
+    'seg' => AnnotationMode.seg,
+    _ => AnnotationMode.hbb,
   };
 }
 
-List<_LabelClass> _labelClassesFromDatabase(Object? raw) {
+List<LabelClass> _labelClassesFromDatabase(Object? raw) {
   if (raw is! List) {
     return const [];
   }
-  final classes = <_LabelClass>[];
+  final classes = <LabelClass>[];
   for (final item in raw) {
     if (item is! Map) {
       continue;
@@ -215,17 +215,17 @@ List<_LabelClass> _labelClassesFromDatabase(Object? raw) {
     if (id == null || name.isEmpty || color == null) {
       continue;
     }
-    classes.add(_LabelClass(id: id, name: name, colorValue: color));
+    classes.add(LabelClass(id: id, name: name, colorValue: color));
   }
   classes.sort((a, b) => a.id.compareTo(b.id));
   return classes;
 }
 
-Map<String, List<_AnnotationRegion>> _annotationsFromDatabase(
+Map<String, List<AnnotationRegion>> _annotationsFromDatabase(
   Object? raw,
   Set<String> openImageKeys,
 ) {
-  final result = <String, List<_AnnotationRegion>>{};
+  final result = <String, List<AnnotationRegion>>{};
   if (raw is! List) {
     return result;
   }
@@ -234,7 +234,7 @@ Map<String, List<_AnnotationRegion>> _annotationsFromDatabase(
       continue;
     }
     final imagePath = '${item['imagePath'] ?? ''}';
-    final imageKey = _pathKey(imagePath);
+    final imageKey = pathKey(imagePath);
     if (!openImageKeys.contains(imageKey)) {
       continue;
     }
@@ -250,16 +250,16 @@ Map<String, List<_AnnotationRegion>> _annotationsFromDatabase(
       ((item['right'] as num?) ?? 0).toDouble(),
       ((item['bottom'] as num?) ?? 0).toDouble(),
     );
-    final points = mode == _AnnotationMode.seg
+    final points = mode == AnnotationMode.seg
         ? _annotationPointsFromDatabase('${item['points'] ?? ''}')
         : const <Offset>[];
     result
         .putIfAbsent(imageKey, () => [])
         .add(
-          _AnnotationRegion(
+          AnnotationRegion(
             id: id,
             mode: mode,
-            rect: _normalizeRect(rect),
+            rect: normalizeRect(rect),
             classId: classId,
             rotationDegrees: ((item['rotation'] as num?) ?? 0).toDouble(),
             points: points,
@@ -273,7 +273,7 @@ Map<String, List<_AnnotationRegion>> _annotationsFromDatabase(
 }
 
 int _nextAnnotationSerialFor(
-  Map<String, List<_AnnotationRegion>> annotationsByImage,
+  Map<String, List<AnnotationRegion>> annotationsByImage,
 ) {
   var next = 1;
   final pattern = RegExp(r'^ann_(\d+)$');

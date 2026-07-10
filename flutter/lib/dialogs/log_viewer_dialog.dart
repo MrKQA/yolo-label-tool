@@ -7,11 +7,11 @@ Future<void> _showLogViewerDialogForContext({
   String dateKey(DateTime value) => value.toIso8601String().substring(0, 10);
 
   _flushLogs();
-  var dates = _ConfigStore.logDates();
+  var dates = ConfigStore.logDates();
   String? selectedDate = dates.isEmpty ? null : dates.first;
   String logText = selectedDate == null
       ? t('logs.noLogs')
-      : _ConfigStore.readLogsForDate(selectedDate);
+      : ConfigStore.readLogsForDate(selectedDate);
   final logScrollController = ScrollController();
 
   try {
@@ -71,17 +71,17 @@ Future<void> _showLogViewerDialogForContext({
               if (range == null) {
                 return;
               }
-              final deleted = _ConfigStore.deleteLogsByDateRange(
+              final deleted = ConfigStore.deleteLogsByDateRange(
                 dateKey(range.start),
                 dateKey(range.end),
               );
-              dates = _ConfigStore.logDates();
+              dates = ConfigStore.logDates();
               selectedDate = dates.contains(selectedDate)
                   ? selectedDate
                   : (dates.isEmpty ? null : dates.first);
               logText = selectedDate == null
                   ? t('logs.noLogs')
-                  : _ConfigStore.readLogsForDate(selectedDate!);
+                  : ConfigStore.readLogsForDate(selectedDate!);
               setDialogState(() {});
               onMessage('${t('logs.deleted')}: $deleted');
             }
@@ -116,7 +116,7 @@ Future<void> _showLogViewerDialogForContext({
                                     if (value == null) return;
                                     setDialogState(() {
                                       selectedDate = value;
-                                      logText = _ConfigStore.readLogsForDate(
+                                      logText = ConfigStore.readLogsForDate(
                                         value,
                                       );
                                     });

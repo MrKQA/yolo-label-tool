@@ -37,31 +37,31 @@ class _CanvasStage extends StatelessWidget {
   });
 
   final _BridgeStatus bridgeStatus;
-  final _ImageItem? image;
+  final ImageItem? image;
   final bool unauthorized;
   final int imageIndex;
   final int imageCount;
   final double zoom;
   final Offset viewportOffset;
   final String activeTool;
-  final _AnnotationMode activeMode;
+  final AnnotationMode activeMode;
   final String imageSplit;
-  final List<_LabelClass> labelClasses;
-  final List<_AnnotationRegion> annotations;
-  final List<_Sam3ClickPromptPoint> sam3ClickPrompts;
-  final List<_AnnotationRegion> sam3PreviewAnnotations;
+  final List<LabelClass> labelClasses;
+  final List<AnnotationRegion> annotations;
+  final List<Sam3ClickPromptPoint> sam3ClickPrompts;
+  final List<AnnotationRegion> sam3PreviewAnnotations;
   final String? selectedAnnotationId;
   final bool showClassLabels;
   final void Function(PointerSignalEvent event) onPointerSignal;
   final ValueChanged<Offset> onViewportOffsetChanged;
-  final ValueChanged<_AnnotationMode> onModeSelected;
+  final ValueChanged<AnnotationMode> onModeSelected;
   final ValueChanged<String> onImageSplitChanged;
   final VoidCallback onSelectMode;
   final Future<int?> Function() onEnsureClass;
   final void Function(Rect rect, int classId) onAnnotationCreated;
   final void Function(List<Offset> points, int classId) onSegAnnotationCreated;
   final ValueChanged<String?> onAnnotationSelected;
-  final ValueChanged<_AnnotationRegion> onAnnotationUpdated;
+  final ValueChanged<AnnotationRegion> onAnnotationUpdated;
   final ValueChanged<String> onAnnotationDeleted;
   final VoidCallback onAnnotationDragStarted;
   final Future<bool> Function(
@@ -165,10 +165,10 @@ class _WorkspaceHeader extends StatelessWidget {
   final _BridgeStatus status;
   final int imageIndex;
   final int imageCount;
-  final _AnnotationMode activeMode;
+  final AnnotationMode activeMode;
   final String activeTool;
   final String imageSplit;
-  final ValueChanged<_AnnotationMode> onModeSelected;
+  final ValueChanged<AnnotationMode> onModeSelected;
   final ValueChanged<String> onImageSplitChanged;
 
   @override
@@ -186,7 +186,7 @@ class _WorkspaceHeader extends StatelessWidget {
           style: Theme.of(context).textTheme.titleLarge,
         ),
         _StatusPill(label: '$imageIndex / $imageCount'),
-        for (final mode in _AnnotationMode.values)
+        for (final mode in AnnotationMode.values)
           _ModeButton(
             mode: mode,
             enabled: status.modes
@@ -218,7 +218,7 @@ class _ModeButton extends StatelessWidget {
     required this.onPressed,
   });
 
-  final _AnnotationMode mode;
+  final AnnotationMode mode;
   final bool enabled;
   final bool selected;
   final VoidCallback onPressed;
@@ -258,7 +258,7 @@ class _SplitSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final selected = _datasetSplits.contains(value) ? value : 'train';
+    final selected = datasetSplits.contains(value) ? value : 'train';
     return SizedBox(
       height: 36,
       child: DecoratedBox(
@@ -281,7 +281,7 @@ class _SplitSelector extends StatelessWidget {
                     }
                   : null,
               items: [
-                for (final split in _datasetSplits)
+                for (final split in datasetSplits)
                   DropdownMenuItem(value: split, child: Text(split)),
               ],
             ),

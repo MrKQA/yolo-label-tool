@@ -16,7 +16,7 @@ class _AiAssistFloatingPanel extends StatefulWidget {
     required this.onAnnotateAll,
   });
 
-  final _AiAssistConfig? initialConfig;
+  final AiAssistConfig? initialConfig;
   final int imageCount;
   final String pythonPath;
   final double width;
@@ -24,10 +24,10 @@ class _AiAssistFloatingPanel extends StatefulWidget {
   final VoidCallback onClose;
   final ValueChanged<Offset> onDrag;
   final ValueChanged<Offset> onResize;
-  final ValueChanged<_AiAssistConfig> onConfigSaved;
-  final Future<void> Function(_AiAssistConfig config) onSave;
-  final Future<void> Function(_AiAssistConfig config) onAnnotateCurrent;
-  final Future<void> Function(_AiAssistConfig config) onAnnotateAll;
+  final ValueChanged<AiAssistConfig> onConfigSaved;
+  final Future<void> Function(AiAssistConfig config) onSave;
+  final Future<void> Function(AiAssistConfig config) onAnnotateCurrent;
+  final Future<void> Function(AiAssistConfig config) onAnnotateAll;
 
   @override
   State<_AiAssistFloatingPanel> createState() => _AiAssistFloatingPanelState();
@@ -37,23 +37,23 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
   late final TextEditingController _startController;
   late final TextEditingController _endController;
   late final TextEditingController _sam3PromptController;
-  _AiAssistBackend _backend = _AiAssistBackend.yolo;
+  AiAssistBackend _backend = AiAssistBackend.yolo;
   String? _yoloModelPath;
   String? _sam3ModelPath;
-  List<_AiModelClass> _classes = const [];
+  List<AiModelClass> _classes = const [];
   Set<int> _selectedClassIds = <int>{};
   double _confThreshold = 0.25;
-  _AiSam3OutputMode _sam3OutputMode = _AiSam3OutputMode.seg;
-  _AiSam3PromptMode _sam3PromptMode = _AiSam3PromptMode.text;
-  _AiSam3RuntimeConfig _sam3Runtime = const _AiSam3RuntimeConfig();
+  AiSam3OutputMode _sam3OutputMode = AiSam3OutputMode.seg;
+  AiSam3PromptMode _sam3PromptMode = AiSam3PromptMode.text;
+  AiSam3RuntimeConfig _sam3Runtime = const AiSam3RuntimeConfig();
   bool _loadingClasses = false;
   String? _error;
 
   String? get _modelPath =>
-      _backend == _AiAssistBackend.sam3 ? _sam3ModelPath : _yoloModelPath;
+      _backend == AiAssistBackend.sam3 ? _sam3ModelPath : _yoloModelPath;
 
   set _modelPath(String? value) {
-    if (_backend == _AiAssistBackend.sam3) {
+    if (_backend == AiAssistBackend.sam3) {
       _sam3ModelPath = value;
     } else {
       _yoloModelPath = value;
@@ -64,22 +64,22 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
   void initState() {
     super.initState();
     final initial = widget.initialConfig;
-    _backend = initial?.backend ?? _AiAssistBackend.yolo;
-    if (initial?.backend == _AiAssistBackend.sam3) {
+    _backend = initial?.backend ?? AiAssistBackend.yolo;
+    if (initial?.backend == AiAssistBackend.sam3) {
       _sam3ModelPath = initial?.modelPath;
     } else {
       _yoloModelPath = initial?.modelPath;
     }
-    final savedSam3ModelPath = _ConfigStore.loadLastSam3ModelPath();
+    final savedSam3ModelPath = ConfigStore.loadLastSam3ModelPath();
     if (savedSam3ModelPath.isNotEmpty) {
       _sam3ModelPath = savedSam3ModelPath;
     }
     _classes = initial?.classes ?? const [];
     _selectedClassIds = initial?.selectedClassIds.toSet() ?? <int>{};
-    _confThreshold = _normalizeAiConfidence(initial?.confThreshold ?? 0.25);
-    _sam3OutputMode = initial?.sam3OutputMode ?? _AiSam3OutputMode.seg;
-    _sam3PromptMode = initial?.sam3PromptMode ?? _AiSam3PromptMode.text;
-    _sam3Runtime = initial?.sam3Runtime ?? const _AiSam3RuntimeConfig();
+    _confThreshold = normalizeAiConfidence(initial?.confThreshold ?? 0.25);
+    _sam3OutputMode = initial?.sam3OutputMode ?? AiSam3OutputMode.seg;
+    _sam3PromptMode = initial?.sam3PromptMode ?? AiSam3PromptMode.text;
+    _sam3Runtime = initial?.sam3Runtime ?? const AiSam3RuntimeConfig();
     _startController = TextEditingController(
       text: (initial?.startIndex ?? 1).toString(),
     );
@@ -103,10 +103,10 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
     final file = await openFile(
       acceptedTypeGroups: [
         XTypeGroup(
-          label: _backend == _AiAssistBackend.sam3
+          label: _backend == AiAssistBackend.sam3
               ? 'SAM3 checkpoint'
               : 'YOLO AI model',
-          extensions: _backend == _AiAssistBackend.sam3
+          extensions: _backend == AiAssistBackend.sam3
               ? const ['pt', 'pth', 'safetensors']
               : const ['pt', 'onnx'],
         ),
@@ -116,7 +116,7 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
       return;
     }
     final path = file.path;
-    if (_backend == _AiAssistBackend.yolo &&
+    if (_backend == AiAssistBackend.yolo &&
         !path.toLowerCase().endsWith('.pt')) {
       setState(() {
         _modelPath = path;
@@ -126,12 +126,12 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
       });
       return;
     }
-    if (_backend == _AiAssistBackend.sam3) {
+    if (_backend == AiAssistBackend.sam3) {
       setState(() {
         _modelPath = path;
         _error = null;
       });
-      _ConfigStore.saveLastSam3ModelPath(path);
+      ConfigStore.saveLastSam3ModelPath(path);
       _saveDraftIfValid();
       return;
     }
@@ -146,7 +146,7 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
       _error = null;
     });
     try {
-      final result = await _RustVideoBackend.aiModelClasses(
+      final result = await RustBackend.aiModelClasses(
         pythonPath: pythonPath,
         modelPath: path,
       );
@@ -171,7 +171,7 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
     }
   }
 
-  _AiAssistConfig? _configFromFields({bool showErrors = true}) {
+  AiAssistConfig? _configFromFields({bool showErrors = true}) {
     final modelPath = _modelPath;
     if (modelPath == null || modelPath.trim().isEmpty) {
       if (showErrors) {
@@ -179,14 +179,14 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
       }
       return null;
     }
-    if (_backend == _AiAssistBackend.yolo && _selectedClassIds.isEmpty) {
+    if (_backend == AiAssistBackend.yolo && _selectedClassIds.isEmpty) {
       if (showErrors) {
         setState(() => _error = t('ai.noSelectedClasses'));
       }
       return null;
     }
-    if (_backend == _AiAssistBackend.sam3 &&
-        _sam3PromptMode == _AiSam3PromptMode.text &&
+    if (_backend == AiAssistBackend.sam3 &&
+        _sam3PromptMode == AiSam3PromptMode.text &&
         _sam3PromptController.text.trim().isEmpty) {
       if (showErrors) {
         setState(() => _error = t('ai.sam3PromptRequired'));
@@ -198,15 +198,15 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
     final maxIndex = math.max(1, widget.imageCount);
     final normalizedStart = start.clamp(1, maxIndex).toInt();
     final normalizedEnd = end.clamp(normalizedStart, maxIndex).toInt();
-    return _AiAssistConfig(
+    return AiAssistConfig(
       backend: _backend,
       modelPath: modelPath,
       classes: _classes,
       selectedClassIds: _selectedClassIds.toSet(),
       startIndex: normalizedStart,
       endIndex: normalizedEnd,
-      confThreshold: _normalizeAiConfidence(_confThreshold),
-      imageSize: _backend == _AiAssistBackend.sam3
+      confThreshold: normalizeAiConfidence(_confThreshold),
+      imageSize: _backend == AiAssistBackend.sam3
           ? math.max(_sam3Runtime.maxImageWidth, _sam3Runtime.maxImageHeight)
           : 640,
       sam3OutputMode: _sam3OutputMode,
@@ -254,9 +254,9 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
   }
 
   Future<void> _editSam3Runtime() async {
-    final next = await showDialog<_AiSam3RuntimeConfig>(
+    final next = await showDialog<AiSam3RuntimeConfig>(
       context: context,
-      builder: (context) => _Sam3RuntimeDialog(initial: _sam3Runtime),
+      builder: (context) => Sam3RuntimeDialog(initial: _sam3Runtime),
     );
     if (next == null || !mounted) {
       return;
@@ -311,13 +311,13 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
           min: 0.05,
           max: 0.95,
           divisions: 18,
-          value: _normalizeAiConfidence(_confThreshold),
-          label: _normalizeAiConfidence(_confThreshold).toStringAsFixed(2),
+          value: normalizeAiConfidence(_confThreshold),
+          label: normalizeAiConfidence(_confThreshold).toStringAsFixed(2),
           onChanged: disabled
               ? null
               : (value) {
                   setState(() {
-                    _confThreshold = _normalizeAiConfidence(value);
+                    _confThreshold = normalizeAiConfidence(value);
                   });
                 },
         ),
@@ -328,10 +328,10 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
   Widget _modelRow({required bool disabled}) {
     final modelPath = _modelPath;
     final sam3Selected =
-        _backend == _AiAssistBackend.sam3 &&
+        _backend == AiAssistBackend.sam3 &&
         modelPath != null &&
         modelPath.trim().isNotEmpty;
-    final displayText = sam3Selected ? _fileName(modelPath) : modelPath;
+    final displayText = sam3Selected ? fileName(modelPath) : modelPath;
     return Row(
       children: [
         Expanded(
@@ -450,18 +450,18 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
         Row(
           children: [
             Expanded(
-              child: SegmentedButton<_AiSam3OutputMode>(
+              child: SegmentedButton<AiSam3OutputMode>(
                 segments: const [
                   ButtonSegment(
-                    value: _AiSam3OutputMode.hbb,
+                    value: AiSam3OutputMode.hbb,
                     label: Text('HBB'),
                   ),
                   ButtonSegment(
-                    value: _AiSam3OutputMode.obb,
+                    value: AiSam3OutputMode.obb,
                     label: Text('OBB'),
                   ),
                   ButtonSegment(
-                    value: _AiSam3OutputMode.seg,
+                    value: AiSam3OutputMode.seg,
                     label: Text('SEG'),
                   ),
                 ],
@@ -477,14 +477,14 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
           ],
         ),
         const SizedBox(height: 12),
-        SegmentedButton<_AiSam3PromptMode>(
+        SegmentedButton<AiSam3PromptMode>(
           segments: [
             ButtonSegment(
-              value: _AiSam3PromptMode.text,
+              value: AiSam3PromptMode.text,
               label: Text(t('ai.sam3PromptText')),
             ),
             ButtonSegment(
-              value: _AiSam3PromptMode.click,
+              value: AiSam3PromptMode.click,
               label: Text(t('ai.sam3PromptClick')),
             ),
           ],
@@ -497,7 +497,7 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
                 },
         ),
         const SizedBox(height: 12),
-        if (_sam3PromptMode == _AiSam3PromptMode.text)
+        if (_sam3PromptMode == AiSam3PromptMode.text)
           TextField(
             controller: _sam3PromptController,
             minLines: 3,
@@ -547,8 +547,8 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
     final textTheme = Theme.of(context).textTheme;
     final disabled = _loadingClasses;
     final sam3ClickMode =
-        _backend == _AiAssistBackend.sam3 &&
-        _sam3PromptMode == _AiSam3PromptMode.click;
+        _backend == AiAssistBackend.sam3 &&
+        _sam3PromptMode == AiSam3PromptMode.click;
 
     return Material(
       elevation: 18,
@@ -614,7 +614,7 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
                       TabBar(
                         onTap: (index) {
                           setState(() {
-                            _backend = _AiAssistBackend.values[index];
+                            _backend = AiAssistBackend.values[index];
                             _error = null;
                           });
                           _saveDraftIfValid();
@@ -631,7 +631,7 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
                             mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              if (_backend == _AiAssistBackend.yolo)
+                              if (_backend == AiAssistBackend.yolo)
                                 _yoloTab(disabled: disabled)
                               else
                                 _sam3Tab(disabled: disabled),

@@ -1,6 +1,7 @@
-part of '../main.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 
-bool _isEditableTextFocused() {
+bool isEditableTextFocused() {
   final context = FocusManager.instance.primaryFocus?.context;
   if (context == null) {
     return false;
@@ -11,7 +12,7 @@ bool _isEditableTextFocused() {
   return context.findAncestorWidgetOfExactType<EditableText>() != null;
 }
 
-String _keyboardLabel(LogicalKeyboardKey key) {
+String keyboardLabel(LogicalKeyboardKey key) {
   if (key == LogicalKeyboardKey.space) return 'Space';
   if (key == LogicalKeyboardKey.arrowLeft) return 'Left';
   if (key == LogicalKeyboardKey.arrowRight) return 'Right';

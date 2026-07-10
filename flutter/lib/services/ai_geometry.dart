@@ -1,6 +1,14 @@
-part of '../main.dart';
+import 'dart:math' as math;
+import 'dart:ui';
 
-List<Offset> _scaleAiPoints(
+class AiOrientedRect {
+  const AiOrientedRect({required this.rect, required this.rotationDegrees});
+
+  final Rect rect;
+  final double rotationDegrees;
+}
+
+List<Offset> scaleAiPoints(
   List<Offset> points, {
   required Size sourceSize,
   required Size displaySize,
@@ -17,7 +25,7 @@ List<Offset> _scaleAiPoints(
   ];
 }
 
-Rect _pointsBounds(List<Offset> points) {
+Rect pointsBounds(List<Offset> points) {
   if (points.isEmpty) {
     return Rect.zero;
   }
@@ -34,23 +42,23 @@ Rect _pointsBounds(List<Offset> points) {
   return Rect.fromLTRB(minX, minY, maxX, maxY);
 }
 
-_AiOrientedRect _minimumAreaRect(List<Offset> points) {
+AiOrientedRect minimumAreaRect(List<Offset> points) {
   if (points.length < 3) {
-    return _AiOrientedRect(rect: _pointsBounds(points), rotationDegrees: 0);
+    return AiOrientedRect(rect: pointsBounds(points), rotationDegrees: 0);
   }
   final hull = _convexHull(points);
   if (hull.length < 3) {
-    return _AiOrientedRect(rect: _pointsBounds(points), rotationDegrees: 0);
+    return AiOrientedRect(rect: pointsBounds(points), rotationDegrees: 0);
   }
   var bestArea = double.infinity;
-  Rect bestRect = _pointsBounds(points);
+  Rect bestRect = pointsBounds(points);
   var bestAngle = 0.0;
   for (var i = 0; i < hull.length; i++) {
     final current = hull[i];
     final next = hull[(i + 1) % hull.length];
     final angle = math.atan2(next.dy - current.dy, next.dx - current.dx);
     final rotated = [for (final point in hull) _rotateOffset(point, -angle)];
-    final rect = _pointsBounds(rotated);
+    final rect = pointsBounds(rotated);
     final area = rect.width * rect.height;
     if (area >= bestArea) {
       continue;
@@ -64,7 +72,7 @@ _AiOrientedRect _minimumAreaRect(List<Offset> points) {
       height: rect.height,
     );
   }
-  return _AiOrientedRect(
+  return AiOrientedRect(
     rect: bestRect,
     rotationDegrees: bestAngle * 180 / math.pi,
   );

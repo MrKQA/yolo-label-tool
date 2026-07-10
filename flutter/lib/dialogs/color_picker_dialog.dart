@@ -1,6 +1,9 @@
-part of '../main.dart';
+import 'package:flex_color_picker/flex_color_picker.dart';
+import 'package:flutter/material.dart';
 
-Future<Color?> _showWheelColorDialog({
+import '../services/i18n.dart';
+
+Future<Color?> showWheelColorDialog({
   required BuildContext context,
   required Color initialColor,
   required String title,

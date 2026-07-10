@@ -18,7 +18,7 @@ class _DetectPreviewList extends StatelessWidget {
       itemCount: items.length,
       itemBuilder: (context, index) {
         final item = items[index];
-        final selected = _pathKey(item) == _pathKey(selectedInput ?? '');
+        final selected = pathKey(item) == pathKey(selectedInput ?? '');
         return Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: InkWell(
@@ -43,7 +43,7 @@ class _DetectPreviewList extends StatelessWidget {
                   children: [
                     AspectRatio(
                       aspectRatio: 16 / 9,
-                      child: _isImagePath(item)
+                      child: isImagePath(item)
                           ? Image.file(File(item), fit: BoxFit.cover)
                           : const Center(
                               child: Icon(Icons.video_file_outlined, size: 32),
@@ -51,7 +51,7 @@ class _DetectPreviewList extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      _fileName(item),
+                      fileName(item),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -105,7 +105,7 @@ class _DetectParameterPanel extends StatelessWidget {
   final ValueChanged<int> onImageSizeChanged;
   final ValueChanged<String> onDeviceChanged;
 
-  bool get _hasFolderImageTargets => session.folderItems.any(_isImagePath);
+  bool get _hasFolderImageTargets => session.folderItems.any(isImagePath);
 
   bool get _canRunCurrent =>
       !session.predicting && session.selectedInput != null;
@@ -127,7 +127,7 @@ class _DetectParameterPanel extends StatelessWidget {
           Expanded(
             child: ListView(
               children: [
-                _ParameterSectionTitle(title: t('detect.model')),
+                ParameterSectionTitle(title: t('detect.model')),
                 Row(
                   children: [
                     Expanded(
@@ -140,7 +140,7 @@ class _DetectParameterPanel extends StatelessWidget {
                           label: Text(
                             selectedModel == null
                                 ? t('detect.chooseModel')
-                                : _fileName(selectedModel),
+                                : fileName(selectedModel),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -158,7 +158,7 @@ class _DetectParameterPanel extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 14),
-                _ParameterSectionTitle(title: t('detect.actions')),
+                ParameterSectionTitle(title: t('detect.actions')),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   dense: true,
@@ -229,8 +229,8 @@ class _DetectParameterPanel extends StatelessWidget {
                   ),
                 ],
                 const SizedBox(height: 14),
-                _ParameterSectionTitle(title: t('detect.inferenceParams')),
-                _ImageSizeParameterEditor(
+                ParameterSectionTitle(title: t('detect.inferenceParams')),
+                ImageSizeParameterEditor(
                   value: session.detectImageSize.toDouble(),
                   enabled: !session.predicting,
                   onChanged: (value) => onImageSizeChanged(value.round()),
@@ -243,12 +243,12 @@ class _DetectParameterPanel extends StatelessWidget {
                     padding: const EdgeInsets.only(bottom: 12),
                     child: Column(
                       children: [
-                        _ParameterHeader(
+                        ParameterHeader(
                           name: t('detect.conf'),
                           value:
                               'conf=${session.detectConf.toStringAsFixed(2)}',
                         ),
-                        _CompactSlider(
+                        CompactSlider(
                           value: session.detectConf,
                           min: 0.01,
                           max: 1.0,
@@ -270,7 +270,7 @@ class _DetectParameterPanel extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _ParameterHeader(
+                        ParameterHeader(
                           name: t('detect.device'),
                           value: 'device=$deviceArgument',
                         ),

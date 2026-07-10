@@ -1,6 +1,12 @@
-part of '../main.dart';
+import 'dart:convert';
+import 'dart:ffi' as ffi;
+import 'dart:io';
+import 'dart:math' as math;
+import 'dart:typed_data';
 
-final class _RustVideoByteBuffer extends ffi.Struct {
+import 'rust_library_loader.dart';
+
+final class RustVideoByteBuffer extends ffi.Struct {
   external ffi.Pointer<ffi.Uint8> ptr;
 
   @ffi.IntPtr()
@@ -11,306 +17,306 @@ final class _RustVideoByteBuffer extends ffi.Struct {
 }
 
 typedef _VideoInfoJsonNative =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
-typedef _VideoInfoJsonDart =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef VideoInfoJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 
 typedef _DecodeVideoFrameNative =
-    _RustVideoByteBuffer Function(
+    RustVideoByteBuffer Function(
       ffi.Pointer<ffi.Uint8>,
       ffi.IntPtr,
       ffi.Double,
       ffi.Uint32,
     );
-typedef _DecodeVideoFrameDart =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int, double, int);
+typedef DecodeVideoFrameDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int, double, int);
 typedef _DetectJsonNative =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
-typedef _DetectJsonDart =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef DetectJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _DetectModelTaskJsonNative =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
-typedef _DetectModelTaskJsonDart =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
-typedef _AiModelClassesJsonNative =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
-typedef _AiModelClassesJsonDart =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef DetectModelTaskJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+typedef AiModelClassesJsonNative =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef AiModelClassesJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _ExportModelJsonNative =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
-typedef _ExportModelJsonDart =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef ExportModelJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _AiAnnotateImageJsonNative =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
-typedef _AiAnnotateImageJsonDart =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef AiAnnotateImageJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _AiAnnotateImagesJsonNative =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
-typedef _AiAnnotateImagesJsonDart =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef AiAnnotateImagesJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _PreloadYoloPythonJsonNative =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
-typedef _PreloadYoloPythonJsonDart =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef PreloadYoloPythonJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _TrainingLogTailJsonNative =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
-typedef _TrainingLogTailJsonDart =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef TrainingLogTailJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _TrainingResourceUsageJsonNative =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
-typedef _TrainingResourceUsageJsonDart =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef TrainingResourceUsageJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _ShutdownPythonJsonNative =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
-typedef _ShutdownPythonJsonDart =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef ShutdownPythonJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _DbSaveSnapshotJsonNative =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
-typedef _DbSaveSnapshotJsonDart =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef DbSaveSnapshotJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _DbLoadSnapshotJsonNative =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
-typedef _DbLoadSnapshotJsonDart =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef DbLoadSnapshotJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _DbSaveConfigJsonNative =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
-typedef _DbSaveConfigJsonDart =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef DbSaveConfigJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _DbLoadConfigJsonNative =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
-typedef _DbLoadConfigJsonDart =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef DbLoadConfigJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _DbDeleteConfigJsonNative =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
-typedef _DbDeleteConfigJsonDart =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef DbDeleteConfigJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _DbAppendLogsJsonNative =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
-typedef _DbAppendLogsJsonDart =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef DbAppendLogsJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _DbLogDatesJsonNative =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
-typedef _DbLogDatesJsonDart =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef DbLogDatesJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _DbReadLogsJsonNative =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
-typedef _DbReadLogsJsonDart =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef DbReadLogsJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _DbDeleteLogsJsonNative =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
-typedef _DbDeleteLogsJsonDart =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef DbDeleteLogsJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _DbOverviewJsonNative =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
-typedef _DbOverviewJsonDart =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef DbOverviewJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _DbTableJsonNative =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
-typedef _DbTableJsonDart =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef DbTableJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _DbSqlQueryJsonNative =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
-typedef _DbSqlQueryJsonDart =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef DbSqlQueryJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _TrainingLogDatesJsonNative =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
-typedef _TrainingLogDatesJsonDart =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef TrainingLogDatesJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _ReadTrainingLogJsonNative =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
-typedef _ReadTrainingLogJsonDart =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef ReadTrainingLogJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _DeleteTrainingLogsJsonNative =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
-typedef _DeleteTrainingLogsJsonDart =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef DeleteTrainingLogsJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _CollabCommandJsonNative =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
-typedef _CollabCommandJsonDart =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef CollabCommandJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _CollabPollJsonNative =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
-typedef _CollabPollJsonDart =
-    _RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef CollabPollJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 
-typedef _FreeByteBufferNative = ffi.Void Function(_RustVideoByteBuffer);
-typedef _FreeByteBufferDart = void Function(_RustVideoByteBuffer);
+typedef _FreeByteBufferNative = ffi.Void Function(RustVideoByteBuffer);
+typedef FreeByteBufferDart = void Function(RustVideoByteBuffer);
 
-class _RustVideoBindings {
-  _RustVideoBindings._(ffi.DynamicLibrary library)
-    : allocator = _WindowsHeapAllocator(),
+class RustVideoBindings {
+  RustVideoBindings._(ffi.DynamicLibrary library)
+    : allocator = WindowsHeapAllocator(),
       videoInfoJson = library
-          .lookupFunction<_VideoInfoJsonNative, _VideoInfoJsonDart>(
+          .lookupFunction<_VideoInfoJsonNative, VideoInfoJsonDart>(
             'rust_label_video_info_json',
           ),
       decodeVideoFramePng = library
-          .lookupFunction<_DecodeVideoFrameNative, _DecodeVideoFrameDart>(
+          .lookupFunction<_DecodeVideoFrameNative, DecodeVideoFrameDart>(
             'rust_label_decode_video_frame_png',
           ),
-      detectJson = library.lookupFunction<_DetectJsonNative, _DetectJsonDart>(
+      detectJson = library.lookupFunction<_DetectJsonNative, DetectJsonDart>(
         'rust_label_detect_json',
       ),
       detectModelTaskJson = library
-          .lookupFunction<_DetectModelTaskJsonNative, _DetectModelTaskJsonDart>(
+          .lookupFunction<_DetectModelTaskJsonNative, DetectModelTaskJsonDart>(
             'rust_label_detect_model_task_json',
           ),
       aiModelClassesJson = library
-          .lookupFunction<_AiModelClassesJsonNative, _AiModelClassesJsonDart>(
+          .lookupFunction<AiModelClassesJsonNative, AiModelClassesJsonDart>(
             'rust_label_ai_model_classes_json',
           ),
       exportModelJson = library
-          .lookupFunction<_ExportModelJsonNative, _ExportModelJsonDart>(
+          .lookupFunction<_ExportModelJsonNative, ExportModelJsonDart>(
             'rust_label_export_model_json',
           ),
       aiAnnotateImageJson = library
-          .lookupFunction<_AiAnnotateImageJsonNative, _AiAnnotateImageJsonDart>(
+          .lookupFunction<_AiAnnotateImageJsonNative, AiAnnotateImageJsonDart>(
             'rust_label_ai_annotate_image_json',
           ),
       aiAnnotateImagesJson = library
           .lookupFunction<
             _AiAnnotateImagesJsonNative,
-            _AiAnnotateImagesJsonDart
+            AiAnnotateImagesJsonDart
           >('rust_label_ai_annotate_images_json'),
       preloadYoloPythonJson = library
           .lookupFunction<
             _PreloadYoloPythonJsonNative,
-            _PreloadYoloPythonJsonDart
+            PreloadYoloPythonJsonDart
           >('rust_label_preload_yolo_python_json'),
       trainingLogTailJson = library
-          .lookupFunction<_TrainingLogTailJsonNative, _TrainingLogTailJsonDart>(
+          .lookupFunction<_TrainingLogTailJsonNative, TrainingLogTailJsonDart>(
             'rust_label_training_log_tail_json',
           ),
       trainingResourceUsageJson = library
           .lookupFunction<
             _TrainingResourceUsageJsonNative,
-            _TrainingResourceUsageJsonDart
+            TrainingResourceUsageJsonDart
           >('rust_label_training_resource_usage_json'),
       shutdownPythonJson = library
-          .lookupFunction<_ShutdownPythonJsonNative, _ShutdownPythonJsonDart>(
+          .lookupFunction<_ShutdownPythonJsonNative, ShutdownPythonJsonDart>(
             'rust_label_shutdown_python_json',
           ),
       dbSaveSnapshotJson = library
-          .lookupFunction<_DbSaveSnapshotJsonNative, _DbSaveSnapshotJsonDart>(
+          .lookupFunction<_DbSaveSnapshotJsonNative, DbSaveSnapshotJsonDart>(
             'rust_label_db_save_snapshot_json',
           ),
       dbLoadSnapshotJson = library
-          .lookupFunction<_DbLoadSnapshotJsonNative, _DbLoadSnapshotJsonDart>(
+          .lookupFunction<_DbLoadSnapshotJsonNative, DbLoadSnapshotJsonDart>(
             'rust_label_db_load_snapshot_json',
           ),
       dbSaveConfigJson = library
-          .lookupFunction<_DbSaveConfigJsonNative, _DbSaveConfigJsonDart>(
+          .lookupFunction<_DbSaveConfigJsonNative, DbSaveConfigJsonDart>(
             'rust_label_db_save_config_json',
           ),
       dbLoadConfigJson = library
-          .lookupFunction<_DbLoadConfigJsonNative, _DbLoadConfigJsonDart>(
+          .lookupFunction<_DbLoadConfigJsonNative, DbLoadConfigJsonDart>(
             'rust_label_db_load_config_json',
           ),
       dbDeleteConfigJson = library
-          .lookupFunction<_DbDeleteConfigJsonNative, _DbDeleteConfigJsonDart>(
+          .lookupFunction<_DbDeleteConfigJsonNative, DbDeleteConfigJsonDart>(
             'rust_label_db_delete_config_json',
           ),
       dbAppendLogsJson = library
-          .lookupFunction<_DbAppendLogsJsonNative, _DbAppendLogsJsonDart>(
+          .lookupFunction<_DbAppendLogsJsonNative, DbAppendLogsJsonDart>(
             'rust_label_db_append_logs_json',
           ),
       dbLogDatesJson = library
-          .lookupFunction<_DbLogDatesJsonNative, _DbLogDatesJsonDart>(
+          .lookupFunction<_DbLogDatesJsonNative, DbLogDatesJsonDart>(
             'rust_label_db_log_dates_json',
           ),
       dbReadLogsJson = library
-          .lookupFunction<_DbReadLogsJsonNative, _DbReadLogsJsonDart>(
+          .lookupFunction<_DbReadLogsJsonNative, DbReadLogsJsonDart>(
             'rust_label_db_read_logs_json',
           ),
       dbDeleteLogsJson = library
-          .lookupFunction<_DbDeleteLogsJsonNative, _DbDeleteLogsJsonDart>(
+          .lookupFunction<_DbDeleteLogsJsonNative, DbDeleteLogsJsonDart>(
             'rust_label_db_delete_logs_json',
           ),
       dbOverviewJson = library
-          .lookupFunction<_DbOverviewJsonNative, _DbOverviewJsonDart>(
+          .lookupFunction<_DbOverviewJsonNative, DbOverviewJsonDart>(
             'rust_label_db_overview_json',
           ),
       dbTableJson = library
-          .lookupFunction<_DbTableJsonNative, _DbTableJsonDart>(
+          .lookupFunction<_DbTableJsonNative, DbTableJsonDart>(
             'rust_label_db_table_json',
           ),
       dbSqlQueryJson = library
-          .lookupFunction<_DbSqlQueryJsonNative, _DbSqlQueryJsonDart>(
+          .lookupFunction<_DbSqlQueryJsonNative, DbSqlQueryJsonDart>(
             'rust_label_db_sql_query_json',
           ),
       trainingLogDatesJson = library
           .lookupFunction<
             _TrainingLogDatesJsonNative,
-            _TrainingLogDatesJsonDart
+            TrainingLogDatesJsonDart
           >('rust_label_training_log_dates_json'),
       readTrainingLogJson = library
-          .lookupFunction<_ReadTrainingLogJsonNative, _ReadTrainingLogJsonDart>(
+          .lookupFunction<_ReadTrainingLogJsonNative, ReadTrainingLogJsonDart>(
             'rust_label_read_training_log_json',
           ),
       deleteTrainingLogsJson = library
           .lookupFunction<
             _DeleteTrainingLogsJsonNative,
-            _DeleteTrainingLogsJsonDart
+            DeleteTrainingLogsJsonDart
           >('rust_label_delete_training_logs_json'),
       collabCommandJson = library
-          .lookupFunction<_CollabCommandJsonNative, _CollabCommandJsonDart>(
+          .lookupFunction<_CollabCommandJsonNative, CollabCommandJsonDart>(
             'rust_label_collab_command_json',
           ),
       collabPollJson = library
-          .lookupFunction<_CollabPollJsonNative, _CollabPollJsonDart>(
+          .lookupFunction<_CollabPollJsonNative, CollabPollJsonDart>(
             'rust_label_collab_poll_json',
           ),
       _freeByteBuffer = library
-          .lookupFunction<_FreeByteBufferNative, _FreeByteBufferDart>(
+          .lookupFunction<_FreeByteBufferNative, FreeByteBufferDart>(
             'rust_label_free_byte_buffer',
           );
 
-  final _WindowsHeapAllocator allocator;
-  final _VideoInfoJsonDart videoInfoJson;
-  final _DecodeVideoFrameDart decodeVideoFramePng;
-  final _DetectJsonDart detectJson;
-  final _DetectModelTaskJsonDart detectModelTaskJson;
-  final _AiModelClassesJsonDart aiModelClassesJson;
-  final _ExportModelJsonDart exportModelJson;
-  final _AiAnnotateImageJsonDart aiAnnotateImageJson;
-  final _AiAnnotateImagesJsonDart aiAnnotateImagesJson;
-  final _PreloadYoloPythonJsonDart preloadYoloPythonJson;
-  final _TrainingLogTailJsonDart trainingLogTailJson;
-  final _TrainingResourceUsageJsonDart trainingResourceUsageJson;
-  final _ShutdownPythonJsonDart shutdownPythonJson;
-  final _DbSaveSnapshotJsonDart dbSaveSnapshotJson;
-  final _DbLoadSnapshotJsonDart dbLoadSnapshotJson;
-  final _DbSaveConfigJsonDart dbSaveConfigJson;
-  final _DbLoadConfigJsonDart dbLoadConfigJson;
-  final _DbDeleteConfigJsonDart dbDeleteConfigJson;
-  final _DbAppendLogsJsonDart dbAppendLogsJson;
-  final _DbLogDatesJsonDart dbLogDatesJson;
-  final _DbReadLogsJsonDart dbReadLogsJson;
-  final _DbDeleteLogsJsonDart dbDeleteLogsJson;
-  final _DbOverviewJsonDart dbOverviewJson;
-  final _DbTableJsonDart dbTableJson;
-  final _DbSqlQueryJsonDart dbSqlQueryJson;
-  final _TrainingLogDatesJsonDart trainingLogDatesJson;
-  final _ReadTrainingLogJsonDart readTrainingLogJson;
-  final _DeleteTrainingLogsJsonDart deleteTrainingLogsJson;
-  final _CollabCommandJsonDart collabCommandJson;
-  final _CollabPollJsonDart collabPollJson;
-  final _FreeByteBufferDart _freeByteBuffer;
+  final WindowsHeapAllocator allocator;
+  final VideoInfoJsonDart videoInfoJson;
+  final DecodeVideoFrameDart decodeVideoFramePng;
+  final DetectJsonDart detectJson;
+  final DetectModelTaskJsonDart detectModelTaskJson;
+  final AiModelClassesJsonDart aiModelClassesJson;
+  final ExportModelJsonDart exportModelJson;
+  final AiAnnotateImageJsonDart aiAnnotateImageJson;
+  final AiAnnotateImagesJsonDart aiAnnotateImagesJson;
+  final PreloadYoloPythonJsonDart preloadYoloPythonJson;
+  final TrainingLogTailJsonDart trainingLogTailJson;
+  final TrainingResourceUsageJsonDart trainingResourceUsageJson;
+  final ShutdownPythonJsonDart shutdownPythonJson;
+  final DbSaveSnapshotJsonDart dbSaveSnapshotJson;
+  final DbLoadSnapshotJsonDart dbLoadSnapshotJson;
+  final DbSaveConfigJsonDart dbSaveConfigJson;
+  final DbLoadConfigJsonDart dbLoadConfigJson;
+  final DbDeleteConfigJsonDart dbDeleteConfigJson;
+  final DbAppendLogsJsonDart dbAppendLogsJson;
+  final DbLogDatesJsonDart dbLogDatesJson;
+  final DbReadLogsJsonDart dbReadLogsJson;
+  final DbDeleteLogsJsonDart dbDeleteLogsJson;
+  final DbOverviewJsonDart dbOverviewJson;
+  final DbTableJsonDart dbTableJson;
+  final DbSqlQueryJsonDart dbSqlQueryJson;
+  final TrainingLogDatesJsonDart trainingLogDatesJson;
+  final ReadTrainingLogJsonDart readTrainingLogJson;
+  final DeleteTrainingLogsJsonDart deleteTrainingLogsJson;
+  final CollabCommandJsonDart collabCommandJson;
+  final CollabPollJsonDart collabPollJson;
+  final FreeByteBufferDart _freeByteBuffer;
 
-  static _RustVideoBindings open() {
+  static RustVideoBindings open() {
     if (!Platform.isWindows) {
       throw UnsupportedError(
         'Rust video backend is currently wired for Windows',
       );
     }
-    for (final path in _rustLibraryCandidates()) {
+    for (final path in const RustLibraryLoader().libraryCandidates()) {
       if (File(path).existsSync()) {
-        return _RustVideoBindings._(ffi.DynamicLibrary.open(path));
+        return RustVideoBindings._(ffi.DynamicLibrary.open(path));
       }
     }
     throw StateError('yolo_label_bridge.dll was not found');
   }
 
-  Uint8List takeBytes(_RustVideoByteBuffer buffer) {
+  Uint8List takeBytes(RustVideoByteBuffer buffer) {
     if (buffer.ptr == ffi.nullptr || buffer.len <= 0) {
       return Uint8List(0);
     }
@@ -321,7 +327,7 @@ class _RustVideoBindings {
     }
   }
 
-  String takeUtf8(_RustVideoByteBuffer buffer) {
+  String takeUtf8(RustVideoByteBuffer buffer) {
     final bytes = takeBytes(buffer);
     if (bytes.isEmpty) {
       return '';
@@ -331,7 +337,7 @@ class _RustVideoBindings {
 }
 
 typedef _GetProcessHeapNative = ffi.Pointer<ffi.Void> Function();
-typedef _GetProcessHeapDart = ffi.Pointer<ffi.Void> Function();
+typedef GetProcessHeapDart = ffi.Pointer<ffi.Void> Function();
 
 typedef _HeapAllocNative =
     ffi.Pointer<ffi.Void> Function(
@@ -339,7 +345,7 @@ typedef _HeapAllocNative =
       ffi.Uint32,
       ffi.IntPtr,
     );
-typedef _HeapAllocDart =
+typedef HeapAllocDart =
     ffi.Pointer<ffi.Void> Function(ffi.Pointer<ffi.Void>, int, int);
 
 typedef _HeapFreeNative =
@@ -348,29 +354,29 @@ typedef _HeapFreeNative =
       ffi.Uint32,
       ffi.Pointer<ffi.Void>,
     );
-typedef _HeapFreeDart =
+typedef HeapFreeDart =
     int Function(ffi.Pointer<ffi.Void>, int, ffi.Pointer<ffi.Void>);
 
-class _WindowsHeapAllocator {
-  _WindowsHeapAllocator()
+class WindowsHeapAllocator {
+  WindowsHeapAllocator()
     : _kernel32 = ffi.DynamicLibrary.open('kernel32.dll') {
     _getProcessHeap = _kernel32
-        .lookupFunction<_GetProcessHeapNative, _GetProcessHeapDart>(
+        .lookupFunction<_GetProcessHeapNative, GetProcessHeapDart>(
           'GetProcessHeap',
         );
-    _heapAlloc = _kernel32.lookupFunction<_HeapAllocNative, _HeapAllocDart>(
+    _heapAlloc = _kernel32.lookupFunction<_HeapAllocNative, HeapAllocDart>(
       'HeapAlloc',
     );
-    _heapFree = _kernel32.lookupFunction<_HeapFreeNative, _HeapFreeDart>(
+    _heapFree = _kernel32.lookupFunction<_HeapFreeNative, HeapFreeDart>(
       'HeapFree',
     );
     _heap = _getProcessHeap();
   }
 
   final ffi.DynamicLibrary _kernel32;
-  late final _GetProcessHeapDart _getProcessHeap;
-  late final _HeapAllocDart _heapAlloc;
-  late final _HeapFreeDart _heapFree;
+  late final GetProcessHeapDart _getProcessHeap;
+  late final HeapAllocDart _heapAlloc;
+  late final HeapFreeDart _heapFree;
   late final ffi.Pointer<ffi.Void> _heap;
 
   ffi.Pointer<ffi.Uint8> allocate(Uint8List bytes) {

@@ -22,7 +22,7 @@ class _PredictedFrameSequencePanelState
     extends State<_PredictedFrameSequencePanel> {
   Timer? _timer;
   Timer? _pollTimer;
-  _PredictionFrameManifest? _manifest;
+  PredictionFrameManifest? _manifest;
   String? _error;
   double? _scrubFrame;
   bool _paused = false;
@@ -69,7 +69,7 @@ class _PredictedFrameSequencePanelState
 
   void _refreshManifest({required bool resetPlayback}) {
     try {
-      final manifest = _PredictionFrameManifest.load(widget.manifestPath);
+      final manifest = PredictionFrameManifest.load(widget.manifestPath);
       final previous = _manifest;
       final previousLength = previous?.frames.length ?? 0;
       final changed =
@@ -101,7 +101,7 @@ class _PredictedFrameSequencePanelState
     }
   }
 
-  void _startPlayback(_PredictionFrameManifest manifest) {
+  void _startPlayback(PredictionFrameManifest manifest) {
     _timer?.cancel();
     if (_paused) {
       return;
@@ -183,7 +183,7 @@ class _PredictedFrameSequencePanelState
   void _seekTo(double value) {
     final target = value.round();
     final generatedIndex = _nearestGeneratedFrameIndex(target);
-    final generatedFrames = _manifest?.frames ?? const <_PredictionFrameInfo>[];
+    final generatedFrames = _manifest?.frames ?? const <PredictionFrameInfo>[];
     final generatedFrameValue = generatedFrames.isEmpty
         ? null
         : generatedFrames[generatedIndex].frameNumber.toDouble();
@@ -201,7 +201,7 @@ class _PredictedFrameSequencePanelState
   }
 
   int _nearestGeneratedFrameIndex(int frameNumber) {
-    final frames = _manifest?.frames ?? const <_PredictionFrameInfo>[];
+    final frames = _manifest?.frames ?? const <PredictionFrameInfo>[];
     if (frames.isEmpty) {
       return 0;
     }

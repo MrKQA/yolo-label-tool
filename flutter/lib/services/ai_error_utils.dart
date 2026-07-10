@@ -1,6 +1,4 @@
-part of '../main.dart';
-
-String _classifyAiFailure(Object error) {
+String classifyAiFailure(Object error) {
   final text = error.toString().toLowerCase();
   if (text.contains('out of memory') ||
       text.contains('cuda oom') ||
@@ -27,7 +25,7 @@ String _classifyAiFailure(Object error) {
   return 'runtime';
 }
 
-String _shortAiError(Object error) {
+String shortAiError(Object error) {
   final normalized = error
       .toString()
       .replaceAll('\r\n', '\n')

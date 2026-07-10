@@ -4,7 +4,7 @@ class _ExportEntry {
   const _ExportEntry(this.path, this.annotations);
 
   final String path;
-  final List<_AnnotationRegion> annotations;
+  final List<AnnotationRegion> annotations;
 }
 
 class _DatasetExportResult {
@@ -34,9 +34,9 @@ class _DatasetExportResult {
 Future<_DatasetExportResult?> _exportAnnotationsToNewDataset({
   required _ExportConfig config,
   required String exportRoot,
-  required List<_ImageItem> images,
-  required List<_LabelClass> labelClasses,
-  required Map<String, List<_AnnotationRegion>> annotationsByImage,
+  required List<ImageItem> images,
+  required List<LabelClass> labelClasses,
+  required Map<String, List<AnnotationRegion>> annotationsByImage,
   required Size? Function(String imagePath) displaySizeForImagePath,
   required Future<Size> Function(String imagePath) ensureDisplaySizeForImagePath,
 }) async {
@@ -130,10 +130,10 @@ Future<_DatasetExportResult?> _exportAnnotationsToNewDataset({
 
 Future<_DatasetExportResult?> _overwriteImportedDatasetExport({
   required _ExportConfig config,
-  required _ImportedDataset dataset,
-  required List<_ImageItem> images,
-  required List<_LabelClass> labelClasses,
-  required Map<String, List<_AnnotationRegion>> annotationsByImage,
+  required ImportedDataset dataset,
+  required List<ImageItem> images,
+  required List<LabelClass> labelClasses,
+  required Map<String, List<AnnotationRegion>> annotationsByImage,
   required Map<String, String> imageSplits,
   required Size? Function(String imagePath) displaySizeForImagePath,
   required Future<Size> Function(String imagePath) ensureDisplaySizeForImagePath,
@@ -156,15 +156,15 @@ Future<_DatasetExportResult?> _overwriteImportedDatasetExport({
   }
 
   final grouped = <String, Set<String>>{
-    for (final split in _datasetSplits) split: <String>{},
+    for (final split in datasetSplits) split: <String>{},
   };
   for (final entry in entries) {
-    final split = imageSplits[_pathKey(entry.path)] ?? 'train';
-    grouped[_datasetSplits.contains(split) ? split : 'train']!.add(entry.path);
+    final split = imageSplits[pathKey(entry.path)] ?? 'train';
+    grouped[datasetSplits.contains(split) ? split : 'train']!.add(entry.path);
   }
 
   final pathToEntry = {for (final entry in entries) entry.path: entry};
-  for (final split in _datasetSplits) {
+  for (final split in datasetSplits) {
     _writeImportedDatasetLabels(
       paths: grouped[split]!,
       split: split,
@@ -181,7 +181,7 @@ Future<_DatasetExportResult?> _overwriteImportedDatasetExport({
   }
 
   File(dataset.dataYamlPath).writeAsStringSync(
-    '${_datasetYamlContent(dataset, grouped, labelClasses)}\n',
+    '${datasetYamlContent(dataset, grouped, labelClasses)}\n',
   );
 
   return _DatasetExportResult(
@@ -197,11 +197,11 @@ Future<_DatasetExportResult?> _overwriteImportedDatasetExport({
   );
 }
 
-List<_AnnotationRegion> _exportAnnotationsForPath(
-  Map<String, List<_AnnotationRegion>> annotationsByImage,
+List<AnnotationRegion> _exportAnnotationsForPath(
+  Map<String, List<AnnotationRegion>> annotationsByImage,
   String path,
 ) {
-  return annotationsByImage[_pathKey(path)] ?? const [];
+  return annotationsByImage[pathKey(path)] ?? const [];
 }
 
 int _annotationCount(List<_ExportEntry> entries) {
@@ -300,7 +300,7 @@ void _writeExportLabels({
   required String split,
   required Map<String, _ExportEntry> pathToEntry,
   required Map<String, Directory> splitDirs,
-  required List<_LabelClass> labelClasses,
+  required List<LabelClass> labelClasses,
   required Size? Function(String imagePath) displaySizeForImagePath,
   required bool skipEmpty,
 }) {
@@ -311,7 +311,7 @@ void _writeExportLabels({
 
   for (final path in paths) {
     final entry = pathToEntry[path]!;
-    final baseName = _fileName(path).replaceAll(RegExp(r'\.[^.]+$'), '');
+    final baseName = fileName(path).replaceAll(RegExp(r'\.[^.]+$'), '');
     _writeYoloLabelFile(
       path: path,
       labelFile: File('${labelDir.path}\\$baseName.txt'),
@@ -326,9 +326,9 @@ void _writeExportLabels({
 void _writeImportedDatasetLabels({
   required Set<String> paths,
   required String split,
-  required _ImportedDataset dataset,
+  required ImportedDataset dataset,
   required Map<String, _ExportEntry> pathToEntry,
-  required List<_LabelClass> labelClasses,
+  required List<LabelClass> labelClasses,
   required Size? Function(String imagePath) displaySizeForImagePath,
   required bool skipEmpty,
 }) {
@@ -339,7 +339,7 @@ void _writeImportedDatasetLabels({
     _writeYoloLabelFile(
       path: path,
       labelFile: File(
-        '${labelDir.path}\\${_baseNameWithoutExtension(path)}.txt',
+        '${labelDir.path}\\${baseNameWithoutExtension(path)}.txt',
       ),
       annotations: entry.annotations,
       labelClasses: labelClasses,
@@ -352,8 +352,8 @@ void _writeImportedDatasetLabels({
 void _writeYoloLabelFile({
   required String path,
   required File labelFile,
-  required List<_AnnotationRegion> annotations,
-  required List<_LabelClass> labelClasses,
+  required List<AnnotationRegion> annotations,
+  required List<LabelClass> labelClasses,
   required Size? Function(String imagePath) displaySizeForImagePath,
   required bool skipEmpty,
 }) {
@@ -382,7 +382,7 @@ void _writeYoloLabelFile({
 String _newDatasetYamlContent(
   Directory baseDir,
   _ExportSplitPlan splitPlan,
-  List<_LabelClass> labelClasses,
+  List<LabelClass> labelClasses,
 ) {
   final lines = <String>[
     'path: ${baseDir.path.replaceAll('\\', '/')}',
@@ -408,21 +408,21 @@ void _copyExportImages({
     return;
   }
   for (final path in paths) {
-    _copyFileOverwrite(path, '${imageDir.path}\\${_fileName(path)}');
+    copyFileOverwrite(path, '${imageDir.path}\\${fileName(path)}');
   }
 }
 
 void _copyImportedDatasetImages(
-  _ImportedDataset dataset,
+  ImportedDataset dataset,
   Map<String, Set<String>> grouped,
 ) {
-  for (final split in _datasetSplits) {
+  for (final split in datasetSplits) {
     final imageDir = Directory(dataset.imageDirForSplit(split))
       ..createSync(recursive: true);
     for (final path in grouped[split]!) {
-      final target = '${imageDir.path}\\${_fileName(path)}';
-      if (_pathKey(path) != _pathKey(target)) {
-        _copyFileOverwrite(path, target);
+      final target = '${imageDir.path}\\${fileName(path)}';
+      if (pathKey(path) != pathKey(target)) {
+        copyFileOverwrite(path, target);
       }
     }
   }

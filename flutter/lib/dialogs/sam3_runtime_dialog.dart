@@ -1,15 +1,18 @@
-part of '../main.dart';
+import 'package:flutter/material.dart';
 
-class _Sam3RuntimeDialog extends StatefulWidget {
-  const _Sam3RuntimeDialog({required this.initial});
+import '../models/ai_assist.dart';
+import '../services/i18n.dart';
 
-  final _AiSam3RuntimeConfig initial;
+class Sam3RuntimeDialog extends StatefulWidget {
+  const Sam3RuntimeDialog({required this.initial});
+
+  final AiSam3RuntimeConfig initial;
 
   @override
-  State<_Sam3RuntimeDialog> createState() => _Sam3RuntimeDialogState();
+  State<Sam3RuntimeDialog> createState() => _Sam3RuntimeDialogState();
 }
 
-class _Sam3RuntimeDialogState extends State<_Sam3RuntimeDialog> {
+class _Sam3RuntimeDialogState extends State<Sam3RuntimeDialog> {
   late String _precision;
   late String _encoder;
   late String _resizeMethod;
@@ -64,7 +67,7 @@ class _Sam3RuntimeDialogState extends State<_Sam3RuntimeDialog> {
 
   void _save() {
     Navigator.of(context).pop(
-      _AiSam3RuntimeConfig(
+      AiSam3RuntimeConfig(
         precision: _precision,
         encoder: _encoder,
         imageBatchSize: _intValue(_imageBatchController, 1),

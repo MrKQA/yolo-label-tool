@@ -7,7 +7,7 @@ part of '../main.dart';
 class _TrainPage extends StatefulWidget {
   const _TrainPage({super.key, required this.settings});
 
-  final _AppSettings settings;
+  final AppSettings settings;
 
   @override
   State<_TrainPage> createState() => _TrainPageState();
@@ -16,10 +16,10 @@ class _TrainPage extends StatefulWidget {
 class _TrainPageState extends State<_TrainPage> {
   final TextEditingController _datasetPathController = TextEditingController();
   final Map<String, double> _parameters = Map<String, double>.from(
-    _defaultTrainingParameters,
+    defaultTrainingParameters,
   );
   final Map<String, String> _stringParameters = Map<String, String>.from(
-    _defaultTrainingStringParameters,
+    defaultTrainingStringParameters,
   );
 
   Timer? _hideTimer;
@@ -30,8 +30,8 @@ class _TrainPageState extends State<_TrainPage> {
   bool _trainingInterrupted = false;
   int _currentEpoch = 0;
   String? _activeRunDir;
-  _TrainingMetrics? _trainingMetrics;
-  _TrainingResourceUsage _resourceUsage = const _TrainingResourceUsage();
+  TrainingMetrics? _trainingMetrics;
+  TrainingResourceUsage _resourceUsage = const TrainingResourceUsage();
   final Map<String, int> _chartColors = {
     'Train Loss': 0xFF2563EB,
     'Val Loss': 0xFFDC2626,
@@ -41,28 +41,28 @@ class _TrainPageState extends State<_TrainPage> {
     'Recall': 0xFF0891B2,
     'LR': 0xFF64748B,
   };
-  List<_TrainingMetricPoint> _trainingMetricPoints = const [];
+  List<TrainingMetricPoint> _trainingMetricPoints = const [];
   bool _showTrainingTerminal = false;
   String _trainingLogText = '';
   String? _modelPath;
   String? _datasetPath;
-  _DatasetSummary? _datasetSummary;
+  DatasetSummary? _datasetSummary;
   List<String> _modelOptions = const [];
-  List<_TrainingDeviceOption> _deviceOptions = const [
-    _TrainingDeviceOption(id: 'cpu', label: 'CPU'),
+  List<TrainingDeviceOption> _deviceOptions = const [
+    TrainingDeviceOption(id: 'cpu', label: 'CPU'),
   ];
   Set<String> _selectedDeviceIds = const {'cpu'};
-  _YoloExportSettings _exportSettings = const _YoloExportSettings();
+  YoloExportSettings _exportSettings = const YoloExportSettings();
   bool _exportingModel = false;
   bool _manualDeviceSelection = false;
-  _BatchMode _batchMode = _BatchMode.fixed;
+  BatchMode _batchMode = BatchMode.fixed;
   double _batchSize = 16;
   double _batchRatio = 0.70;
   bool _ampEnabled = false;
   bool _resumeEnabled = false;
   bool _datasetLoading = false;
-  _ResumeTrainingInfo? _resumeInfo;
-  List<_TrainingHistoryEntry> _trainingHistory = const [];
+  ResumeTrainingInfo? _resumeInfo;
+  List<TrainingHistoryEntry> _trainingHistory = const [];
 
   bool get _validYoloModel {
     final path = _modelPath;
@@ -83,9 +83,9 @@ class _TrainPageState extends State<_TrainPage> {
 
   String get _batchArgument {
     return switch (_batchMode) {
-      _BatchMode.fixed => _batchSize.round().toString(),
-      _BatchMode.autoGpu60 => '-1',
-      _BatchMode.autoGpuRatio => _batchRatio.toStringAsFixed(2),
+      BatchMode.fixed => _batchSize.round().toString(),
+      BatchMode.autoGpu60 => '-1',
+      BatchMode.autoGpuRatio => _batchRatio.toStringAsFixed(2),
     };
   }
 
@@ -93,14 +93,14 @@ class _TrainPageState extends State<_TrainPage> {
     if (_usingCpuDevice || _selectedDeviceIds.isEmpty) {
       return 'cpu';
     }
-    final ids = _selectedDeviceIds.toList()..sort(_naturalCompare);
+    final ids = _selectedDeviceIds.toList()..sort(naturalCompare);
     return ids.join(',');
   }
 
   @override
   void initState() {
     super.initState();
-    _trainingHistory = _ConfigStore.loadTrainingHistory().entries;
+    _trainingHistory = ConfigStore.loadTrainingHistory().entries;
     unawaited(_loadDeviceOptions());
     _loadModelOptions();
     _scheduleHide();
@@ -140,7 +140,7 @@ class _TrainPageState extends State<_TrainPage> {
       _modelOptions = _dedupeModelOptions(discovered, preferredPath: previous);
       if (preserveSelection &&
           previous != null &&
-          _modelOptions.any((path) => _pathKey(path) == _pathKey(previous))) {
+          _modelOptions.any((path) => pathKey(path) == pathKey(previous))) {
         _modelPath = _matchingModelOption(previous);
       } else {
         _modelPath = _modelOptions.isEmpty ? null : _modelOptions.first;
@@ -148,7 +148,7 @@ class _TrainPageState extends State<_TrainPage> {
     });
     _log(
       'TRAIN',
-      'Model options loaded: count=${_modelOptions.length}, selected=${_modelPath == null ? '-' : _fileName(_modelPath!)}',
+      'Model options loaded: count=${_modelOptions.length}, selected=${_modelPath == null ? '-' : fileName(_modelPath!)}',
       level: _LogLevel.debug,
     );
     _refreshResumeInfo();
@@ -163,12 +163,12 @@ class _TrainPageState extends State<_TrainPage> {
       if (path.trim().isEmpty) {
         continue;
       }
-      byKey.putIfAbsent(_pathKey(path), () => path);
+      byKey.putIfAbsent(pathKey(path), () => path);
     }
     if (preferredPath != null &&
         preferredPath.trim().isNotEmpty &&
         File(preferredPath).existsSync()) {
-      byKey[_pathKey(preferredPath)] = preferredPath;
+      byKey[pathKey(preferredPath)] = preferredPath;
     }
     return byKey.values.toList()..sort(_compareModelPaths);
   }
@@ -177,13 +177,13 @@ class _TrainPageState extends State<_TrainPage> {
     final leftOrder = _yoloModelSortOrder(left);
     final rightOrder = _yoloModelSortOrder(right);
     final order = leftOrder.compareTo(rightOrder);
-    return order == 0 ? _naturalPathCompare(left, right) : order;
+    return order == 0 ? naturalPathCompare(left, right) : order;
   }
 
   String? _matchingModelOption(String path, [Iterable<String>? options]) {
-    final key = _pathKey(path);
+    final key = pathKey(path);
     for (final option in options ?? _modelOptions) {
-      if (_pathKey(option) == key) {
+      if (pathKey(option) == key) {
         return option;
       }
     }
@@ -199,7 +199,7 @@ class _TrainPageState extends State<_TrainPage> {
   }
 
   void _restorePreferences() {
-    final prefs = _ConfigStore.loadTrainingPreferences();
+    final prefs = ConfigStore.loadTrainingPreferences();
     if (prefs.chartColors.isNotEmpty) {
       _chartColors.addAll(prefs.chartColors);
     }
@@ -210,8 +210,8 @@ class _TrainPageState extends State<_TrainPage> {
       if (prefs.stringParameters.isNotEmpty) {
         _stringParameters.addAll(prefs.stringParameters);
       }
-      _batchMode = _BatchMode
-          .values[prefs.batchModeIndex.clamp(0, _BatchMode.values.length - 1)];
+      _batchMode = BatchMode
+          .values[prefs.batchModeIndex.clamp(0, BatchMode.values.length - 1)];
       _batchSize = prefs.batchSize;
       _batchRatio = prefs.batchRatio;
       _ampEnabled = prefs.ampEnabled;
@@ -230,13 +230,13 @@ class _TrainPageState extends State<_TrainPage> {
       if (prefs.datasetPath != null && File(prefs.datasetPath!).existsSync()) {
         _datasetPath = prefs.datasetPath;
         _datasetPathController.text = prefs.datasetPath!;
-        _datasetSummary = _DatasetSummary.fromYamlFile(prefs.datasetPath!);
+        _datasetSummary = loadDatasetSummary(prefs.datasetPath!);
       }
     });
   }
 
   void _savePreferences() {
-    final prefs = _TrainingPreferences(
+    final prefs = TrainingPreferences(
       modelPath: _modelPath,
       datasetPath: _datasetPath,
       parameters: Map<String, double>.from(_parameters),
@@ -250,18 +250,18 @@ class _TrainPageState extends State<_TrainPage> {
       chartColors: Map<String, int>.from(_chartColors),
       exportSettings: _exportSettings,
     );
-    _ConfigStore.saveTrainingPreferences(prefs);
+    ConfigStore.saveTrainingPreferences(prefs);
   }
 
   void _resetParameters() {
     setState(() {
       _parameters
         ..clear()
-        ..addAll(_defaultTrainingParameters);
+        ..addAll(defaultTrainingParameters);
       _stringParameters
         ..clear()
-        ..addAll(_defaultTrainingStringParameters);
-      _batchMode = _BatchMode.fixed;
+        ..addAll(defaultTrainingStringParameters);
+      _batchMode = BatchMode.fixed;
       _batchSize = 16;
       _batchRatio = 0.70;
       _ampEnabled = false;
@@ -273,7 +273,7 @@ class _TrainPageState extends State<_TrainPage> {
 
   Future<void> _setChartColor(String key) async {
     final current = Color(_chartColors[key] ?? 0xFF2563EB);
-    final selected = await _showWheelColorDialog(
+    final selected = await showWheelColorDialog(
       context: context,
       initialColor: current,
       title: key,
@@ -289,29 +289,29 @@ class _TrainPageState extends State<_TrainPage> {
   }
 
   Future<void> _loadDeviceOptions() async {
-    if (_resolvePythonExecutable(widget.settings.pythonPath.trim()) == null) {
+    if (resolvePythonExecutable(widget.settings.pythonPath.trim()) == null) {
       if (mounted) {
         setState(() {
           _deviceOptions = const [
-            _TrainingDeviceOption(id: 'cpu', label: 'CPU'),
+            TrainingDeviceOption(id: 'cpu', label: 'CPU'),
           ];
           _selectedDeviceIds = const {'cpu'};
         });
       }
       return;
     }
-    final devices = await _detectNvidiaDevices();
-    devices.sort((a, b) => _naturalCompare(a.id, b.id));
+    final devices = await detectNvidiaDevices();
+    devices.sort((a, b) => naturalCompare(a.id, b.id));
     if (!mounted) {
       return;
     }
     setState(() {
       if (devices.isEmpty) {
-        _deviceOptions = const [_TrainingDeviceOption(id: 'cpu', label: 'CPU')];
+        _deviceOptions = const [TrainingDeviceOption(id: 'cpu', label: 'CPU')];
       } else {
         _deviceOptions = [
           ...devices,
-          const _TrainingDeviceOption(id: 'cpu', label: 'CPU'),
+          const TrainingDeviceOption(id: 'cpu', label: 'CPU'),
         ];
       }
       _selectedDeviceIds = _manualDeviceSelection
@@ -343,14 +343,14 @@ class _TrainPageState extends State<_TrainPage> {
   List<Directory> _modelsDirectoryCandidates() {
     final current = Directory.current;
     return [
-      _ConfigStore.defaultModelsDirectory,
+      ConfigStore.defaultModelsDirectory,
       Directory('${current.path}\\models'),
       Directory('${current.parent.path}\\models'),
     ];
   }
 
   bool _isSupportedYoloPtModel(String path) {
-    final name = _fileName(path).toLowerCase();
+    final name = fileName(path).toLowerCase();
     return name.endsWith('.pt') &&
         (name.startsWith('yolo') || name == 'last.pt' || name == 'best.pt') &&
         !name.contains('-cls') &&
@@ -358,7 +358,7 @@ class _TrainPageState extends State<_TrainPage> {
   }
 
   int _yoloModelSortOrder(String path) {
-    final name = _fileName(path).toLowerCase().replaceAll('.pt', '');
+    final name = fileName(path).toLowerCase().replaceAll('.pt', '');
     if (name == 'last' || name == 'best') return 999999;
 
     // Version order: v8 < 11 < 26
@@ -491,7 +491,7 @@ class _TrainPageState extends State<_TrainPage> {
     setState(() => _datasetLoading = true);
     try {
       _log('TRAIN', 'Dataset summary loading: $path');
-      final summary = await _loadDatasetSummaryInBackground(path);
+      final summary = await loadDatasetSummaryInBackground(path);
       if (!mounted) {
         return;
       }
@@ -538,7 +538,7 @@ class _TrainPageState extends State<_TrainPage> {
     }
     final selectedDataset = _datasetPath;
     if (selectedDataset == null ||
-        _pathKey(selectedDataset) != _pathKey(dataYamlPath)) {
+        pathKey(selectedDataset) != pathKey(dataYamlPath)) {
       _log(
         'TRAIN',
         'Export auto training skipped: exported dataset was not loaded: $dataYamlPath',
@@ -627,7 +627,7 @@ class _TrainPageState extends State<_TrainPage> {
                           for (final path in options)
                             DropdownMenuItem<String>(
                               value: path,
-                              child: Text(_fileName(path)),
+                              child: Text(fileName(path)),
                             ),
                         ],
                         onChanged: (value) {
@@ -718,14 +718,14 @@ class _TrainPageState extends State<_TrainPage> {
     final nextEpoch = _initialTrainingEpoch(totalEpochs);
     final initialMetricPoints = continuing
         ? _initialTrainingMetricPoints()
-        : const <_TrainingMetricPoint>[];
+        : const <TrainingMetricPoint>[];
     final initialMetrics = initialMetricPoints.isEmpty
         ? null
         : initialMetricPoints.last.metrics;
     _trainingTimer?.cancel();
     _log(
       'TRAIN',
-      'Starting training: model=${_fileName(_modelPath!)}, data=$_datasetPath, epochs=$totalEpochs, imgsz=${_parameters['imgsz']?.round() ?? 640}, batch=$_batchArgument, device=$_deviceArgument, workers=${_parameters['workers']?.round() ?? 4}, resume=$_useResumeTraining, amp=$_ampEnabled',
+      'Starting training: model=${fileName(_modelPath!)}, data=$_datasetPath, epochs=$totalEpochs, imgsz=${_parameters['imgsz']?.round() ?? 640}, batch=$_batchArgument, device=$_deviceArgument, workers=${_parameters['workers']?.round() ?? 4}, resume=$_useResumeTraining, amp=$_ampEnabled',
     );
 
     setState(() {
@@ -734,16 +734,16 @@ class _TrainPageState extends State<_TrainPage> {
       _trainingInterrupted = false;
       _currentEpoch = nextEpoch;
       _trainingMetrics = initialMetrics;
-      _resourceUsage = const _TrainingResourceUsage();
+      _resourceUsage = const TrainingResourceUsage();
       _trainingMetricPoints = initialMetricPoints;
       _trainingLogText = '';
     });
     _appendTrainingRecord(
-      continuing ? _TrainingHistoryAction.resume : _TrainingHistoryAction.start,
+      continuing ? TrainingHistoryAction.resume : TrainingHistoryAction.start,
     );
 
     try {
-      final runDir = await _RustVideoBackend.startYoloTraining(
+      final runDir = await RustBackend.startYoloTraining(
         pythonPath: pythonPath,
         modelPath: _modelPath!,
         dataYamlPath: _datasetPath!,
@@ -781,7 +781,7 @@ class _TrainPageState extends State<_TrainPage> {
         resume: _useResumeTraining,
         clsPw: _parameters['cls_pw'] ?? 0,
       );
-      final logText = await _readTrainingLogTail();
+      final logText = await readTrainingLogTail();
       if (mounted) {
         setState(() {
           _activeRunDir = runDir;
@@ -790,7 +790,7 @@ class _TrainPageState extends State<_TrainPage> {
       }
     } on Object catch (e) {
       _log('TRAIN', 'Training start failed: $e', level: _LogLevel.error);
-      final logText = await _readTrainingLogTail();
+      final logText = await readTrainingLogTail();
       _trainingTimer?.cancel();
       if (mounted) {
         setState(() {
@@ -817,18 +817,18 @@ class _TrainPageState extends State<_TrainPage> {
       'Stopping training at epoch $_currentEpoch',
       level: _LogLevel.warning,
     );
-    _RustVideoBackend.stopYoloTraining();
+    RustBackend.stopYoloTraining();
     setState(() {
       _trainingStopping = true;
       _showTrainingTerminal = true;
     });
-    _appendTrainingRecord(_TrainingHistoryAction.stop);
+    _appendTrainingRecord(TrainingHistoryAction.stop);
   }
 
   Future<void> _showExportSettingsDialog() async {
-    final result = await showDialog<_YoloExportSettings>(
+    final result = await showDialog<YoloExportSettings>(
       context: context,
-      builder: (context) => _YoloExportSettingsDialog(
+      builder: (context) => YoloExportSettingsDialog(
         initial: _exportSettings,
         onManualExport: (settings) async {
           setState(() => _exportSettings = settings);
@@ -852,9 +852,9 @@ class _TrainPageState extends State<_TrainPage> {
     _savePreferences();
   }
 
-  Future<_ModelExportResult> _runModelExport({
+  Future<ModelExportResult> _runModelExport({
     required String modelPath,
-    required _YoloExportSettings settings,
+    required YoloExportSettings settings,
     required String trigger,
   }) async {
     final pythonPath = widget.settings.pythonPath.trim();
@@ -871,7 +871,7 @@ class _TrainPageState extends State<_TrainPage> {
       'Model export started: trigger=$trigger, model=$modelPath, format=${exportSettings.format}, imgsz=${exportSettings.imgsz}, batch=${exportSettings.batch}, quantize=${exportSettings.quantize.isEmpty ? 'fp32' : exportSettings.quantize}, data=${_exportNeedsData(exportSettings) ? exportSettings.dataPath : ''}',
     );
     try {
-      final result = await _RustVideoBackend.exportYoloModel(
+      final result = await RustBackend.exportYoloModel(
         pythonPath: pythonPath,
         modelPath: modelPath,
         settings: exportSettings,
@@ -898,8 +898,8 @@ class _TrainPageState extends State<_TrainPage> {
     }
   }
 
-  _YoloExportSettings _settingsForModelExport({
-    required _YoloExportSettings settings,
+  YoloExportSettings _settingsForModelExport({
+    required YoloExportSettings settings,
     required String trigger,
   }) {
     if (trigger != 'after-training' || !_exportNeedsData(settings)) {
@@ -917,7 +917,7 @@ class _TrainPageState extends State<_TrainPage> {
     return settings.copyWith(dataPath: trainingDataYaml);
   }
 
-  bool _exportNeedsData(_YoloExportSettings settings) {
+  bool _exportNeedsData(YoloExportSettings settings) {
     final quantize = settings.quantize.trim().toLowerCase();
     return quantize == '8' || quantize == 'int8' || quantize == 'w8a8';
   }
@@ -970,9 +970,9 @@ class _TrainPageState extends State<_TrainPage> {
   Future<void> _pollTrainingProgress() async {
     if (!mounted || !_trainingRunning) return;
     try {
-      final progress = await _RustVideoBackend.pollYoloTrainingProgress();
-      final logText = await _readTrainingLogTail();
-      final resourceUsage = await _readTrainingResourceUsage();
+      final progress = await RustBackend.pollYoloTrainingProgress();
+      final logText = await readTrainingLogTail();
+      final resourceUsage = await readTrainingResourceUsage();
       if (!mounted || !_trainingRunning) return;
       var shouldAutoExport = false;
       if (progress == null) {
@@ -986,7 +986,7 @@ class _TrainPageState extends State<_TrainPage> {
         _trainingLogText = logText;
         _resourceUsage = resourceUsage;
         _currentEpoch = progress.currentEpoch;
-        _trainingMetrics = _TrainingMetrics(
+        _trainingMetrics = TrainingMetrics(
           trainLoss: progress.trainLoss,
           valLoss: progress.valLoss,
           map50: progress.map50,
@@ -1001,7 +1001,7 @@ class _TrainPageState extends State<_TrainPage> {
           final existingIndex = nextPoints.indexWhere(
             (point) => point.epoch == progress.currentEpoch,
           );
-          final nextPoint = _TrainingMetricPoint(
+          final nextPoint = TrainingMetricPoint(
             epoch: progress.currentEpoch,
             timestamp: DateTime.now(),
             metrics: metrics,
@@ -1012,7 +1012,7 @@ class _TrainPageState extends State<_TrainPage> {
             nextPoints[existingIndex] = nextPoint;
           }
           nextPoints.sort((a, b) => a.epoch.compareTo(b.epoch));
-          _trainingMetricPoints = _trimTrainingMetricPoints(nextPoints);
+          _trainingMetricPoints = trimTrainingMetricPoints(nextPoints);
         }
         if (progress.status == 'stopping') {
           _trainingStopping = true;
@@ -1050,7 +1050,7 @@ class _TrainPageState extends State<_TrainPage> {
         'Training progress poll failed: $error',
         level: _LogLevel.warning,
       );
-      final logText = await _readTrainingLogTail();
+      final logText = await readTrainingLogTail();
       if (mounted && _trainingRunning) {
         setState(() => _trainingLogText = logText);
       }
@@ -1075,12 +1075,12 @@ class _TrainPageState extends State<_TrainPage> {
     return 1;
   }
 
-  List<_TrainingMetricPoint> _initialTrainingMetricPoints() {
+  List<TrainingMetricPoint> _initialTrainingMetricPoints() {
     final resultsPath = _continuationResultsPath();
     if (resultsPath == null) {
       return const [];
     }
-    return _readTrainingMetricPoints(File(resultsPath));
+    return readTrainingMetricPoints(File(resultsPath));
   }
 
   String? _continuationResultsPath() {
@@ -1100,19 +1100,19 @@ class _TrainPageState extends State<_TrainPage> {
     return null;
   }
 
-  void _appendTrainingRecord(_TrainingHistoryAction action) {
-    final entry = _TrainingHistoryEntry(
+  void _appendTrainingRecord(TrainingHistoryAction action) {
+    final entry = TrainingHistoryEntry(
       action: action,
       timestamp: DateTime.now(),
       modelPath: _modelPath ?? '',
       datasetPath: _datasetPath ?? '',
       epoch: _currentEpoch,
       targetEpochs: _targetTrainingEpochs(),
-      resume: _useResumeTraining || action == _TrainingHistoryAction.resume,
+      resume: _useResumeTraining || action == TrainingHistoryAction.resume,
     );
     final next = [entry, ..._trainingHistory].take(40).toList();
     setState(() => _trainingHistory = next);
-    _ConfigStore.saveTrainingHistory(_TrainingHistoryConfig(entries: next));
+    ConfigStore.saveTrainingHistory(TrainingHistoryConfig(entries: next));
   }
 
   void _setModelPath(String? value) {
@@ -1154,10 +1154,10 @@ class _TrainPageState extends State<_TrainPage> {
       return;
     }
     if (_datasetPath != null &&
-        _pathKey(_datasetPath!) == _pathKey(dataYamlPath)) {
+        pathKey(_datasetPath!) == pathKey(dataYamlPath)) {
       return;
     }
-    final summary = _DatasetSummary.fromYamlFile(dataYamlPath);
+    final summary = loadDatasetSummary(dataYamlPath);
     setState(() {
       _datasetPath = dataYamlPath;
       _datasetPathController.text = dataYamlPath;
@@ -1168,7 +1168,7 @@ class _TrainPageState extends State<_TrainPage> {
   }
 
   String? _checkpointDataYamlPath(String? modelPath) {
-    if (modelPath == null || _fileName(modelPath).toLowerCase() != 'last.pt') {
+    if (modelPath == null || fileName(modelPath).toLowerCase() != 'last.pt') {
       return null;
     }
     final checkpoint = File(modelPath);
@@ -1178,59 +1178,61 @@ class _TrainPageState extends State<_TrainPage> {
     final weightsDir = checkpoint.parent;
     final runDir = weightsDir.parent;
     if (weightsDir.path == runDir.path ||
-        _fileName(weightsDir.path).toLowerCase() != 'weights') {
+        fileName(weightsDir.path).toLowerCase() != 'weights') {
       return null;
     }
-    return _readTrainingDataPath(
+    return readTrainingDataPath(
       File('${runDir.path}\\args.yaml'),
       runDir.path,
     );
   }
 
-  _ResumeTrainingInfo? _detectResumeInfo(String modelPath) {
-    if (_fileName(modelPath).toLowerCase() != 'last.pt') {
+  ResumeTrainingInfo? _detectResumeInfo(String modelPath) {
+    if (fileName(modelPath).toLowerCase() != 'last.pt') {
       return null;
     }
     final checkpoint = File(modelPath);
     if (!checkpoint.existsSync()) {
-      return _ResumeTrainingInfo.unavailable(t('train.resumeNoCheckpoint'));
+      return ResumeTrainingInfo.unavailable(t('train.resumeNoCheckpoint'));
     }
     final weightsDir = checkpoint.parent;
     final runDir = weightsDir.parent;
     if (weightsDir.path == runDir.path ||
-        _fileName(weightsDir.path).toLowerCase() != 'weights') {
-      return _ResumeTrainingInfo.unavailable(t('train.resumeInvalidLayout'));
+        fileName(weightsDir.path).toLowerCase() != 'weights') {
+      return ResumeTrainingInfo.unavailable(t('train.resumeInvalidLayout'));
     }
     final resultsCsv = File('${runDir.path}\\results.csv');
     final argsYaml = File('${runDir.path}\\args.yaml');
     if (!resultsCsv.existsSync()) {
-      return _ResumeTrainingInfo.unavailable(t('train.resumeNoResults'));
+      return ResumeTrainingInfo.unavailable(t('train.resumeNoResults'));
     }
     final targetEpochs =
-        _readTrainingEpochs(argsYaml) ?? _parameters['epochs']?.round() ?? 0;
-    final lastEpoch = _readLastResultEpoch(resultsCsv);
+        readTrainingEpochs(argsYaml) ?? _parameters['epochs']?.round() ?? 0;
+    final lastEpoch = readLastTrainingResultEpoch(resultsCsv);
     if (targetEpochs <= 0 || lastEpoch == null) {
-      return _ResumeTrainingInfo.unavailable(t('train.resumeUnknownProgress'));
+      return ResumeTrainingInfo.unavailable(t('train.resumeUnknownProgress'));
     }
     final selectedData = _datasetPath;
-    final recordedData = _readTrainingDataPath(argsYaml, runDir.path);
+    final recordedData = readTrainingDataPath(argsYaml, runDir.path);
     final dataMatches =
         selectedData == null ||
         recordedData == null ||
-        _pathKey(selectedData) == _pathKey(recordedData);
+        pathKey(selectedData) == pathKey(recordedData);
     if (!dataMatches) {
-      return _ResumeTrainingInfo.unavailable(t('train.resumeDataMismatch'));
+      return ResumeTrainingInfo.unavailable(t('train.resumeDataMismatch'));
     }
     final completedEpochs = lastEpoch + 1;
     if (completedEpochs >= targetEpochs) {
-      return _ResumeTrainingInfo.unavailable(t('train.resumeAlreadyDone'));
+      return ResumeTrainingInfo.unavailable(t('train.resumeAlreadyDone'));
     }
-    return _ResumeTrainingInfo.available(
+    return ResumeTrainingInfo.available(
       runDir: runDir.path,
       argsPath: argsYaml.existsSync() ? argsYaml.path : null,
       resultsPath: resultsCsv.path,
       targetEpochs: targetEpochs,
       completedEpochs: completedEpochs,
+      statusText:
+          '${t('train.resumeAvailable')}: $completedEpochs / $targetEpochs',
     );
   }
 
@@ -1239,7 +1241,7 @@ class _TrainPageState extends State<_TrainPage> {
     if (datasetPath == null || datasetPath.isEmpty) {
       return 'train_${DateTime.now().millisecondsSinceEpoch}';
     }
-    final datasetName = _fileName(File(datasetPath).parent.path);
+    final datasetName = fileName(File(datasetPath).parent.path);
     final sanitized = datasetName
         .replaceAll(RegExp(r'[<>:"/\\|?*]'), '_')
         .trim();
@@ -1288,7 +1290,7 @@ class _TrainPageState extends State<_TrainPage> {
                                   DropdownMenuItem(
                                     value: model,
                                     child: Text(
-                                      _fileName(model),
+                                      fileName(model),
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
@@ -1442,7 +1444,7 @@ class _TrainPageState extends State<_TrainPage> {
                         overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 16),
-                      _DatasetSummaryPanel(summary: _datasetSummary),
+                      DatasetSummaryPanel(summary: _datasetSummary),
                       const SizedBox(height: 16),
                       Expanded(
                         child: DecoratedBox(
@@ -1495,20 +1497,20 @@ class _TrainPageState extends State<_TrainPage> {
                               ),
                               Expanded(
                                 child: _showTrainingTerminal
-                                    ? _TrainingTerminalPanel(
+                                    ? TrainingTerminalPanel(
                                         text: _trainingLogText,
                                       )
                                     : (_trainingMetricPoints.isNotEmpty ||
                                           _trainingRunning ||
                                           _resourceUsage.hasAny)
-                                    ? _TrainingProgressPanel(
+                                    ? TrainingProgressPanel(
                                         metrics:
                                             _trainingMetrics ??
                                             (_trainingMetricPoints.isNotEmpty
                                                 ? _trainingMetricPoints
                                                       .last
                                                       .metrics
-                                                : const _TrainingMetrics()),
+                                                : const TrainingMetrics()),
                                         colors: _chartColors,
                                         onColorChanged: _setChartColor,
                                         points: _trainingMetricPoints,
@@ -1543,7 +1545,7 @@ class _TrainPageState extends State<_TrainPage> {
                   ),
                   child: ClipRect(
                     child: _parameterPanelVisible
-                        ? _TrainingParameterPanel(
+                        ? TrainingParameterPanel(
                             parameters: _parameters,
                             stringParameters: _stringParameters,
                             batchMode: _batchMode,

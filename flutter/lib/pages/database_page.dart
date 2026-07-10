@@ -71,8 +71,8 @@ class _DatabasePageState extends State<_DatabasePage> {
       _errorMessage = null;
     });
     try {
-      final overview = await _ConfigStore.databaseOverview();
-      final projectTable = await _ConfigStore.databaseTable(table: 'projects');
+      final overview = await ConfigStore.databaseOverview();
+      final projectTable = await ConfigStore.databaseTable(table: 'projects');
       final projectRows = _rowsFromTable(projectTable);
       final validProjectIds = projectRows.map((row) => row['id']).toSet();
       final projectId = validProjectIds.contains(_selectedProjectId)
@@ -111,7 +111,7 @@ class _DatabasePageState extends State<_DatabasePage> {
       return _loadStructureData(_activeTable);
     }
     if (_activeAction == 'sql') {
-      return _ConfigStore.databaseSqlQuery(sql: _sqlController.text);
+      return ConfigStore.databaseSqlQuery(sql: _sqlController.text);
     }
     return _loadTableData(
       table: _activeTable,
@@ -126,7 +126,7 @@ class _DatabasePageState extends State<_DatabasePage> {
     String? imageId,
   }) async {
     if (table == 'training_terminal_logs') {
-      final dates = await _ConfigStore.trainingLogDates();
+      final dates = await ConfigStore.trainingLogDates();
       final start = (_pageIndex * _rowsPerPage)
           .clamp(0, dates.length)
           .toInt();
@@ -138,7 +138,7 @@ class _DatabasePageState extends State<_DatabasePage> {
         ],
       };
     }
-    return _ConfigStore.databaseTable(
+    return ConfigStore.databaseTable(
       table: table,
       projectId: table == 'projects' ? '' : (projectId ?? ''),
       imageId: table == 'annotations' ? (imageId ?? '') : '',
@@ -160,7 +160,7 @@ class _DatabasePageState extends State<_DatabasePage> {
         ],
       });
     }
-    return _ConfigStore.databaseSqlQuery(sql: 'PRAGMA table_info($table);');
+    return ConfigStore.databaseSqlQuery(sql: 'PRAGMA table_info($table);');
   }
 
   List<String> _columnsFromTable(Map<String, dynamic> tableData) {
@@ -244,7 +244,7 @@ class _DatabasePageState extends State<_DatabasePage> {
       _selectedRowIndex = null;
     });
     try {
-      final tableData = await _ConfigStore.databaseSqlQuery(
+      final tableData = await ConfigStore.databaseSqlQuery(
         sql: _sqlController.text,
       );
       if (!mounted) {
@@ -326,8 +326,8 @@ class _DatabasePageState extends State<_DatabasePage> {
     final startDate = _dateString(range.start);
     final endDate = _dateString(range.end);
     final deleted = _activeTable == 'training_terminal_logs'
-        ? await _ConfigStore.deleteTrainingLogsByDateRange(startDate, endDate)
-        : _ConfigStore.deleteLogsByDateRange(startDate, endDate);
+        ? await ConfigStore.deleteTrainingLogsByDateRange(startDate, endDate)
+        : ConfigStore.deleteLogsByDateRange(startDate, endDate);
     _showDatabaseMessage('${t('logs.deleted')}: $deleted');
     await _reload();
   }
@@ -376,7 +376,7 @@ class _DatabasePageState extends State<_DatabasePage> {
     if (date.isEmpty) {
       return;
     }
-    final text = await _ConfigStore.readTrainingLogForDate(date);
+    final text = await ConfigStore.readTrainingLogForDate(date);
     if (!mounted) {
       return;
     }
@@ -410,7 +410,7 @@ class _DatabasePageState extends State<_DatabasePage> {
 
   @override
   Widget build(BuildContext context) {
-    final dbPath = '${_overview?['dbPath'] ?? _ConfigStore.databaseFile.path}';
+    final dbPath = '${_overview?['dbPath'] ?? ConfigStore.databaseFile.path}';
     final cleanupText =
         '${t('database.cleanedImages')}: ${_overview?['cleanupDeletedImages'] ?? 0}  '
         '${t('database.cleanedProjects')}: ${_overview?['cleanupDeletedProjects'] ?? 0}';

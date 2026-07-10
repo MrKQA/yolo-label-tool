@@ -1,12 +1,22 @@
 // ignore_for_file: file_names, unused_element, invalid_use_of_internal_member
 
-part of '../main.dart';
+import 'dart:convert';
+import 'dart:isolate';
+import 'dart:typed_data';
+import 'dart:ui';
+
+import '../models/detection.dart';
+import '../models/export.dart';
+import '../models/training.dart';
+import '../src/rust/api/training_mod.dart' show TrainingProgress;
+import '../src/rust/frb_generated.dart';
+import 'rust_ffi.dart';
 
 /// 涓枃锛歊ust + FFmpeg 瑙嗛鎾斁鍚庣鐨勮交閲?FFI 灏佽銆?/// English: Lightweight FFI wrapper for the Rust + FFmpeg video backend.
-class _RustVideoBackend {
-  const _RustVideoBackend._();
+class RustBackend {
+  const RustBackend._();
 
-  static Future<_RustVideoInfo> loadInfo(String videoPath) {
+  static Future<RustVideoInfo> loadInfo(String videoPath) {
     return Isolate.run(() => _loadInfoSync(videoPath));
   }
 
@@ -92,7 +102,7 @@ class _RustVideoBackend {
     return Isolate.run(() => _trainingLogTailSync(maxChars: maxChars));
   }
 
-  static Future<_TrainingResourceUsage> trainingResourceUsage() {
+  static Future<TrainingResourceUsage> trainingResourceUsage() {
     return Isolate.run(_trainingResourceUsageSync);
   }
 
@@ -245,7 +255,7 @@ class _RustVideoBackend {
     );
   }
 
-  static Future<_DetectResult> detect({
+  static Future<DetectResult> detect({
     required String mode,
     required String pythonPath,
     required String modelPath,
@@ -279,7 +289,7 @@ class _RustVideoBackend {
     );
   }
 
-  static Future<_DetectModelTaskResult> detectModelTask({
+  static Future<DetectModelTaskResult> detectModelTask({
     required String pythonPath,
     required String modelPath,
   }) {
@@ -288,10 +298,10 @@ class _RustVideoBackend {
     );
   }
 
-  static Future<_ModelExportResult> exportYoloModel({
+  static Future<ModelExportResult> exportYoloModel({
     required String pythonPath,
     required String modelPath,
-    required _YoloExportSettings settings,
+    required YoloExportSettings settings,
   }) {
     final settingsJson = settings.toJson();
     return Isolate.run(
@@ -303,7 +313,7 @@ class _RustVideoBackend {
     );
   }
 
-  static Future<_AiModelClassesResult> aiModelClasses({
+  static Future<AiModelClassesResult> aiModelClasses({
     required String pythonPath,
     required String modelPath,
   }) {
@@ -312,7 +322,7 @@ class _RustVideoBackend {
     );
   }
 
-  static Future<_AiAnnotationResult> aiAnnotateImage({
+  static Future<AiAnnotationResult> aiAnnotateImage({
     required String backend,
     required String pythonPath,
     required String modelPath,
@@ -364,7 +374,7 @@ class _RustVideoBackend {
     );
   }
 
-  static Future<List<_AiAnnotationResult>> aiAnnotateImages({
+  static Future<List<AiAnnotationResult>> aiAnnotateImages({
     required String backend,
     required String pythonPath,
     required String modelPath,
@@ -418,8 +428,8 @@ class _RustVideoBackend {
     );
   }
 
-  static _RustVideoInfo _loadInfoSync(String videoPath) {
-    final bindings = _RustVideoBindings.open();
+  static RustVideoInfo _loadInfoSync(String videoPath) {
+    final bindings = RustVideoBindings.open();
     final pathBytes = Uint8List.fromList(utf8.encode(videoPath));
     final pathPtr = bindings.allocator.allocate(pathBytes);
     try {
@@ -434,7 +444,7 @@ class _RustVideoBackend {
           '${decoded['error'] ?? 'Unknown video backend error'}',
         );
       }
-      return _RustVideoInfo(
+      return RustVideoInfo(
         width: (decoded['width'] as num?)?.toInt() ?? 0,
         height: (decoded['height'] as num?)?.toInt() ?? 0,
         durationSeconds: (decoded['durationSeconds'] as num?)?.toDouble() ?? 0,
@@ -452,7 +462,7 @@ class _RustVideoBackend {
     required double timestampSeconds,
     required int maxWidth,
   }) {
-    final bindings = _RustVideoBindings.open();
+    final bindings = RustVideoBindings.open();
     final pathBytes = Uint8List.fromList(utf8.encode(videoPath));
     final pathPtr = bindings.allocator.allocate(pathBytes);
     try {
@@ -468,7 +478,7 @@ class _RustVideoBackend {
     }
   }
 
-  static _DetectResult _detectSync({
+  static DetectResult _detectSync({
     required String mode,
     required String pythonPath,
     required String modelPath,
@@ -483,7 +493,7 @@ class _RustVideoBackend {
     required String cancelPath,
     required int startFrame,
   }) {
-    final bindings = _RustVideoBindings.open();
+    final bindings = RustVideoBindings.open();
     final request = jsonEncode({
       'mode': mode,
       'pythonPath': pythonPath,
@@ -508,7 +518,7 @@ class _RustVideoBackend {
       if (decoded is! Map<String, dynamic>) {
         throw StateError('Invalid detection response');
       }
-      return _DetectResult(
+      return DetectResult(
         ok: decoded['ok'] == true,
         outputPath: '${decoded['outputPath'] ?? ''}',
         error: decoded['error']?.toString(),
@@ -519,11 +529,11 @@ class _RustVideoBackend {
     }
   }
 
-  static _DetectModelTaskResult _detectModelTaskSync({
+  static DetectModelTaskResult _detectModelTaskSync({
     required String pythonPath,
     required String modelPath,
   }) {
-    final bindings = _RustVideoBindings.open();
+    final bindings = RustVideoBindings.open();
     final request = jsonEncode({
       'pythonPath': pythonPath,
       'modelPath': modelPath,
@@ -540,7 +550,7 @@ class _RustVideoBackend {
       if (decoded is! Map<String, dynamic>) {
         throw StateError('Invalid model task response');
       }
-      return _DetectModelTaskResult(
+      return DetectModelTaskResult(
         ok: decoded['ok'] == true,
         task: '${decoded['task'] ?? ''}',
         folder: '${decoded['folder'] ?? 'hbb'}',
@@ -551,13 +561,13 @@ class _RustVideoBackend {
     }
   }
 
-  static _ModelExportResult _exportYoloModelSync({
+  static ModelExportResult _exportYoloModelSync({
     required String pythonPath,
     required String modelPath,
     required Map<String, Object> settingsJson,
   }) {
-    final settings = _YoloExportSettings.fromJson(settingsJson);
-    final bindings = _RustVideoBindings.open();
+    final settings = YoloExportSettings.fromJson(settingsJson);
+    final bindings = RustVideoBindings.open();
     final request = jsonEncode({
       'pythonPath': pythonPath,
       'modelPath': modelPath,
@@ -585,7 +595,7 @@ class _RustVideoBackend {
       if (decoded['ok'] != true) {
         throw StateError('${decoded['error'] ?? 'Model export failed'}');
       }
-      return _ModelExportResult(
+      return ModelExportResult(
         format: '${decoded['format'] ?? settings.format}',
         outputPath: '${decoded['outputPath'] ?? ''}',
         stdout: '${decoded['stdout'] ?? ''}',
@@ -600,7 +610,7 @@ class _RustVideoBackend {
     if (pythonPath.trim().isEmpty) {
       return;
     }
-    final bindings = _RustVideoBindings.open();
+    final bindings = RustVideoBindings.open();
     final request = jsonEncode({'pythonPath': pythonPath});
     final requestBytes = Uint8List.fromList(utf8.encode(request));
     final requestPtr = bindings.allocator.allocate(requestBytes);
@@ -621,7 +631,7 @@ class _RustVideoBackend {
   }
 
   static String _trainingLogTailSync({required int maxChars}) {
-    final bindings = _RustVideoBindings.open();
+    final bindings = RustVideoBindings.open();
     final request = jsonEncode({'maxChars': maxChars});
     final requestBytes = Uint8List.fromList(utf8.encode(request));
     final requestPtr = bindings.allocator.allocate(requestBytes);
@@ -641,8 +651,8 @@ class _RustVideoBackend {
     }
   }
 
-  static _TrainingResourceUsage _trainingResourceUsageSync() {
-    final bindings = _RustVideoBindings.open();
+  static TrainingResourceUsage _trainingResourceUsageSync() {
+    final bindings = RustVideoBindings.open();
     final requestBytes = Uint8List(0);
     final requestPtr = bindings.allocator.allocate(requestBytes);
     try {
@@ -653,7 +663,7 @@ class _RustVideoBackend {
       final jsonText = bindings.takeUtf8(buffer);
       final decoded = jsonDecode(jsonText);
       if (decoded is Map && decoded['ok'] == true) {
-        return _TrainingResourceUsage.fromJson(decoded);
+        return TrainingResourceUsage.fromJson(decoded);
       }
       throw StateError('${decoded is Map ? decoded['error'] : jsonText}');
     } finally {
@@ -662,7 +672,7 @@ class _RustVideoBackend {
   }
 
   static void _shutdownPythonSync() {
-    final bindings = _RustVideoBindings.open();
+    final bindings = RustVideoBindings.open();
     final requestBytes = Uint8List(0);
     final requestPtr = bindings.allocator.allocate(requestBytes);
     try {
@@ -685,7 +695,7 @@ class _RustVideoBackend {
     required String payload,
     required bool save,
   }) {
-    final bindings = _RustVideoBindings.open();
+    final bindings = RustVideoBindings.open();
     final request = jsonEncode({'payload': payload});
     final requestBytes = Uint8List.fromList(utf8.encode(request));
     final requestPtr = bindings.allocator.allocate(requestBytes);
@@ -712,7 +722,7 @@ class _RustVideoBackend {
     String value = '',
     required String mode,
   }) {
-    final bindings = _RustVideoBindings.open();
+    final bindings = RustVideoBindings.open();
     final request = jsonEncode({'key': key, 'value': value});
     final requestBytes = Uint8List.fromList(utf8.encode(request));
     final requestPtr = bindings.allocator.allocate(requestBytes);
@@ -738,7 +748,7 @@ class _RustVideoBackend {
     String endDate = '',
     required String mode,
   }) {
-    final bindings = _RustVideoBindings.open();
+    final bindings = RustVideoBindings.open();
     final request = jsonEncode({
       'lines': lines,
       'date': date,
@@ -761,7 +771,7 @@ class _RustVideoBackend {
   }
 
   static Map<String, dynamic> _databaseOverviewSync() {
-    final bindings = _RustVideoBindings.open();
+    final bindings = RustVideoBindings.open();
     final requestBytes = Uint8List.fromList(utf8.encode('{}'));
     final requestPtr = bindings.allocator.allocate(requestBytes);
     try {
@@ -779,7 +789,7 @@ class _RustVideoBackend {
     required int limit,
     required int offset,
   }) {
-    final bindings = _RustVideoBindings.open();
+    final bindings = RustVideoBindings.open();
     final request = jsonEncode({
       'table': table,
       'projectId': projectId,
@@ -798,7 +808,7 @@ class _RustVideoBackend {
   }
 
   static Map<String, dynamic> _databaseSqlQuerySync({required String sql}) {
-    final bindings = _RustVideoBindings.open();
+    final bindings = RustVideoBindings.open();
     final request = jsonEncode({'sql': sql});
     final requestBytes = Uint8List.fromList(utf8.encode(request));
     final requestPtr = bindings.allocator.allocate(requestBytes);
@@ -813,7 +823,7 @@ class _RustVideoBackend {
   static Map<String, dynamic> _collaborationCommandSync({
     required Map<String, Object?> request,
   }) {
-    final bindings = _RustVideoBindings.open();
+    final bindings = RustVideoBindings.open();
     final requestBytes = Uint8List.fromList(utf8.encode(jsonEncode(request)));
     final requestPtr = bindings.allocator.allocate(requestBytes);
     try {
@@ -834,7 +844,7 @@ class _RustVideoBackend {
   static List<Map<String, dynamic>> _collaborationPollEventsSync({
     required int maxEvents,
   }) {
-    final bindings = _RustVideoBindings.open();
+    final bindings = RustVideoBindings.open();
     final request = jsonEncode({'maxEvents': maxEvents});
     final requestBytes = Uint8List.fromList(utf8.encode(request));
     final requestPtr = bindings.allocator.allocate(requestBytes);
@@ -867,7 +877,7 @@ class _RustVideoBackend {
     String endDate = '',
     required String mode,
   }) {
-    final bindings = _RustVideoBindings.open();
+    final bindings = RustVideoBindings.open();
     final request = jsonEncode({
       'date': date,
       'startDate': startDate,
@@ -895,8 +905,8 @@ class _RustVideoBackend {
   }
 
   static Map<String, dynamic> _decodeDbResponse(
-    _RustVideoBindings bindings,
-    _RustVideoByteBuffer buffer,
+    RustVideoBindings bindings,
+    RustVideoByteBuffer buffer,
     String fallbackError,
   ) {
     final jsonText = bindings.takeUtf8(buffer);
@@ -910,11 +920,11 @@ class _RustVideoBackend {
     return decoded;
   }
 
-  static _AiModelClassesResult _aiModelClassesSync({
+  static AiModelClassesResult _aiModelClassesSync({
     required String pythonPath,
     required String modelPath,
   }) {
-    final bindings = _RustVideoBindings.open();
+    final bindings = RustVideoBindings.open();
     final request = jsonEncode({
       'pythonPath': pythonPath,
       'modelPath': modelPath,
@@ -934,13 +944,13 @@ class _RustVideoBackend {
       if (decoded['ok'] != true) {
         throw StateError('${decoded['error'] ?? 'Failed to read classes'}');
       }
-      final classes = <_AiModelClass>[];
+      final classes = <AiModelClass>[];
       final rawClasses = decoded['classes'];
       if (rawClasses is List) {
         for (final item in rawClasses) {
           if (item is Map) {
             classes.add(
-              _AiModelClass(
+              AiModelClass(
                 id: (item['id'] as num?)?.toInt() ?? classes.length,
                 name: '${item['name'] ?? 'class_${classes.length}'}',
               ),
@@ -948,7 +958,7 @@ class _RustVideoBackend {
           }
         }
       }
-      return _AiModelClassesResult(
+      return AiModelClassesResult(
         task: '${decoded['task'] ?? 'detect'}',
         classes: classes,
       );
@@ -957,7 +967,7 @@ class _RustVideoBackend {
     }
   }
 
-  static _AiAnnotationResult _aiAnnotateImageSync({
+  static AiAnnotationResult _aiAnnotateImageSync({
     required String backend,
     required String pythonPath,
     required String modelPath,
@@ -981,7 +991,7 @@ class _RustVideoBackend {
     required String samResizeMethod,
     required bool samCompile,
   }) {
-    final bindings = _RustVideoBindings.open();
+    final bindings = RustVideoBindings.open();
     final request = jsonEncode({
       'backend': backend,
       'pythonPath': pythonPath,
@@ -1021,7 +1031,7 @@ class _RustVideoBackend {
       if (decoded['ok'] != true) {
         throw StateError('${decoded['error'] ?? 'AI annotation failed'}');
       }
-      return _AiAnnotationResult(
+      return AiAnnotationResult(
         inputPath: inputPath,
         width: (decoded['width'] as num?)?.toDouble() ?? 0,
         height: (decoded['height'] as num?)?.toDouble() ?? 0,
@@ -1033,7 +1043,7 @@ class _RustVideoBackend {
     }
   }
 
-  static List<_AiAnnotationResult> _aiAnnotateImagesSync({
+  static List<AiAnnotationResult> _aiAnnotateImagesSync({
     required String backend,
     required String pythonPath,
     required String modelPath,
@@ -1058,7 +1068,7 @@ class _RustVideoBackend {
     required String samResizeMethod,
     required bool samCompile,
   }) {
-    final bindings = _RustVideoBindings.open();
+    final bindings = RustVideoBindings.open();
     final request = jsonEncode({
       'backend': backend,
       'pythonPath': pythonPath,
@@ -1099,14 +1109,14 @@ class _RustVideoBackend {
       if (decoded['ok'] != true) {
         throw StateError('${decoded['error'] ?? 'AI batch annotation failed'}');
       }
-      final results = <_AiAnnotationResult>[];
+      final results = <AiAnnotationResult>[];
       final rawImages = decoded['images'];
       if (rawImages is List) {
         for (var index = 0; index < rawImages.length; index++) {
           final item = rawImages[index];
           if (item is Map) {
             results.add(
-              _AiAnnotationResult(
+              AiAnnotationResult(
                 inputPath:
                     '${item['inputPath'] ?? (index < inputPaths.length ? inputPaths[index] : '')}',
                 width: (item['width'] as num?)?.toDouble() ?? 0,
@@ -1124,13 +1134,13 @@ class _RustVideoBackend {
     }
   }
 
-  static List<_AiPredictionBox> _parseAiPredictionBoxes(Object? rawBoxes) {
-    final boxes = <_AiPredictionBox>[];
+  static List<AiPredictionBox> _parseAiPredictionBoxes(Object? rawBoxes) {
+    final boxes = <AiPredictionBox>[];
     if (rawBoxes is List) {
       for (final item in rawBoxes) {
         if (item is Map) {
           boxes.add(
-            _AiPredictionBox(
+            AiPredictionBox(
               classId: (item['classId'] as num?)?.toInt() ?? 0,
               className: '${item['className'] ?? 'class'}',
               confidence: (item['confidence'] as num?)?.toDouble() ?? 0,
@@ -1148,8 +1158,8 @@ class _RustVideoBackend {
     return boxes;
   }
 
-  static List<_AiPredictionMask> _parseAiPredictionMasks(Object? rawMasks) {
-    final masks = <_AiPredictionMask>[];
+  static List<AiPredictionMask> _parseAiPredictionMasks(Object? rawMasks) {
+    final masks = <AiPredictionMask>[];
     if (rawMasks is List) {
       for (final item in rawMasks) {
         if (item is! Map) {
@@ -1177,7 +1187,7 @@ class _RustVideoBackend {
           }
         }
         masks.add(
-          _AiPredictionMask(
+          AiPredictionMask(
             classId: (item['classId'] as num?)?.toInt() ?? 0,
             className: '${item['className'] ?? 'class'}',
             confidence: (item['confidence'] as num?)?.toDouble() ?? 0,

@@ -1,6 +1,8 @@
-part of '../main.dart';
+import 'package:flutter/material.dart';
 
-Future<void> _showAboutDialogForContext(BuildContext context) {
+import '../services/i18n.dart';
+
+Future<void> showAboutDialogForContext(BuildContext context) {
   return showDialog<void>(
     context: context,
     builder: (context) {
