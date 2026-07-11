@@ -1,7 +1,16 @@
-part of '../../main.dart';
+import 'dart:async';
+import 'dart:io';
 
-class _DetectPreviewList extends StatelessWidget {
-  const _DetectPreviewList({
+import 'package:flutter/material.dart';
+
+import '../../pages/detect_video_page.dart';
+import '../../services/i18n.dart';
+import '../../services/path_utils.dart';
+import '../../theme/theme_helpers.dart';
+import '../train/training_parameter_panel.dart';
+
+class DetectPreviewList extends StatelessWidget {
+  const DetectPreviewList({
     required this.items,
     required this.selectedInput,
     required this.onSelected,
@@ -28,11 +37,11 @@ class _DetectPreviewList extends StatelessWidget {
               decoration: BoxDecoration(
                 color: selected
                     ? Theme.of(context).colorScheme.primaryContainer
-                    : _controlColor(context),
+                    : controlColor(context),
                 border: Border.all(
                   color: selected
                       ? Theme.of(context).colorScheme.primary
-                      : _borderColor(context),
+                      : borderColor(context),
                 ),
                 borderRadius: BorderRadius.circular(6),
               ),
@@ -66,8 +75,8 @@ class _DetectPreviewList extends StatelessWidget {
   }
 }
 
-class _DetectParameterPanel extends StatelessWidget {
-  const _DetectParameterPanel({
+class DetectParameterPanel extends StatelessWidget {
+  const DetectParameterPanel({
     required this.session,
     required this.deviceValue,
     required this.deviceArgument,
@@ -87,7 +96,7 @@ class _DetectParameterPanel extends StatelessWidget {
     required this.onDeviceChanged,
   });
 
-  final _DetectVideoSession session;
+  final DetectVideoSession session;
   final String deviceValue;
   final String deviceArgument;
   final String autoDeviceLabel;

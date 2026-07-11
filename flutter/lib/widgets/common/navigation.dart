@@ -1,7 +1,15 @@
-part of '../../main.dart';
+import 'package:flutter/material.dart';
 
-class _TopMenuBar extends StatelessWidget {
-  const _TopMenuBar({
+import '../../services/i18n.dart';
+import '../../theme/colors.dart';
+import '../../theme/dimensions.dart';
+import '../../theme/theme_helpers.dart';
+
+const _recentMenuVisibleCount = 5;
+
+class TopMenuBar extends StatelessWidget {
+  const TopMenuBar({
+    super.key,
     required this.visible,
     required this.recentFolders,
     required this.recentFiles,
@@ -68,10 +76,10 @@ class _TopMenuBar extends StatelessWidget {
       onExit: (_) => onPointerExit(),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
-        height: visible ? _topMenuHeight : _topMenuCollapsedHeight,
+        height: visible ? topMenuHeight : topMenuCollapsedHeight,
         decoration: BoxDecoration(
-          color: _panelColor(context),
-          border: Border(bottom: BorderSide(color: _borderColor(context))),
+          color: panelColor(context),
+          border: Border(bottom: BorderSide(color: borderColor(context))),
         ),
         child: ClipRect(
           child: AnimatedOpacity(
@@ -90,7 +98,7 @@ class _TopMenuBar extends StatelessWidget {
                   MenuBar(
                     style: MenuStyle(
                       backgroundColor: WidgetStatePropertyAll(
-                        _panelColor(context),
+                        panelColor(context),
                       ),
                       elevation: const WidgetStatePropertyAll(0),
                     ),
@@ -379,8 +387,9 @@ class _RecentFilesMenu extends StatelessWidget {
   }
 }
 
-class _PrimarySidebar extends StatelessWidget {
-  const _PrimarySidebar({
+class PrimarySidebar extends StatelessWidget {
+  const PrimarySidebar({
+    super.key,
     required this.activeSection,
     required this.collapsed,
     required this.onCollapseChanged,
@@ -405,15 +414,15 @@ class _PrimarySidebar extends StatelessWidget {
   Widget build(BuildContext context) {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 160),
-      width: collapsed ? _collapsedSidebarWidth : _expandedSidebarWidth,
+      width: collapsed ? collapsedSidebarWidth : expandedSidebarWidth,
       decoration: BoxDecoration(
-        color: _panelColor(context),
-        border: Border(right: BorderSide(color: _borderColor(context))),
+        color: panelColor(context),
+        border: Border(right: BorderSide(color: borderColor(context))),
       ),
       child: Column(
         children: [
           SizedBox(
-            height: _paneHeaderHeight,
+            height: paneHeaderHeight,
             child: Center(
               child: Tooltip(
                 message: collapsed
@@ -459,10 +468,10 @@ class _SidebarButton extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final foreground = selected
         ? colorScheme.primary
-        : _primaryTextColor(context);
+        : primaryTextColor(context);
     final background = selected
-        ? (_isDarkMode(context)
-              ? _darkControlBackground
+        ? (isDarkMode(context)
+              ? appDarkControlBackground
               : const Color(0xFFEFF6FF))
         : Colors.transparent;
 

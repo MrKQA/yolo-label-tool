@@ -8,112 +8,19 @@
 // UDP discovery and Rust TCP message transport.
 // =============================================================================
 
-// ignore_for_file: file_names
+import 'dart:math' as math;
 
-part of '../main.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
-enum _CollaborationMode { off, host, client }
+import '../models/collaboration.dart';
+import '../services/collaboration_identity.dart';
+import '../services/i18n.dart';
+import '../theme/theme_helpers.dart';
 
-class _CollaborationPermissions {
-  const _CollaborationPermissions({
-    this.canEditOthers = false,
-    this.canDeleteOthers = false,
-    this.canChangeClass = false,
-  });
-
-  final bool canEditOthers;
-  final bool canDeleteOthers;
-  final bool canChangeClass;
-
-  _CollaborationPermissions copyWith({
-    bool? canEditOthers,
-    bool? canDeleteOthers,
-    bool? canChangeClass,
-  }) {
-    return _CollaborationPermissions(
-      canEditOthers: canEditOthers ?? this.canEditOthers,
-      canDeleteOthers: canDeleteOthers ?? this.canDeleteOthers,
-      canChangeClass: canChangeClass ?? this.canChangeClass,
-    );
-  }
-}
-
-class _CollaborationPeer {
-  const _CollaborationPeer({
-    required this.userId,
-    required this.userName,
-    required this.address,
-    required this.colorValue,
-    required this.online,
-    this.assignmentStart = 1,
-    this.assignmentEnd = 1,
-    this.permissions = const _CollaborationPermissions(),
-  });
-
-  final String userId;
-  final String userName;
-  final String address;
-  final int colorValue;
-  final bool online;
-  final int assignmentStart;
-  final int assignmentEnd;
-  final _CollaborationPermissions permissions;
-
-  _CollaborationPeer copyWith({
-    String? userId,
-    String? userName,
-    String? address,
-    int? colorValue,
-    bool? online,
-    int? assignmentStart,
-    int? assignmentEnd,
-    _CollaborationPermissions? permissions,
-  }) {
-    return _CollaborationPeer(
-      userId: userId ?? this.userId,
-      userName: userName ?? this.userName,
-      address: address ?? this.address,
-      colorValue: colorValue ?? this.colorValue,
-      online: online ?? this.online,
-      assignmentStart: assignmentStart ?? this.assignmentStart,
-      assignmentEnd: assignmentEnd ?? this.assignmentEnd,
-      permissions: permissions ?? this.permissions,
-    );
-  }
-}
-
-class _CollaborationPeerPermissionResult {
-  const _CollaborationPeerPermissionResult({
-    required this.userId,
-    required this.permissions,
-    required this.assignmentStart,
-    required this.assignmentEnd,
-  });
-
-  final String userId;
-  final _CollaborationPermissions permissions;
-  final int assignmentStart;
-  final int assignmentEnd;
-}
-
-class _CollaborationDiscoveredHost {
-  const _CollaborationDiscoveredHost({
-    required this.hostId,
-    required this.hostName,
-    required this.address,
-    required this.port,
-    required this.online,
-  });
-
-  final String hostId;
-  final String hostName;
-  final String address;
-  final int port;
-  final bool online;
-}
-
-class _CollaborationPage extends StatelessWidget {
-  const _CollaborationPage({
+class CollaborationPage extends StatelessWidget {
+  const CollaborationPage({
+    super.key,
     required this.mode,
     required this.hostId,
     required this.userId,
@@ -136,7 +43,7 @@ class _CollaborationPage extends StatelessWidget {
     required this.onPeerPermissionsChanged,
   });
 
-  final _CollaborationMode mode;
+  final CollaborationMode mode;
   final String hostId;
   final String userId;
   final String userName;
@@ -145,33 +52,34 @@ class _CollaborationPage extends StatelessWidget {
   final int imageCount;
   final int assignmentStart;
   final int assignmentEnd;
-  final List<_CollaborationDiscoveredHost> discoveredHosts;
+  final List<CollaborationDiscoveredHost> discoveredHosts;
   final String? selectedHostId;
   final bool joining;
-  final List<_CollaborationPeer> peers;
+  final List<CollaborationPeer> peers;
   final ValueChanged<String> onUserNameChanged;
   final ValueChanged<int> onPortChanged;
   final ValueChanged<String?> onHostSelected;
   final VoidCallback onStartHost;
   final VoidCallback onJoinClient;
   final VoidCallback onStop;
-  final ValueChanged<_CollaborationPeerPermissionResult>
+  final ValueChanged<CollaborationPeerPermissionResult>
   onPeerPermissionsChanged;
 
-  bool get _active => mode != _CollaborationMode.off;
+  bool get _active => mode != CollaborationMode.off;
 
   bool get _canJoinSelectedHost =>
-      mode == _CollaborationMode.off &&
+      mode == CollaborationMode.off &&
       !joining &&
       selectedHostId != null &&
       discoveredHosts.any((host) => host.hostId == selectedHostId && host.online);
 
   @override
   Widget build(BuildContext context) {
-    final canEditPeers = mode == _CollaborationMode.host;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final canEditPeers = mode == CollaborationMode.host;
     return SizedBox.expand(
       child: Container(
-        color: _workspaceColor(context),
+        color: appWorkspaceColor(dark),
         padding: const EdgeInsets.all(24),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -213,7 +121,7 @@ class _CollaborationPage extends StatelessWidget {
                         _CollaborationIdentityChip(
                           label: t('collab.hostId'),
                           value: hostId,
-                          color: _collaborationColorForId(hostId),
+                          color: collaborationColorForId(hostId),
                         ),
                         _CollaborationIdentityChip(
                           label: t('collab.userId'),
@@ -240,7 +148,7 @@ class _CollaborationPage extends StatelessWidget {
                             },
                           ),
                         ),
-                        _StatusPill(label: _modeLabel()),
+                        _CollaborationStatusPill(label: _modeLabel()),
                       ],
                     ),
                   ),
@@ -262,7 +170,7 @@ class _CollaborationPage extends StatelessWidget {
                       crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         FilledButton.icon(
-                          onPressed: mode == _CollaborationMode.host
+                          onPressed: mode == CollaborationMode.host
                               ? null
                               : onStartHost,
                           icon: const Icon(Icons.cast_connected_outlined),
@@ -303,32 +211,32 @@ class _CollaborationPage extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          mode == _CollaborationMode.host
+                          mode == CollaborationMode.host
                               ? t('collab.assignmentPeerHint')
                               : t('collab.assignmentHint'),
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
                         const SizedBox(height: 12),
-                        if (mode == _CollaborationMode.client)
+                        if (mode == CollaborationMode.client)
                           Wrap(
                             spacing: 12,
                             runSpacing: 12,
                             crossAxisAlignment: WrapCrossAlignment.center,
                             children: [
-                              _StatusPill(
+                              _CollaborationStatusPill(
                                 label: '${t('collab.startIndex')}: $assignmentStart',
                               ),
-                              _StatusPill(
+                              _CollaborationStatusPill(
                                 label: '${t('collab.endIndex')}: $assignmentEnd',
                               ),
-                              _StatusPill(
+                              _CollaborationStatusPill(
                                 label:
                                     '${t('collab.totalImages')}: $imageCount',
                               ),
                             ],
                           )
                         else
-                          _StatusPill(
+                          _CollaborationStatusPill(
                             label: '${t('collab.totalImages')}: $imageCount',
                           ),
                       ],
@@ -371,7 +279,7 @@ class _CollaborationPage extends StatelessWidget {
                                     size: 14,
                                   ),
                                   title: Text(
-                                    '${peer.userName}#${_shortCollaborationId(peer.userId)}',
+                                    '${peer.userName}#${shortCollaborationId(peer.userId)}',
                                   ),
                                   subtitle: Text(
                                     '${peer.address}  ${peer.online ? t('collab.online') : t('collab.offline')}  ${t('collab.assignment')}: ${peer.assignmentStart}-${peer.assignmentEnd}',
@@ -408,20 +316,20 @@ class _CollaborationPage extends StatelessWidget {
 
   String _modeLabel() {
     return switch (mode) {
-      _CollaborationMode.host => t('collab.modeHost'),
-      _CollaborationMode.client => t('collab.modeClient'),
-      _CollaborationMode.off => t('collab.modeOff'),
+      CollaborationMode.host => t('collab.modeHost'),
+      CollaborationMode.client => t('collab.modeClient'),
+      CollaborationMode.off => t('collab.modeOff'),
     };
   }
 
   Future<void> _editPeerPermissions(
     BuildContext context,
-    _CollaborationPeer peer,
+    CollaborationPeer peer,
   ) async {
-    if (mode != _CollaborationMode.host) {
+    if (mode != CollaborationMode.host) {
       return;
     }
-    final result = await showDialog<_CollaborationPeerPermissionResult>(
+    final result = await showDialog<CollaborationPeerPermissionResult>(
       context: context,
       builder: (context) => _CollaborationPeerPermissionDialog(
         peer: peer,
@@ -432,11 +340,33 @@ class _CollaborationPage extends StatelessWidget {
       return;
     }
     onPeerPermissionsChanged(
-      _CollaborationPeerPermissionResult(
+      CollaborationPeerPermissionResult(
         userId: peer.userId,
         permissions: result.permissions,
         assignmentStart: result.assignmentStart,
         assignmentEnd: result.assignmentEnd,
+      ),
+    );
+  }
+}
+
+class _CollaborationStatusPill extends StatelessWidget {
+  const _CollaborationStatusPill({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: appPanelColor(dark),
+        border: Border.all(color: appBorderColor(dark)),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: Text(label, style: Theme.of(context).textTheme.labelMedium),
       ),
     );
   }
@@ -450,10 +380,11 @@ class _CollaborationCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: _panelColor(context),
-        border: Border.all(color: _borderColor(context)),
+        color: appPanelColor(dark),
+        border: Border.all(color: appBorderColor(dark)),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Padding(
@@ -484,12 +415,13 @@ class _CollaborationIdentityChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 360),
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: _controlColor(context),
-          border: Border.all(color: _borderColor(context)),
+          color: appControlColor(dark),
+          border: Border.all(color: appBorderColor(dark)),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Padding(
@@ -524,7 +456,7 @@ class _CollaborationPeerPermissionDialog extends StatefulWidget {
     required this.imageCount,
   });
 
-  final _CollaborationPeer peer;
+  final CollaborationPeer peer;
   final int imageCount;
 
   @override
@@ -534,7 +466,7 @@ class _CollaborationPeerPermissionDialog extends StatefulWidget {
 
 class _CollaborationPeerPermissionDialogState
     extends State<_CollaborationPeerPermissionDialog> {
-  late _CollaborationPermissions _permissions = widget.peer.permissions;
+  late CollaborationPermissions _permissions = widget.peer.permissions;
   late int _assignmentStart = widget.peer.assignmentStart;
   late int _assignmentEnd = widget.peer.assignmentEnd;
 
@@ -563,7 +495,7 @@ class _CollaborationPeerPermissionDialogState
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '${peer.userName}#${_shortCollaborationId(peer.userId)}',
+                    '${peer.userName}#${shortCollaborationId(peer.userId)}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -654,7 +586,7 @@ class _CollaborationPeerPermissionDialogState
         ),
         FilledButton(
           onPressed: () => Navigator.of(context).pop(
-            _CollaborationPeerPermissionResult(
+            CollaborationPeerPermissionResult(
               userId: peer.userId,
               permissions: _permissions,
               assignmentStart: _assignmentStart
@@ -679,7 +611,7 @@ class _DiscoveredHostsList extends StatelessWidget {
     required this.onSelected,
   });
 
-  final List<_CollaborationDiscoveredHost> hosts;
+  final List<CollaborationDiscoveredHost> hosts;
   final String? selectedHostId;
   final ValueChanged<String?> onSelected;
 
@@ -718,7 +650,7 @@ class _DiscoveredHostsList extends StatelessWidget {
             groupValue: selectedHostId,
             onChanged: host.online ? onSelected : null,
             title: Text(
-              '${host.hostName}#${_shortCollaborationId(host.hostId)}',
+              '${host.hostName}#${shortCollaborationId(host.hostId)}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -727,7 +659,7 @@ class _DiscoveredHostsList extends StatelessWidget {
               Icons.circle,
               size: 12,
               color: host.online
-                  ? _collaborationColorForId(host.hostId)
+                  ? collaborationColorForId(host.hostId)
                   : Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),

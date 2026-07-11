@@ -1,4 +1,12 @@
-part of 'main.dart';
+import 'package:flutter/material.dart';
+
+import 'models/app_status.dart';
+import 'services/app_runtime.dart';
+import 'services/i18n.dart';
+import 'src/rust/api.dart';
+import 'theme/colors.dart';
+import 'theme/theme_helpers.dart';
+import 'widgets/common/workspace_shell.dart';
 
 class YoloLabelApp extends StatelessWidget {
   const YoloLabelApp({super.key});
@@ -9,40 +17,40 @@ class YoloLabelApp extends StatelessWidget {
       valueListenable: languageStringsNotifier,
       builder: (context, language, _) {
         return ValueListenableBuilder<ThemeMode>(
-          valueListenable: _themeModeNotifier,
+          valueListenable: themeModeNotifier,
           builder: (context, themeMode, _) {
             return MaterialApp(
               debugShowCheckedModeBanner: false,
               title: t('app.title'),
               themeMode: themeMode,
               theme: ThemeData(
-                colorScheme: ColorScheme.fromSeed(seedColor: _brandColor),
-                fontFamily: theme_helpers.appFontFamily,
-                scaffoldBackgroundColor: _workspaceBackground,
+                colorScheme: ColorScheme.fromSeed(seedColor: appBrandColor),
+                fontFamily: appFontFamily,
+                scaffoldBackgroundColor: appWorkspaceBackground,
                 useMaterial3: true,
               ),
               darkTheme: ThemeData(
                 colorScheme: ColorScheme.fromSeed(
-                  seedColor: _darkBrandColor,
+                  seedColor: appDarkBrandColor,
                   brightness: Brightness.dark,
                 ),
                 brightness: Brightness.dark,
-                fontFamily: theme_helpers.appFontFamily,
-                scaffoldBackgroundColor: _darkAppBackground,
+                fontFamily: appFontFamily,
+                scaffoldBackgroundColor: appDarkAppBackground,
                 dialogTheme: const DialogThemeData(
-                  backgroundColor: _darkPanelBackground,
+                  backgroundColor: appDarkPanelBackground,
                   titleTextStyle: TextStyle(
-                    color: _darkTextColor,
-                    fontFamily: theme_helpers.appFontFamily,
+                    color: appDarkTextColor,
+                    fontFamily: appFontFamily,
                     fontSize: 20,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                dividerTheme: const DividerThemeData(color: _darkBorderColor),
+                dividerTheme: const DividerThemeData(color: appDarkBorderColor),
                 menuTheme: const MenuThemeData(
                   style: MenuStyle(
                     backgroundColor: WidgetStatePropertyAll(
-                      _darkPanelBackground,
+                      appDarkPanelBackground,
                     ),
                     surfaceTintColor: WidgetStatePropertyAll(
                       Colors.transparent,
@@ -51,13 +59,15 @@ class YoloLabelApp extends StatelessWidget {
                 ),
                 outlinedButtonTheme: OutlinedButtonThemeData(
                   style: OutlinedButton.styleFrom(
-                    backgroundColor: _darkControlBackground,
-                    foregroundColor: _darkTextColor,
-                    side: const BorderSide(color: _darkBorderColor),
+                    backgroundColor: appDarkControlBackground,
+                    foregroundColor: appDarkTextColor,
+                    side: const BorderSide(color: appDarkBorderColor),
                   ),
                 ),
                 textButtonTheme: TextButtonThemeData(
-                  style: TextButton.styleFrom(foregroundColor: _darkBrandColor),
+                  style: TextButton.styleFrom(
+                    foregroundColor: appDarkBrandColor,
+                  ),
                 ),
                 useMaterial3: true,
               ),
@@ -78,18 +88,18 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  late final Future<_BridgeStatus> _status = _loadStatus();
+  late final Future<BridgeStatus> _status = _loadStatus();
 
-  Future<_BridgeStatus> _loadStatus() async {
+  Future<BridgeStatus> _loadStatus() async {
     final greeting = await rustGreeting(name: 'Flutter');
     final modes = await supportedAnnotationModes();
-    return _BridgeStatus(greeting: greeting, modes: modes);
+    return BridgeStatus(greeting: greeting, modes: modes);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: FutureBuilder<_BridgeStatus>(
+      body: FutureBuilder<BridgeStatus>(
         future: _status,
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
@@ -107,16 +117,9 @@ class _HomePageState extends State<HomePage> {
             );
           }
 
-          return _WorkspaceShell(status: snapshot.data!);
+          return WorkspaceShell(status: snapshot.data!);
         },
       ),
     );
   }
-}
-
-class _BridgeStatus {
-  const _BridgeStatus({required this.greeting, required this.modes});
-
-  final String greeting;
-  final List<String> modes;
 }

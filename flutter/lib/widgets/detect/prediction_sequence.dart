@@ -1,7 +1,14 @@
-part of '../../main.dart';
+import 'dart:async';
+import 'dart:io';
+import 'dart:math' as math;
 
-class _PredictedFrameSequencePanel extends StatefulWidget {
-  const _PredictedFrameSequencePanel({
+import 'package:flutter/material.dart';
+
+import '../../models/detection.dart';
+import '../../services/i18n.dart';
+
+class PredictedFrameSequencePanel extends StatefulWidget {
+  const PredictedFrameSequencePanel({
     required this.manifestPath,
     required this.predicting,
     required this.onCancelPrediction,
@@ -14,12 +21,12 @@ class _PredictedFrameSequencePanel extends StatefulWidget {
   final ValueChanged<int> onSeekFrame;
 
   @override
-  State<_PredictedFrameSequencePanel> createState() =>
-      _PredictedFrameSequencePanelState();
+  State<PredictedFrameSequencePanel> createState() =>
+      PredictedFrameSequencePanelState();
 }
 
-class _PredictedFrameSequencePanelState
-    extends State<_PredictedFrameSequencePanel> {
+class PredictedFrameSequencePanelState
+    extends State<PredictedFrameSequencePanel> {
   Timer? _timer;
   Timer? _pollTimer;
   PredictionFrameManifest? _manifest;
@@ -37,7 +44,7 @@ class _PredictedFrameSequencePanelState
   }
 
   @override
-  void didUpdateWidget(covariant _PredictedFrameSequencePanel oldWidget) {
+  void didUpdateWidget(covariant PredictedFrameSequencePanel oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.manifestPath != widget.manifestPath) {
       _loadManifest();

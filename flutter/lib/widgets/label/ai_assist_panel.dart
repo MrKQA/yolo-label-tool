@@ -1,7 +1,21 @@
-part of '../../main.dart';
+import 'dart:async';
+import 'dart:math' as math;
 
-class _AiAssistFloatingPanel extends StatefulWidget {
-  const _AiAssistFloatingPanel({
+import 'package:file_selector/file_selector.dart';
+import 'package:flutter/material.dart';
+
+import '../../dialogs/sam3_runtime_dialog.dart';
+import '../../models/ai_assist.dart';
+import '../../models/detection.dart';
+import '../../services/config_store.dart';
+import '../../services/i18n.dart';
+import '../../services/path_utils.dart';
+import '../../services/rust_backend.dart';
+import '../../theme/theme_helpers.dart';
+
+class AiAssistFloatingPanel extends StatefulWidget {
+  const AiAssistFloatingPanel({
+    super.key,
     required this.initialConfig,
     required this.imageCount,
     required this.pythonPath,
@@ -30,10 +44,10 @@ class _AiAssistFloatingPanel extends StatefulWidget {
   final Future<void> Function(AiAssistConfig config) onAnnotateAll;
 
   @override
-  State<_AiAssistFloatingPanel> createState() => _AiAssistFloatingPanelState();
+  State<AiAssistFloatingPanel> createState() => _AiAssistFloatingPanelState();
 }
 
-class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
+class _AiAssistFloatingPanelState extends State<AiAssistFloatingPanel> {
   late final TextEditingController _startController;
   late final TextEditingController _endController;
   late final TextEditingController _sam3PromptController;
@@ -370,6 +384,7 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
   }
 
   Widget _yoloTab({required bool disabled}) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -390,7 +405,7 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
         else
           DecoratedBox(
             decoration: BoxDecoration(
-              border: Border.all(color: _borderColor(context)),
+              border: Border.all(color: appBorderColor(dark)),
               borderRadius: BorderRadius.circular(6),
             ),
             child: ExpansionTile(
@@ -439,6 +454,7 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
   }
 
   Widget _sam3Tab({required bool disabled}) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -514,7 +530,7 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
               color: Theme.of(
                 context,
               ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.42),
-              border: Border.all(color: _borderColor(context)),
+              border: Border.all(color: appBorderColor(dark)),
               borderRadius: BorderRadius.circular(6),
             ),
             child: Padding(
@@ -545,6 +561,7 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
+    final dark = Theme.of(context).brightness == Brightness.dark;
     final disabled = _loadingClasses;
     final sam3ClickMode =
         _backend == AiAssistBackend.sam3 &&
@@ -552,7 +569,7 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
 
     return Material(
       elevation: 18,
-      color: _panelColor(context),
+      color: appPanelColor(dark),
       borderRadius: BorderRadius.circular(8),
       clipBehavior: Clip.antiAlias,
       child: SizedBox(
@@ -563,7 +580,7 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
             Positioned.fill(
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  border: Border.all(color: _borderColor(context)),
+                  border: Border.all(color: appBorderColor(dark)),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: DefaultTabController(
@@ -581,10 +598,10 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
                             height: 46,
                             padding: const EdgeInsets.symmetric(horizontal: 14),
                             decoration: BoxDecoration(
-                              color: _controlColor(context),
+                              color: appControlColor(dark),
                               border: Border(
                                 bottom: BorderSide(
-                                  color: _borderColor(context),
+                                  color: appBorderColor(dark),
                                 ),
                               ),
                             ),
@@ -732,9 +749,7 @@ class _AiAssistFloatingPanelState extends State<_AiAssistFloatingPanel> {
                         child: Icon(
                           Icons.open_in_full,
                           size: 14,
-                          color: _primaryTextColor(
-                            context,
-                          ).withValues(alpha: 0.72),
+                          color: appTextColor(dark).withValues(alpha: 0.72),
                         ),
                       ),
                     ),

@@ -1,20 +1,37 @@
-part of '../../main.dart';
+import 'dart:async';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
-class _VideoFullscreenOverlay extends StatefulWidget {
-  const _VideoFullscreenOverlay({
+import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
+import 'package:video_player_win/video_player_win.dart' as video_player_win;
+
+import '../../models/detection.dart';
+import '../../models/shortcut.dart';
+import '../../pages/detect_video_page.dart';
+import '../../services/i18n.dart';
+import '../../services/input_utils.dart';
+import '../../services/path_utils.dart';
+import '../../services/rust_backend.dart';
+import '../../theme/theme_helpers.dart';
+import 'detect_support.dart';
+
+class VideoFullscreenOverlay extends StatefulWidget {
+  const VideoFullscreenOverlay({
     required this.session,
     required this.shortcutConfig,
   });
 
-  final _DetectVideoSession session;
+  final DetectVideoSession session;
   final ShortcutConfig shortcutConfig;
 
   @override
-  State<_VideoFullscreenOverlay> createState() =>
-      _VideoFullscreenOverlayState();
+  State<VideoFullscreenOverlay> createState() =>
+      VideoFullscreenOverlayState();
 }
 
-class _VideoFullscreenOverlayState extends State<_VideoFullscreenOverlay> {
+class VideoFullscreenOverlayState extends State<VideoFullscreenOverlay> {
   final FocusNode _focusNode = FocusNode(debugLabel: 'video-fullscreen');
   Timer? _closeButtonHideTimer;
   bool _closeButtonVisible = true;
@@ -32,7 +49,7 @@ class _VideoFullscreenOverlayState extends State<_VideoFullscreenOverlay> {
   }
 
   @override
-  void didUpdateWidget(covariant _VideoFullscreenOverlay oldWidget) {
+  void didUpdateWidget(covariant VideoFullscreenOverlay oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.session != widget.session) {
       oldWidget.session.removeListener(_handleSessionChanged);
@@ -109,7 +126,7 @@ class _VideoFullscreenOverlayState extends State<_VideoFullscreenOverlay> {
             child: Stack(
               children: [
                 Positioned.fill(
-                  child: _VideoPlayerPanel(
+                  child: VideoPlayerPanel(
                     session: widget.session,
                     fullscreen: true,
                   ),
@@ -140,10 +157,10 @@ class _VideoFullscreenOverlayState extends State<_VideoFullscreenOverlay> {
   }
 }
 
-class _VideoPlayerPanel extends StatelessWidget {
-  const _VideoPlayerPanel({required this.session, this.fullscreen = false});
+class VideoPlayerPanel extends StatelessWidget {
+  const VideoPlayerPanel({required this.session, this.fullscreen = false});
 
-  final _DetectVideoSession session;
+  final DetectVideoSession session;
   final bool fullscreen;
 
   @override
@@ -191,7 +208,7 @@ class _ScaledVideoSurface extends StatelessWidget {
 
   final video_player_win.WinVideoPlayerController controller;
   final video_player_win.WinVideoPlayerValue value;
-  final _VideoScaleMode mode;
+  final VideoScaleMode mode;
 
   @override
   Widget build(BuildContext context) {
@@ -235,7 +252,7 @@ class _VideoPlayerShell extends StatefulWidget {
     this.value,
   });
 
-  final _DetectVideoSession session;
+  final DetectVideoSession session;
   final video_player_win.WinVideoPlayerValue? value;
   final Widget child;
   final bool fullscreen;
@@ -431,10 +448,10 @@ class _VideoPlayerShellState extends State<_VideoPlayerShell> {
         .toDouble();
     final videoInsets = fullscreen ? EdgeInsets.zero : const EdgeInsets.all(12);
     final videoRadius = fullscreen ? 0.0 : 6.0;
-    final controlColor = fullscreen
+    final controlsBackground = fullscreen
         ? Colors.black.withAlpha(218)
-        : _controlColor(context).withAlpha(238);
-    final controlBorder = fullscreen ? Colors.white24 : _borderColor(context);
+        : controlColor(context).withAlpha(238);
+    final controlBorder = fullscreen ? Colors.white24 : borderColor(context);
     final controlTextStyle = TextStyle(color: fullscreen ? Colors.white : null);
     return MouseRegion(
       onEnter: _handlePointerEnter,
@@ -506,7 +523,7 @@ class _VideoPlayerShellState extends State<_VideoPlayerShell> {
                       opacity: _controlsVisible ? 1 : 0,
                       child: DecoratedBox(
                         decoration: BoxDecoration(
-                          color: controlColor,
+                          color: controlsBackground,
                           border: Border.all(color: controlBorder),
                           borderRadius: BorderRadius.circular(6),
                         ),
@@ -670,20 +687,20 @@ Size _scaledVideoSize({
   required Size bounds,
   required Size sourceSize,
   required double sourceAspect,
-  required _VideoScaleMode mode,
+  required VideoScaleMode mode,
 }) {
   switch (mode) {
-    case _VideoScaleMode.auto:
+    case VideoScaleMode.auto:
       return _containAspect(bounds, sourceAspect);
-    case _VideoScaleMode.ratio4x3:
+    case VideoScaleMode.ratio4x3:
       return _containAspect(bounds, 4 / 3);
-    case _VideoScaleMode.ratio16x9:
+    case VideoScaleMode.ratio16x9:
       return _containAspect(bounds, 16 / 9);
-    case _VideoScaleMode.fitWidth:
+    case VideoScaleMode.fitWidth:
       return Size(bounds.width, bounds.width / sourceAspect);
-    case _VideoScaleMode.fitHeight:
+    case VideoScaleMode.fitHeight:
       return Size(bounds.height * sourceAspect, bounds.height);
-    case _VideoScaleMode.original:
+    case VideoScaleMode.original:
       return sourceSize;
   }
 }
@@ -725,7 +742,7 @@ Future<double?> _averageFrameLuminance(Uint8List pngBytes) async {
   }
 }
 
-String _videoStatusText({
+String videoStatusText({
   required Size size,
   required double nativeDurationSeconds,
   required RustVideoInfo? metadata,
@@ -750,7 +767,7 @@ String _videoStatusText({
   return parts.join(' | ');
 }
 
-String _shortVideoError(Object error) {
+String shortVideoError(Object error) {
   final text = '$error'.replaceAll(RegExp(r'\s+'), ' ').trim();
   if (text.length <= 120) {
     return text;
@@ -789,7 +806,7 @@ class _SpeedSelector extends StatelessWidget {
       child: DecoratedBox(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: _borderColor(context)),
+          border: Border.all(color: borderColor(context)),
         ),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
@@ -812,18 +829,18 @@ class _VideoScaleSelector extends StatelessWidget {
     required this.onSelected,
   });
 
-  final _VideoScaleMode currentMode;
-  final ValueChanged<_VideoScaleMode> onSelected;
+  final VideoScaleMode currentMode;
+  final ValueChanged<VideoScaleMode> onSelected;
 
   @override
   Widget build(BuildContext context) {
-    return PopupMenuButton<_VideoScaleMode>(
+    return PopupMenuButton<VideoScaleMode>(
       padding: EdgeInsets.zero,
       tooltip: t('detect.scaleMode'),
       onSelected: onSelected,
       itemBuilder: (context) => [
-        for (final mode in _VideoScaleMode.values)
-          PopupMenuItem<_VideoScaleMode>(
+        for (final mode in VideoScaleMode.values)
+          PopupMenuItem<VideoScaleMode>(
             value: mode,
             height: 32,
             child: Row(
@@ -841,7 +858,7 @@ class _VideoScaleSelector extends StatelessWidget {
       child: DecoratedBox(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: _borderColor(context)),
+          border: Border.all(color: borderColor(context)),
         ),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
@@ -881,7 +898,7 @@ class _VolumeIndicator extends StatelessWidget {
       child: DecoratedBox(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: _borderColor(context)),
+          border: Border.all(color: borderColor(context)),
         ),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),

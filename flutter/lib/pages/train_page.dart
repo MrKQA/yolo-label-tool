@@ -1,19 +1,43 @@
-// ignore_for_file: file_names
+import 'dart:async';
+import 'dart:io';
 
-part of '../main.dart';
+import 'package:file_selector/file_selector.dart';
+import 'package:flutter/material.dart';
+
+import '../dialogs/color_picker_dialog.dart';
+import '../dialogs/yolo_export_settings_dialog.dart';
+import '../models/config.dart';
+import '../models/detection.dart';
+import '../models/export.dart';
+import '../models/training.dart';
+import '../services/app_runtime.dart';
+import '../services/collection_utils.dart';
+import '../services/config_store.dart';
+import '../services/i18n.dart';
+import '../services/logger.dart';
+import '../services/path_utils.dart';
+import '../services/python_environment.dart';
+import '../services/rust_backend.dart';
+import '../services/training_dataset_summary.dart';
+import '../theme/theme_helpers.dart';
+import '../widgets/common/overlays.dart';
+import '../widgets/train/dataset_summary_panel.dart';
+import '../widgets/train/train_runtime_support.dart';
+import '../widgets/train/training_parameter_panel.dart';
+import '../widgets/train/training_progress_panel.dart';
 
 /// 训练页面，提供 models 文件夹 YOLO PT 选择、data.yaml 概览和超参数编辑。
 /// Training page with YOLO PT selection from models/, data.yaml summary, and parameters.
-class _TrainPage extends StatefulWidget {
-  const _TrainPage({super.key, required this.settings});
+class TrainPage extends StatefulWidget {
+  const TrainPage({super.key, required this.settings});
 
   final AppSettings settings;
 
   @override
-  State<_TrainPage> createState() => _TrainPageState();
+  State<TrainPage> createState() => TrainPageState();
 }
 
-class _TrainPageState extends State<_TrainPage> {
+class TrainPageState extends State<TrainPage> {
   final TextEditingController _datasetPathController = TextEditingController();
   final Map<String, double> _parameters = Map<String, double>.from(
     defaultTrainingParameters,
@@ -108,7 +132,7 @@ class _TrainPageState extends State<_TrainPage> {
   }
 
   @override
-  void didUpdateWidget(covariant _TrainPage oldWidget) {
+  void didUpdateWidget(covariant TrainPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.settings.pythonPath.trim() !=
         widget.settings.pythonPath.trim()) {
@@ -146,10 +170,10 @@ class _TrainPageState extends State<_TrainPage> {
         _modelPath = _modelOptions.isEmpty ? null : _modelOptions.first;
       }
     });
-    _log(
+    logApp(
       'TRAIN',
       'Model options loaded: count=${_modelOptions.length}, selected=${_modelPath == null ? '-' : fileName(_modelPath!)}',
-      level: _LogLevel.debug,
+      level: AppLogLevel.debug,
     );
     _refreshResumeInfo();
   }
@@ -408,7 +432,7 @@ class _TrainPageState extends State<_TrainPage> {
     if (file == null) {
       return;
     }
-    _log('TRAIN', 'Model selected: ${file.path}');
+    logApp('TRAIN', 'Model selected: ${file.path}');
     setState(() {
       _modelOptions = _dedupeModelOptions(
         _modelOptions,
@@ -480,17 +504,17 @@ class _TrainPageState extends State<_TrainPage> {
       return;
     }
     if (!File(path).existsSync()) {
-      _log(
+      logApp(
         'TRAIN',
         'Dataset path does not exist: $path',
-        level: _LogLevel.warning,
+        level: AppLogLevel.warning,
       );
       _showWarning('${t('train.datasetLoadFailed')}: $path');
       return;
     }
     setState(() => _datasetLoading = true);
     try {
-      _log('TRAIN', 'Dataset summary loading: $path');
+      logApp('TRAIN', 'Dataset summary loading: $path');
       final summary = await loadDatasetSummaryInBackground(path);
       if (!mounted) {
         return;
@@ -503,15 +527,15 @@ class _TrainPageState extends State<_TrainPage> {
       });
       _refreshResumeInfo();
       _savePreferences();
-      _log(
+      logApp(
         'TRAIN',
         'Dataset summary loaded: path=$path, classes=${summary.classes.length}, train=${summary.trainCount}, val=${summary.valCount}, test=${summary.testCount}, cls_pw=${summary.recommendedClsPw.toStringAsFixed(2)}, imbalance=${summary.imbalanceRatio.toStringAsFixed(2)}',
       );
     } on Object catch (error) {
-      _log(
+      logApp(
         'TRAIN',
         'Dataset summary failed: $path, error=$error',
-        level: _LogLevel.error,
+        level: AppLogLevel.error,
       );
       if (mounted) {
         _showWarning('${t('train.datasetLoadFailed')}: $error');
@@ -523,12 +547,12 @@ class _TrainPageState extends State<_TrainPage> {
     }
   }
 
-  Future<void> _loadExportedDatasetAndStartTraining(String dataYamlPath) async {
+  Future<void> loadExportedDatasetAndStartTraining(String dataYamlPath) async {
     if (_trainingRunning) {
-      _log(
+      logApp(
         'TRAIN',
         'Export auto training skipped: training is already running',
-        level: _LogLevel.warning,
+        level: AppLogLevel.warning,
       );
       return;
     }
@@ -539,19 +563,19 @@ class _TrainPageState extends State<_TrainPage> {
     final selectedDataset = _datasetPath;
     if (selectedDataset == null ||
         pathKey(selectedDataset) != pathKey(dataYamlPath)) {
-      _log(
+      logApp(
         'TRAIN',
         'Export auto training skipped: exported dataset was not loaded: $dataYamlPath',
-        level: _LogLevel.warning,
+        level: AppLogLevel.warning,
       );
       return;
     }
     final modelPath = await _showExportTrainingModelDialog();
     if (!mounted || modelPath == null) {
-      _log(
+      logApp(
         'TRAIN',
         'Export auto training cancelled before model confirmation',
-        level: _LogLevel.info,
+        level: AppLogLevel.info,
       );
       return;
     }
@@ -694,20 +718,20 @@ class _TrainPageState extends State<_TrainPage> {
   Future<void> _startTraining() async {
     if (_trainingRunning) return;
     if (_modelPath == null || _datasetPath == null) {
-      _log(
+      logApp(
         'TRAIN',
         'Training start blocked: modelPath=${_modelPath ?? '-'}, datasetPath=${_datasetPath ?? '-'}',
-        level: _LogLevel.warning,
+        level: AppLogLevel.warning,
       );
       return;
     }
     final pythonPath = widget.settings.pythonPath;
     final outputPath = widget.settings.outputPath;
     if (pythonPath.isEmpty) {
-      _log(
+      logApp(
         'TRAIN',
         'Training start blocked: Python path is empty',
-        level: _LogLevel.warning,
+        level: AppLogLevel.warning,
       );
       _showWarning(t('train.pythonNotConfigured'));
       return;
@@ -723,7 +747,7 @@ class _TrainPageState extends State<_TrainPage> {
         ? null
         : initialMetricPoints.last.metrics;
     _trainingTimer?.cancel();
-    _log(
+    logApp(
       'TRAIN',
       'Starting training: model=${fileName(_modelPath!)}, data=$_datasetPath, epochs=$totalEpochs, imgsz=${_parameters['imgsz']?.round() ?? 640}, batch=$_batchArgument, device=$_deviceArgument, workers=${_parameters['workers']?.round() ?? 4}, resume=$_useResumeTraining, amp=$_ampEnabled',
     );
@@ -789,7 +813,7 @@ class _TrainPageState extends State<_TrainPage> {
         });
       }
     } on Object catch (e) {
-      _log('TRAIN', 'Training start failed: $e', level: _LogLevel.error);
+      logApp('TRAIN', 'Training start failed: $e', level: AppLogLevel.error);
       final logText = await readTrainingLogTail();
       _trainingTimer?.cancel();
       if (mounted) {
@@ -812,10 +836,10 @@ class _TrainPageState extends State<_TrainPage> {
 
   void _stopTraining() {
     if (!_trainingRunning || _trainingStopping) return;
-    _log(
+    logApp(
       'TRAIN',
       'Stopping training at epoch $_currentEpoch',
-      level: _LogLevel.warning,
+      level: AppLogLevel.warning,
     );
     RustBackend.stopYoloTraining();
     setState(() {
@@ -866,7 +890,7 @@ class _TrainPageState extends State<_TrainPage> {
       trigger: trigger,
     );
     setState(() => _exportingModel = true);
-    _log(
+    logApp(
       'TRAIN',
       'Model export started: trigger=$trigger, model=$modelPath, format=${exportSettings.format}, imgsz=${exportSettings.imgsz}, batch=${exportSettings.batch}, quantize=${exportSettings.quantize.isEmpty ? 'fp32' : exportSettings.quantize}, data=${_exportNeedsData(exportSettings) ? exportSettings.dataPath : ''}',
     );
@@ -876,20 +900,20 @@ class _TrainPageState extends State<_TrainPage> {
         modelPath: modelPath,
         settings: exportSettings,
       );
-      _log(
+      logApp(
         'TRAIN',
         'Model export completed: format=${result.format}, output=${result.outputPath}',
       );
       if (result.stderr.trim().isNotEmpty) {
-        _log(
+        logApp(
           'TRAIN',
           'Model export stderr: ${result.stderr.trim()}',
-          level: _LogLevel.debug,
+          level: AppLogLevel.debug,
         );
       }
       return result;
     } catch (error) {
-      _log('TRAIN', 'Model export failed: $error', level: _LogLevel.error);
+      logApp('TRAIN', 'Model export failed: $error', level: AppLogLevel.error);
       rethrow;
     } finally {
       if (mounted) {
@@ -907,10 +931,10 @@ class _TrainPageState extends State<_TrainPage> {
     }
     final trainingDataYaml = _datasetPath?.trim() ?? '';
     if (trainingDataYaml.isEmpty) {
-      _log(
+      logApp(
         'TRAIN',
         'Auto export INT8 has no training data.yaml; Ultralytics may require data for calibration.',
-        level: _LogLevel.warning,
+        level: AppLogLevel.warning,
       );
       return settings.copyWith(dataPath: '');
     }
@@ -928,10 +952,10 @@ class _TrainPageState extends State<_TrainPage> {
     }
     final modelPath = _trainedModelForExport();
     if (modelPath == null) {
-      _log(
+      logApp(
         'TRAIN',
         'Auto export skipped: no trained model was found',
-        level: _LogLevel.warning,
+        level: AppLogLevel.warning,
       );
       return;
     }
@@ -1026,13 +1050,13 @@ class _TrainPageState extends State<_TrainPage> {
           _trainingInterrupted = progress.status == 'stopped';
           if (progress.status.startsWith('error')) {
             _showTrainingTerminal = true;
-            _log(
+            logApp(
               'TRAIN',
               'Training failed: ${progress.status}',
-              level: _LogLevel.error,
+              level: AppLogLevel.error,
             );
           } else {
-            _log(
+            logApp(
               'TRAIN',
               'Training finished: ${progress.status} at epoch ${progress.currentEpoch}',
             );
@@ -1045,10 +1069,10 @@ class _TrainPageState extends State<_TrainPage> {
         unawaited(_exportAfterTrainingIfNeeded());
       }
     } on Object catch (error) {
-      _log(
+      logApp(
         'TRAIN',
         'Training progress poll failed: $error',
-        level: _LogLevel.warning,
+        level: AppLogLevel.warning,
       );
       final logText = await readTrainingLogTail();
       if (mounted && _trainingRunning) {
@@ -1265,7 +1289,7 @@ class _TrainPageState extends State<_TrainPage> {
             children: [
               Expanded(
                 child: Container(
-                  color: _workspaceColor(context),
+                  color: workspaceColor(context),
                   padding: const EdgeInsets.all(24),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1449,8 +1473,8 @@ class _TrainPageState extends State<_TrainPage> {
                       Expanded(
                         child: DecoratedBox(
                           decoration: BoxDecoration(
-                            color: _panelColor(context),
-                            border: Border.all(color: _borderColor(context)),
+                            color: panelColor(context),
+                            border: Border.all(color: borderColor(context)),
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Column(
@@ -1538,9 +1562,9 @@ class _TrainPageState extends State<_TrainPage> {
                   duration: const Duration(milliseconds: 180),
                   width: _parameterPanelVisible ? 320 : 8,
                   decoration: BoxDecoration(
-                    color: _panelColor(context),
+                    color: panelColor(context),
                     border: Border(
-                      left: BorderSide(color: _borderColor(context)),
+                      left: BorderSide(color: borderColor(context)),
                     ),
                   ),
                   child: ClipRect(

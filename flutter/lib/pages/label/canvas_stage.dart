@@ -1,83 +1,47 @@
 // Canvas stage and header controls for the label page.
 
-part of '../../main.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
 
-class _CanvasStage extends StatelessWidget {
-  const _CanvasStage({
+import '../../models/annotation.dart';
+import '../../models/app_status.dart';
+import '../../models/imported_dataset.dart';
+import '../../services/i18n.dart';
+import '../../theme/dimensions.dart';
+import '../../theme/theme_helpers.dart';
+
+class CanvasStage extends StatelessWidget {
+  const CanvasStage({
+    super.key,
     required this.bridgeStatus,
-    required this.image,
-    required this.unauthorized,
     required this.imageIndex,
     required this.imageCount,
-    required this.zoom,
-    required this.viewportOffset,
     required this.activeTool,
     required this.activeMode,
     required this.imageSplit,
-    required this.labelClasses,
-    required this.annotations,
-    required this.sam3ClickPrompts,
-    required this.sam3PreviewAnnotations,
-    required this.selectedAnnotationId,
-    required this.showClassLabels,
+    required this.canvas,
     required this.onPointerSignal,
-    required this.onViewportOffsetChanged,
     required this.onModeSelected,
     required this.onImageSplitChanged,
-    required this.onSelectMode,
-    required this.onEnsureClass,
-    required this.onAnnotationCreated,
-    required this.onSegAnnotationCreated,
-    required this.onAnnotationSelected,
-    required this.onAnnotationUpdated,
-    required this.onAnnotationDeleted,
-    required this.onAnnotationDragStarted,
-    this.onSam3ClickPrompt,
-    this.onImageDisplaySizeChanged,
   });
 
-  final _BridgeStatus bridgeStatus;
-  final ImageItem? image;
-  final bool unauthorized;
+  final BridgeStatus bridgeStatus;
   final int imageIndex;
   final int imageCount;
-  final double zoom;
-  final Offset viewportOffset;
   final String activeTool;
   final AnnotationMode activeMode;
   final String imageSplit;
-  final List<LabelClass> labelClasses;
-  final List<AnnotationRegion> annotations;
-  final List<Sam3ClickPromptPoint> sam3ClickPrompts;
-  final List<AnnotationRegion> sam3PreviewAnnotations;
-  final String? selectedAnnotationId;
-  final bool showClassLabels;
+  final Widget canvas;
   final void Function(PointerSignalEvent event) onPointerSignal;
-  final ValueChanged<Offset> onViewportOffsetChanged;
   final ValueChanged<AnnotationMode> onModeSelected;
   final ValueChanged<String> onImageSplitChanged;
-  final VoidCallback onSelectMode;
-  final Future<int?> Function() onEnsureClass;
-  final void Function(Rect rect, int classId) onAnnotationCreated;
-  final void Function(List<Offset> points, int classId) onSegAnnotationCreated;
-  final ValueChanged<String?> onAnnotationSelected;
-  final ValueChanged<AnnotationRegion> onAnnotationUpdated;
-  final ValueChanged<String> onAnnotationDeleted;
-  final VoidCallback onAnnotationDragStarted;
-  final Future<bool> Function(
-    Offset imagePoint,
-    Size imageDisplaySize,
-    bool positive,
-  )?
-  onSam3ClickPrompt;
-  final void Function(Size imageDisplaySize)? onImageDisplaySizeChanged;
 
   @override
   Widget build(BuildContext context) {
     return Listener(
       onPointerSignal: onPointerSignal,
       child: Container(
-        color: _workspaceColor(context),
+        color: workspaceColor(context),
         padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -98,43 +62,19 @@ class _CanvasStage extends StatelessWidget {
                 child: LayoutBuilder(
                   builder: (context, constraints) {
                     final alignment = Alignment(
-                      constraints.maxWidth > _annotationWorkspaceWidth
+                      constraints.maxWidth > annotationWorkspaceWidth
                           ? 0.0
                           : -1.0,
-                      constraints.maxHeight > _annotationWorkspaceHeight
+                      constraints.maxHeight > annotationWorkspaceHeight
                           ? 0.0
                           : -1.0,
                     );
                     return Align(
                       alignment: alignment,
                       child: SizedBox(
-                        width: _annotationWorkspaceWidth,
-                        height: _annotationWorkspaceHeight,
-                        child: _ImageCanvas(
-                          image: image,
-                          unauthorized: unauthorized,
-                          zoom: zoom,
-                          viewportOffset: viewportOffset,
-                          activeTool: activeTool,
-                          activeMode: activeMode,
-                          labelClasses: labelClasses,
-                          annotations: annotations,
-                          sam3ClickPrompts: sam3ClickPrompts,
-                          sam3PreviewAnnotations: sam3PreviewAnnotations,
-                          selectedAnnotationId: selectedAnnotationId,
-                          showClassLabels: showClassLabels,
-                          onViewportOffsetChanged: onViewportOffsetChanged,
-                          onEnsureClass: onEnsureClass,
-                          onSelectMode: onSelectMode,
-                          onAnnotationCreated: onAnnotationCreated,
-                          onSegAnnotationCreated: onSegAnnotationCreated,
-                          onAnnotationSelected: onAnnotationSelected,
-                          onAnnotationUpdated: onAnnotationUpdated,
-                          onAnnotationDeleted: onAnnotationDeleted,
-                          onAnnotationDragStarted: onAnnotationDragStarted,
-                          onSam3ClickPrompt: onSam3ClickPrompt,
-                          onImageDisplaySizeChanged: onImageDisplaySizeChanged,
-                        ),
+                        width: annotationWorkspaceWidth,
+                        height: annotationWorkspaceHeight,
+                        child: canvas,
                       ),
                     );
                   },
@@ -162,7 +102,7 @@ class _WorkspaceHeader extends StatelessWidget {
     required this.onImageSplitChanged,
   });
 
-  final _BridgeStatus status;
+  final BridgeStatus status;
   final int imageIndex;
   final int imageCount;
   final AnnotationMode activeMode;
@@ -231,10 +171,10 @@ class _ModeButton extends StatelessWidget {
       style: OutlinedButton.styleFrom(
         backgroundColor: selected
             ? colorScheme.primaryContainer
-            : _controlColor(context),
+            : controlColor(context),
         foregroundColor: selected
             ? colorScheme.onPrimaryContainer
-            : _primaryTextColor(context),
+            : primaryTextColor(context),
         padding: const EdgeInsets.symmetric(horizontal: 12),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
       ),
@@ -263,9 +203,9 @@ class _SplitSelector extends StatelessWidget {
       height: 36,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          border: Border.all(color: _borderColor(context)),
+          border: Border.all(color: borderColor(context)),
           borderRadius: BorderRadius.circular(6),
-          color: _controlColor(context),
+          color: controlColor(context),
         ),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -301,9 +241,9 @@ class _StatusPill extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        border: Border.all(color: _borderColor(context)),
+        border: Border.all(color: borderColor(context)),
         borderRadius: BorderRadius.circular(6),
-        color: _panelColor(context),
+        color: panelColor(context),
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),

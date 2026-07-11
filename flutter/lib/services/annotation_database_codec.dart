@@ -1,25 +1,30 @@
-part of '../main.dart';
+import 'dart:ui' show Offset, Rect, Size;
 
-String _buildAnnotationDatabasePayload({
+import '../models/annotation.dart';
+import '../models/collaboration.dart';
+import '../models/imported_dataset.dart';
+import 'path_utils.dart';
+
+String buildAnnotationDatabasePayload({
   required List<ImageItem> images,
   required List<LabelClass> labelClasses,
   required Map<String, List<AnnotationRegion>> annotationsByImage,
   required Map<String, String> imageSplits,
   required Map<String, Size> imageDisplaySizes,
   required ImportedDataset? importedDataset,
-  required _CollaborationMode collaborationMode,
-  required _CollaborationPermissions collaborationSelfPermissions,
+  required CollaborationMode collaborationMode,
+  required CollaborationPermissions collaborationSelfPermissions,
   required String collaborationAuthorId,
   required String currentAnnotatorName,
   required int currentAnnotatorColorValue,
   required int collaborationStartIndex,
   required int collaborationEndIndex,
-  required List<_CollaborationPeer> collaborationPeers,
+  required List<CollaborationPeer> collaborationPeers,
   bool includeClasses = true,
   bool includeAnnotations = true,
 }) {
   final lines = <String>[
-    'PROJECT\t${_databaseField(_annotationDatabaseProjectKey(importedDataset: importedDataset, images: images))}',
+    'PROJECT\t${_databaseField(annotationDatabaseProjectKey(importedDataset: importedDataset, images: images))}',
   ];
   if (includeClasses) {
     for (final labelClass in labelClasses) {
@@ -81,9 +86,9 @@ String _buildAnnotationDatabasePayload({
     }
   }
 
-  final selfPermissions = collaborationMode == _CollaborationMode.client
+  final selfPermissions = collaborationMode == CollaborationMode.client
       ? collaborationSelfPermissions
-      : const _CollaborationPermissions(
+      : const CollaborationPermissions(
           canEditOthers: true,
           canDeleteOthers: true,
           canChangeClass: true,
@@ -123,7 +128,7 @@ String _buildAnnotationDatabasePayload({
   return lines.join('\n');
 }
 
-String _annotationDatabaseProjectKey({
+String annotationDatabaseProjectKey({
   required ImportedDataset? importedDataset,
   required List<ImageItem> images,
 }) {
@@ -200,7 +205,7 @@ AnnotationMode _annotationModeFromDatabase(String raw) {
   };
 }
 
-List<LabelClass> _labelClassesFromDatabase(Object? raw) {
+List<LabelClass> labelClassesFromDatabase(Object? raw) {
   if (raw is! List) {
     return const [];
   }
@@ -221,7 +226,7 @@ List<LabelClass> _labelClassesFromDatabase(Object? raw) {
   return classes;
 }
 
-Map<String, List<AnnotationRegion>> _annotationsFromDatabase(
+Map<String, List<AnnotationRegion>> annotationsFromDatabase(
   Object? raw,
   Set<String> openImageKeys,
 ) {
@@ -272,7 +277,7 @@ Map<String, List<AnnotationRegion>> _annotationsFromDatabase(
   return result;
 }
 
-int _nextAnnotationSerialFor(
+int nextAnnotationSerialFor(
   Map<String, List<AnnotationRegion>> annotationsByImage,
 ) {
   var next = 1;

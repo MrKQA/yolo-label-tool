@@ -1,13 +1,23 @@
-part of '../../main.dart';
+import 'dart:io';
 
-class _DetectPlaybackSurface extends StatelessWidget {
-  const _DetectPlaybackSurface({
+import 'package:flutter/material.dart';
+
+import '../../pages/detect_video_page.dart';
+import '../../services/i18n.dart';
+import '../../services/path_utils.dart';
+import '../../theme/theme_helpers.dart';
+import 'detect_support.dart';
+import 'prediction_sequence.dart';
+import 'video_player_widgets.dart';
+
+class DetectPlaybackSurface extends StatelessWidget {
+  const DetectPlaybackSurface({
     required this.session,
     required this.onCancelPrediction,
     required this.onSeekPredictionFrame,
   });
 
-  final _DetectVideoSession session;
+  final DetectVideoSession session;
   final VoidCallback onCancelPrediction;
   final ValueChanged<int> onSeekPredictionFrame;
 
@@ -37,13 +47,13 @@ class _DetectPlaybackSurface extends StatelessWidget {
                       ),
                     )
                   : isPredictionManifestPath(input)
-                  ? _PredictedFrameSequencePanel(
+                  ? PredictedFrameSequencePanel(
                       manifestPath: input,
                       predicting: session.predicting,
                       onCancelPrediction: onCancelPrediction,
                       onSeekFrame: onSeekPredictionFrame,
                     )
-                  : _VideoPlayerPanel(session: session),
+                  : VideoPlayerPanel(session: session),
             ),
           ),
           if (input != null && showPredictionStatus)
@@ -52,8 +62,8 @@ class _DetectPlaybackSurface extends StatelessWidget {
               top: 14,
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  color: _controlColor(context).withAlpha(232),
-                  border: Border.all(color: _borderColor(context)),
+                  color: controlColor(context).withAlpha(232),
+                  border: Border.all(color: borderColor(context)),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Padding(

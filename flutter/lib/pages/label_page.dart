@@ -7,14 +7,35 @@
 // 图片标注页面：绘制画布、标注渲染器、类别管理、导出与 AI 辅助标注。
 // =============================================================================
 
-// ignore_for_file: file_names
+import 'dart:async';
+import 'dart:io';
+import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
-part of '../main.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../models/ai_assist.dart';
+import '../models/annotation.dart';
+import '../models/app_status.dart';
+import '../services/collection_utils.dart';
+import '../services/i18n.dart';
+import '../theme/dimensions.dart';
+import '../theme/theme_helpers.dart';
+import '../widgets/label/canvas_grid_painter.dart';
+import 'label/ai_toolbar.dart';
+import 'label/canvas_stage.dart';
+import 'label/image_canvas_support.dart';
+import 'label/image_preview_pane.dart';
+import 'label/viewport_pan_button.dart';
 
 /// 标注页面入口，组合图片列表、画布、工具栏和类别面板。
 /// Label page entry that combines image list, canvas, toolbar, and classes.
-class _LabelPage extends StatelessWidget {
-  const _LabelPage({
+class LabelPage extends StatelessWidget {
+  const LabelPage({
+    super.key,
     required this.status,
     required this.images,
     required this.selectedImage,
@@ -63,7 +84,7 @@ class _LabelPage extends StatelessWidget {
     this.onImageDisplaySizeChanged,
   });
 
-  final _BridgeStatus status;
+  final BridgeStatus status;
   final List<ImageItem> images;
   final ImageItem? selectedImage;
   final int selectedImageIndex;
@@ -132,37 +153,41 @@ class _LabelPage extends StatelessWidget {
           ),
           Expanded(
             child: ClipRect(
-              child: _CanvasStage(
+              child: CanvasStage(
                 bridgeStatus: status,
-                image: selectedImage,
-                unauthorized: unauthorized,
                 imageIndex: images.isEmpty ? 0 : selectedImageIndex + 1,
                 imageCount: images.length,
-                zoom: zoom,
-                viewportOffset: viewportOffset,
                 activeTool: activeTool,
                 activeMode: activeMode,
                 imageSplit: imageSplit,
-                labelClasses: labelClasses,
-                annotations: annotations,
-                sam3ClickPrompts: sam3ClickPrompts,
-                sam3PreviewAnnotations: sam3PreviewAnnotations,
-                selectedAnnotationId: selectedAnnotationId,
-                showClassLabels: showClassLabels,
+                canvas: _ImageCanvas(
+                  image: selectedImage,
+                  unauthorized: unauthorized,
+                  zoom: zoom,
+                  viewportOffset: viewportOffset,
+                  activeTool: activeTool,
+                  activeMode: activeMode,
+                  labelClasses: labelClasses,
+                  annotations: annotations,
+                  sam3ClickPrompts: sam3ClickPrompts,
+                  sam3PreviewAnnotations: sam3PreviewAnnotations,
+                  selectedAnnotationId: selectedAnnotationId,
+                  showClassLabels: showClassLabels,
+                  onViewportOffsetChanged: onViewportOffsetChanged,
+                  onEnsureClass: onEnsureClass,
+                  onSelectMode: onSelectMode,
+                  onAnnotationCreated: onAnnotationCreated,
+                  onSegAnnotationCreated: onSegAnnotationCreated,
+                  onAnnotationSelected: onAnnotationSelected,
+                  onAnnotationUpdated: onAnnotationUpdated,
+                  onAnnotationDeleted: onAnnotationDeleted,
+                  onAnnotationDragStarted: onAnnotationDragStarted,
+                  onSam3ClickPrompt: onSam3ClickPrompt,
+                  onImageDisplaySizeChanged: onImageDisplaySizeChanged,
+                ),
                 onPointerSignal: onPointerSignal,
-                onViewportOffsetChanged: onViewportOffsetChanged,
                 onModeSelected: onModeSelected,
                 onImageSplitChanged: onImageSplitChanged,
-                onSelectMode: onSelectMode,
-                onEnsureClass: onEnsureClass,
-                onAnnotationCreated: onAnnotationCreated,
-                onSegAnnotationCreated: onSegAnnotationCreated,
-                onAnnotationSelected: onAnnotationSelected,
-                onAnnotationUpdated: onAnnotationUpdated,
-                onAnnotationDeleted: onAnnotationDeleted,
-                onAnnotationDragStarted: onAnnotationDragStarted,
-                onSam3ClickPrompt: onSam3ClickPrompt,
-                onImageDisplaySizeChanged: onImageDisplaySizeChanged,
               ),
             ),
           ),
@@ -416,19 +441,19 @@ class _ImageCanvasState extends State<_ImageCanvas> {
       return const Rect.fromLTWH(
         0,
         0,
-        _annotationWorkspaceWidth,
-        _annotationWorkspaceHeight,
+        annotationWorkspaceWidth,
+        annotationWorkspaceHeight,
       );
     }
     final scale = math.min(
-      _annotationWorkspaceWidth / imageSize.width,
-      _annotationWorkspaceHeight / imageSize.height,
+      annotationWorkspaceWidth / imageSize.width,
+      annotationWorkspaceHeight / imageSize.height,
     );
     final width = imageSize.width * scale;
     final height = imageSize.height * scale;
     return Rect.fromLTWH(
-      (_annotationWorkspaceWidth - width) / 2,
-      (_annotationWorkspaceHeight - height) / 2,
+      (annotationWorkspaceWidth - width) / 2,
+      (annotationWorkspaceHeight - height) / 2,
       width,
       height,
     );
@@ -463,20 +488,20 @@ class _ImageCanvasState extends State<_ImageCanvas> {
 
   Rect _visibleContentRect() {
     final center = const Offset(
-      _annotationWorkspaceWidth / 2,
-      _annotationWorkspaceHeight / 2,
+      annotationWorkspaceWidth / 2,
+      annotationWorkspaceHeight / 2,
     );
     return Rect.fromCenter(
       center: center,
-      width: _annotationWorkspaceWidth / _scale,
-      height: _annotationWorkspaceHeight / _scale,
+      width: annotationWorkspaceWidth / _scale,
+      height: annotationWorkspaceHeight / _scale,
     );
   }
 
   Matrix4 _contentTransform() {
     final center = const Offset(
-      _annotationWorkspaceWidth / 2,
-      _annotationWorkspaceHeight / 2,
+      annotationWorkspaceWidth / 2,
+      annotationWorkspaceHeight / 2,
     );
     return Matrix4.identity()
       ..translateByDouble(center.dx, center.dy, 0, 1)
@@ -630,7 +655,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     final sampleSize = _sampleImageSize;
     final placedRect = _placedImageRect();
     if (bytes == null || sampleSize == null || !placedRect.contains(point)) {
-      return _isDarkMode(context) ? Colors.white : const Color(0xFF111827);
+      return isDarkMode(context) ? Colors.white : const Color(0xFF111827);
     }
     final nx = ((point.dx - placedRect.left) / placedRect.width).clamp(
       0.0,
@@ -644,14 +669,14 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     final sy = (ny * (sampleSize.height - 1)).round();
     final index = ((sy * sampleSize.width.toInt()) + sx) * 4;
     if (index + 3 >= bytes.length) {
-      return _isDarkMode(context) ? Colors.white : const Color(0xFF111827);
+      return isDarkMode(context) ? Colors.white : const Color(0xFF111827);
     }
     final r = bytes[index];
     final g = bytes[index + 1];
     final b = bytes[index + 2];
     final a = bytes[index + 3];
     if (a < 96) {
-      return _isDarkMode(context) ? Colors.white : const Color(0xFF111827);
+      return isDarkMode(context) ? Colors.white : const Color(0xFF111827);
     }
     final luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
     return luminance > 0.52 ? const Color(0xFF111827) : Colors.white;
@@ -1299,8 +1324,8 @@ class _ImageCanvasState extends State<_ImageCanvas> {
           onKeyEvent: _handleCanvasKeyEvent,
           child: DecoratedBox(
             decoration: BoxDecoration(
-              color: _canvasColor(context),
-              border: Border.all(color: _borderColor(context), width: 1.5),
+              color: canvasColor(context),
+              border: Border.all(color: borderColor(context), width: 1.5),
               boxShadow: const [
                 BoxShadow(
                   blurRadius: 16,
@@ -1335,7 +1360,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
                         fit: StackFit.expand,
                         children: [
                           CustomPaint(
-                            painter: CanvasGridPainter(_isDarkMode(context)),
+                            painter: CanvasGridPainter(isDarkMode(context)),
                           ),
                           if (widget.image == null)
                             Center(
@@ -1350,8 +1375,8 @@ class _ImageCanvasState extends State<_ImageCanvas> {
                               child: Transform(
                                 transform: _contentTransform(),
                                 child: SizedBox(
-                                  width: _annotationWorkspaceWidth,
-                                  height: _annotationWorkspaceHeight,
+                                  width: annotationWorkspaceWidth,
+                                  height: annotationWorkspaceHeight,
                                   child: Stack(
                                     fit: StackFit.expand,
                                     children: [
@@ -1375,7 +1400,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
                                           showClassLabels:
                                               widget.showClassLabels,
                                           scale: _scale,
-                                          darkMode: _isDarkMode(context),
+                                          darkMode: isDarkMode(context),
                                           crosshairPoint: crosshairPoint,
                                           crosshairColor: crosshairColor,
                                         ),
@@ -1397,7 +1422,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
                                                 scale: _scale,
                                                 showClassLabels:
                                                     widget.showClassLabels,
-                                                darkMode: _isDarkMode(context),
+                                                darkMode: isDarkMode(context),
                                               ),
                                         ),
                                     ],

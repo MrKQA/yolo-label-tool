@@ -1,6 +1,32 @@
-// ignore_for_file: file_names
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:math' as math;
 
-part of '../main.dart';
+import 'package:file_selector/file_selector.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:video_player_win/video_player_win.dart' as video_player_win;
+
+import '../models/config.dart';
+import '../models/detection.dart';
+import '../models/shortcut.dart';
+import '../models/training.dart';
+import '../services/app_runtime.dart';
+import '../services/collection_utils.dart';
+import '../services/config_store.dart';
+import '../services/i18n.dart';
+import '../services/input_utils.dart';
+import '../services/logger.dart';
+import '../services/path_utils.dart';
+import '../services/python_environment.dart';
+import '../services/rust_backend.dart';
+import '../theme/theme_helpers.dart';
+import '../widgets/detect/detect_panels.dart';
+import '../widgets/detect/detect_playback_surface.dart';
+import '../widgets/detect/detect_support.dart';
+import '../widgets/detect/video_player_widgets.dart';
+import '../widgets/train/train_runtime_support.dart';
 
 const _detectDeviceOptions = ['auto', 'nv', 'intel', 'cpu'];
 const _mediaTypeGroup = XTypeGroup(
@@ -22,15 +48,15 @@ const _mediaTypeGroup = XTypeGroup(
   ],
 );
 
-class _DetectVideoSession extends ChangeNotifier {
+class DetectVideoSession extends ChangeNotifier {
   bool _disposed = false;
   bool _fullscreenToggleScheduled = false;
   int _loadSerial = 0;
   Timer? _positionTimer;
   Timer? _shortcutHudTimer;
   final ValueNotifier<int> progressTick = ValueNotifier<int>(0);
-  final ValueNotifier<_VideoShortcutHud?> shortcutHud =
-      ValueNotifier<_VideoShortcutHud?>(null);
+  final ValueNotifier<VideoShortcutHud?> shortcutHud =
+      ValueNotifier<VideoShortcutHud?>(null);
 
   bool playVideo = true;
   bool predictVideo = false;
@@ -55,7 +81,7 @@ class _DetectVideoSession extends ChangeNotifier {
   String? _controllerPath;
   RustVideoInfo? videoInfo;
   video_player_win.WinVideoPlayerController? controller;
-  _VideoScaleMode scaleMode = _VideoScaleMode.auto;
+  VideoScaleMode scaleMode = VideoScaleMode.auto;
   List<String> folderItems = const [];
   final Map<String, String> _predictionOutputsByInput = {};
   double _positionAnchorSeconds = 0;
@@ -156,7 +182,7 @@ class _DetectVideoSession extends ChangeNotifier {
     if (hold && current != null && current.text == text && current.hold) {
       return;
     }
-    shortcutHud.value = _VideoShortcutHud(text: text, hold: hold);
+    shortcutHud.value = VideoShortcutHud(text: text, hold: hold);
     if (!hold) {
       _shortcutHudTimer = Timer(const Duration(milliseconds: 850), () {
         if (!_disposed) {
@@ -178,7 +204,7 @@ class _DetectVideoSession extends ChangeNotifier {
     if (file == null) {
       return;
     }
-    _log('BROWSE', 'Media file selected: ${file.path}');
+    logApp('BROWSE', 'Media file selected: ${file.path}');
     await selectInput(file.path, newFolderItems: const []);
   }
 
@@ -188,10 +214,10 @@ class _DetectVideoSession extends ChangeNotifier {
       return;
     }
     final items = mediaFilesInDirectory(folder);
-    _log(
+    logApp(
       'BROWSE',
       'Media folder selected: $folder, items=${items.length}',
-      level: items.isEmpty ? _LogLevel.warning : _LogLevel.info,
+      level: items.isEmpty ? AppLogLevel.warning : AppLogLevel.info,
     );
     await selectInput(
       items.isEmpty ? folder : items.first,
@@ -212,10 +238,10 @@ class _DetectVideoSession extends ChangeNotifier {
     if (showPreviewPanel) {
       previewPanelVisible = true;
     }
-    _log(
+    logApp(
       'BROWSE',
       'Selected input changed: $path, folderItems=${folderItems.length}',
-      level: _LogLevel.debug,
+      level: AppLogLevel.debug,
     );
     selectedInput = path;
     showPredictionResult = true;
@@ -283,7 +309,7 @@ class _DetectVideoSession extends ChangeNotifier {
     }
 
     final requestSerial = ++_loadSerial;
-    _log('BROWSE', 'Video load started: $input', level: _LogLevel.debug);
+    logApp('BROWSE', 'Video load started: $input', level: AppLogLevel.debug);
     videoLoading = true;
     videoStatus = t('detect.loadingVideo');
     playbackSpeed = 1;
@@ -304,7 +330,7 @@ class _DetectVideoSession extends ChangeNotifier {
       final metadataFuture = RustBackend.loadInfo(input)
           .then<RustVideoInfo?>((info) => info)
           .catchError((error) {
-            metadataError = _shortVideoError(error);
+            metadataError = shortVideoError(error);
             return null;
           });
       final nextController = video_player_win.WinVideoPlayerController.file(
@@ -331,14 +357,14 @@ class _DetectVideoSession extends ChangeNotifier {
       }
       videoLoading = false;
       final size = nextController.value.size;
-      videoStatus = _videoStatusText(
+      videoStatus = videoStatusText(
         size: size,
         nativeDurationSeconds:
             nextController.value.duration.inMilliseconds / 1000.0,
         metadata: videoInfo,
         metadataError: metadataError,
       );
-      _log(
+      logApp(
         'BROWSE',
         'Video load completed: $input, size=${size.width.toStringAsFixed(0)}x${size.height.toStringAsFixed(0)}, duration=${durationSeconds.toStringAsFixed(2)}s',
       );
@@ -354,10 +380,10 @@ class _DetectVideoSession extends ChangeNotifier {
       _controllerPath = null;
       videoInfo = null;
       videoStatus = '${t('detect.decodeFailed')}: $error';
-      _log(
+      logApp(
         'BROWSE',
         'Video load failed: $input, error=$error',
-        level: _LogLevel.error,
+        level: AppLogLevel.error,
       );
       _emit();
     }
@@ -518,7 +544,7 @@ class _DetectVideoSession extends ChangeNotifier {
 
   Future<void> adjustVolume(double delta) => setVolume(volume + delta);
 
-  void setScaleMode(_VideoScaleMode mode) {
+  void setScaleMode(VideoScaleMode mode) {
     if (scaleMode == mode) {
       return;
     }
@@ -795,14 +821,14 @@ class _DetectVideoSession extends ChangeNotifier {
   }
 }
 
-class _VideoShortcutHud {
-  const _VideoShortcutHud({required this.text, required this.hold});
+class VideoShortcutHud {
+  const VideoShortcutHud({required this.text, required this.hold});
 
   final String text;
   final bool hold;
 }
 
-enum _VideoScaleMode {
+enum VideoScaleMode {
   auto,
   ratio4x3,
   ratio16x9,
@@ -811,19 +837,20 @@ enum _VideoScaleMode {
   original,
 }
 
-extension _VideoScaleModeLabel on _VideoScaleMode {
+extension VideoScaleModeLabel on VideoScaleMode {
   String get labelKey => switch (this) {
-    _VideoScaleMode.auto => 'detect.scaleAuto',
-    _VideoScaleMode.ratio4x3 => 'detect.scale4x3',
-    _VideoScaleMode.ratio16x9 => 'detect.scale16x9',
-    _VideoScaleMode.fitWidth => 'detect.scaleFitWidth',
-    _VideoScaleMode.fitHeight => 'detect.scaleFitHeight',
-    _VideoScaleMode.original => 'detect.scaleOriginal',
+    VideoScaleMode.auto => 'detect.scaleAuto',
+    VideoScaleMode.ratio4x3 => 'detect.scale4x3',
+    VideoScaleMode.ratio16x9 => 'detect.scale16x9',
+    VideoScaleMode.fitWidth => 'detect.scaleFitWidth',
+    VideoScaleMode.fitHeight => 'detect.scaleFitHeight',
+    VideoScaleMode.original => 'detect.scaleOriginal',
   };
 }
 
-class _DetectVideoPage extends StatefulWidget {
-  const _DetectVideoPage({
+class DetectVideoPage extends StatefulWidget {
+  const DetectVideoPage({
+    super.key,
     required this.settings,
     required this.shortcutConfig,
     required this.session,
@@ -831,13 +858,13 @@ class _DetectVideoPage extends StatefulWidget {
 
   final AppSettings settings;
   final ShortcutConfig shortcutConfig;
-  final _DetectVideoSession session;
+  final DetectVideoSession session;
 
   @override
-  State<_DetectVideoPage> createState() => _DetectVideoPageState();
+  State<DetectVideoPage> createState() => DetectVideoPageState();
 }
 
-class _DetectVideoPageState extends State<_DetectVideoPage> {
+class DetectVideoPageState extends State<DetectVideoPage> {
   final FocusNode _focusNode = FocusNode(debugLabel: 'detect-video');
   late final TextEditingController _confController;
   List<TrainingDeviceOption> _nvidiaDeviceOptions = const [];
@@ -849,7 +876,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
   Timer? _parameterHideTimer;
   bool _parameterPanelVisible = true;
 
-  _DetectVideoSession get _session => widget.session;
+  DetectVideoSession get _session => widget.session;
 
   @override
   void initState() {
@@ -871,7 +898,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
   }
 
   @override
-  void didUpdateWidget(covariant _DetectVideoPage oldWidget) {
+  void didUpdateWidget(covariant DetectVideoPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.settings.pythonPath.trim() !=
         widget.settings.pythonPath.trim()) {
@@ -915,16 +942,16 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
     final openVinoInfo = results[1] as OpenVinoDeviceInfo;
     devices.sort((a, b) => naturalCompare(a.id, b.id));
     if (openVinoInfo.hasDevices) {
-      _log(
+      logApp(
         'DETECT',
         'OpenVINO devices detected: ${openVinoInfo.displayDevices}; auto priority=NVIDIA CUDA > Intel GPU > NPU > CPU',
-        level: _LogLevel.info,
+        level: AppLogLevel.info,
       );
     } else if (openVinoInfo.hasError) {
-      _log(
+      logApp(
         'DETECT',
         'OpenVINO device detection failed: ${openVinoInfo.error}',
-        level: _LogLevel.warning,
+        level: AppLogLevel.warning,
       );
     }
     if (!mounted) {
@@ -950,18 +977,18 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
 
   Future<void> _ensureDetectModel() async {
     if (_session.detectModelPath != null) return;
-    final model = await _DetectVideoSession._chooseDetectModel(widget.settings);
+    final model = await DetectVideoSession._chooseDetectModel(widget.settings);
     if (model != null) {
       _session.detectModelPath = model;
     }
   }
 
   Future<void> _chooseDetectModel() async {
-    final model = await _DetectVideoSession._chooseDetectModel(widget.settings);
+    final model = await DetectVideoSession._chooseDetectModel(widget.settings);
     if (model == null) {
       return;
     }
-    _log('DETECT', 'Detect model selected: $model');
+    logApp('DETECT', 'Detect model selected: $model');
     _session.detectModelPath = model;
     _session.clearPredictionEffects();
     await _session._resetVideoController();
@@ -1002,29 +1029,29 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
     bool allImages = false,
   }) async {
     if (_session.predicting) {
-      _log(
+      logApp(
         'DETECT',
         'Detection request ignored: prediction is already running',
-        level: _LogLevel.warning,
+        level: AppLogLevel.warning,
       );
       return;
     }
     _applyConfText();
     final input = _session.selectedInput;
     if (input == null) {
-      _log(
+      logApp(
         'DETECT',
         'Detection request blocked: no selected input',
-        level: _LogLevel.warning,
+        level: AppLogLevel.warning,
       );
       return;
     }
     final pythonPath = widget.settings.pythonPath.trim();
     if (pythonPath.isEmpty) {
-      _log(
+      logApp(
         'DETECT',
         'Detection request blocked: Python path is empty',
-        level: _LogLevel.warning,
+        level: AppLogLevel.warning,
       );
       _showDetectMessage(t('detect.pythonNotConfigured'));
       return;
@@ -1032,10 +1059,10 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
     await _ensureDetectModel();
     final modelPath = _session.detectModelPath;
     if (modelPath == null) {
-      _log(
+      logApp(
         'DETECT',
         'Detection request blocked: no model selected',
-        level: _LogLevel.warning,
+        level: AppLogLevel.warning,
       );
       return;
     }
@@ -1045,10 +1072,10 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
       allImages: allImages,
     );
     if (targets.isEmpty) {
-      _log(
+      logApp(
         'DETECT',
         'Detection request blocked: no image targets for input=$input',
-        level: _LogLevel.warning,
+        level: AppLogLevel.warning,
       );
       _showDetectMessage(t('detect.noImageTargets'));
       return;
@@ -1071,7 +1098,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
         modelPath: modelPath,
         pythonPath: pythonPath,
       );
-      _log(
+      logApp(
         'DETECT',
         'Detection started: save=$save, currentOnly=$currentOnly, allImages=$allImages, targets=${targets.length}, model=${fileName(modelPath)}, device=$deviceArgument, deviceSelection=${_session.detectDevice}, imgsz=${_session.detectImageSize}, conf=${_session.detectConf.toStringAsFixed(2)}, outputDir=$outputDir, startFrame=$startFrame',
       );
@@ -1124,20 +1151,20 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
         if (!result.ok) {
           final error = result.error ?? t('detect.detectFailed');
           _session.videoStatus = '${t('detect.detectFailed')}: $error';
-          _log(
+          logApp(
             'DETECT',
             'Detection target failed: target=$target, error=$error',
-            level: _LogLevel.error,
+            level: AppLogLevel.error,
           );
           _showDetectMessage(_session.videoStatus!);
           return;
         }
         completed += 1;
         totalLabels += result.labelCount;
-        _log(
+        logApp(
           'DETECT',
           'Detection target completed: target=$target, labels=${result.labelCount}, output=${result.outputPath}',
-          level: _LogLevel.debug,
+          level: AppLogLevel.debug,
         );
         _session.cachePredictionOutputForInput(target, result.outputPath);
         if (pathKey(target) == pathKey(_session.selectedInput ?? '')) {
@@ -1150,13 +1177,13 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
           '${save ? t('detect.saveDone') : t('detect.detectDone')} '
           '${targets.length}/${targets.length} '
           '(${t('detect.detectCount')}: $totalLabels)';
-      _log(
+      logApp(
         'DETECT',
         'Detection completed: save=$save, targets=${targets.length}, labels=$totalLabels',
       );
       _showDetectMessage(_session.videoStatus!);
     } on Object catch (error) {
-      _log('DETECT', 'Detection failed: $error', level: _LogLevel.error);
+      logApp('DETECT', 'Detection failed: $error', level: AppLogLevel.error);
       _session.videoStatus = '${t('detect.detectFailed')}: $error';
       _showDetectMessage(_session.videoStatus!);
     } finally {
@@ -1296,12 +1323,12 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
     }
     try {
       File(path).writeAsStringSync('cancel');
-      _log('DETECT', 'Prediction cancellation requested: $path');
+      logApp('DETECT', 'Prediction cancellation requested: $path');
     } on Object catch (error) {
-      _log(
+      logApp(
         'DETECT',
         'Prediction cancellation failed: $path, error=$error',
-        level: _LogLevel.error,
+        level: AppLogLevel.error,
       );
       _showDetectMessage('${t('detect.detectFailed')}: $error');
     }
@@ -1313,10 +1340,10 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
       return;
     }
     final targetFrame = math.max(0, frameNumber);
-    _log(
+    logApp(
       'DETECT',
       'Prediction seek requested: frame=$targetFrame, predicting=${_session.predicting}',
-      level: _LogLevel.debug,
+      level: AppLogLevel.debug,
     );
     if (_session.predicting) {
       _pendingPredictionStartFrame = targetFrame;
@@ -1534,7 +1561,7 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
                 behavior: HitTestBehavior.translucent,
                 onPointerDown: (_) => _focusPage(),
                 child: Container(
-                  color: _workspaceColor(context),
+                  color: workspaceColor(context),
                   padding: const EdgeInsets.all(24),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1588,15 +1615,15 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
                                   width: _session.previewPanelVisible ? 220 : 8,
                                   margin: const EdgeInsets.only(right: 12),
                                   decoration: BoxDecoration(
-                                    color: _panelColor(context),
+                                    color: panelColor(context),
                                     border: Border.all(
-                                      color: _borderColor(context),
+                                      color: borderColor(context),
                                     ),
                                     borderRadius: BorderRadius.circular(6),
                                   ),
                                   child: ClipRect(
                                     child: _session.previewPanelVisible
-                                        ? _DetectPreviewList(
+                                        ? DetectPreviewList(
                                             items: _session.folderItems,
                                             selectedInput:
                                                 _session.selectedInput,
@@ -1612,13 +1639,13 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
                             Expanded(
                               child: DecoratedBox(
                                 decoration: BoxDecoration(
-                                  color: _panelColor(context),
+                                  color: panelColor(context),
                                   border: Border.all(
-                                    color: _borderColor(context),
+                                    color: borderColor(context),
                                   ),
                                   borderRadius: BorderRadius.circular(6),
                                 ),
-                                child: _DetectPlaybackSurface(
+                                child: DetectPlaybackSurface(
                                   session: _session,
                                   onCancelPrediction: _cancelActivePrediction,
                                   onSeekPredictionFrame: _requestPredictionSeek,
@@ -1642,12 +1669,12 @@ class _DetectVideoPageState extends State<_DetectVideoPage> {
               duration: const Duration(milliseconds: 180),
               width: _parameterPanelVisible ? 320 : 8,
               decoration: BoxDecoration(
-                color: _panelColor(context),
-                border: Border(left: BorderSide(color: _borderColor(context))),
+                color: panelColor(context),
+                border: Border(left: BorderSide(color: borderColor(context))),
               ),
               child: ClipRect(
                 child: _parameterPanelVisible
-                    ? _DetectParameterPanel(
+                    ? DetectParameterPanel(
                         session: _session,
                         deviceValue: deviceValue,
                         deviceArgument: deviceArgument,
