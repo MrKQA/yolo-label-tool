@@ -10,6 +10,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../controllers/collaboration_controller.dart';
 import '../../dialogs/about_dialog.dart';
 import '../../dialogs/color_picker_dialog.dart';
 import '../../dialogs/export_dialog.dart';
@@ -89,7 +90,6 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
   Timer? _topMenuHideTimer;
   Timer? _databaseSaveTimer;
   Timer? _labelResumeSaveTimer;
-  Timer? _collaborationPollTimer;
 
   final List<ImageItem> _images = [];
   final List<RecentEntry> _recentFolders = [];
@@ -137,29 +137,39 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
   final Map<String, Set<String>> _sam3ClickAnnotationIdsByImage = {};
   Offset? _aiAssistPanelOffset;
   Size _aiAssistPanelSize = const Size(320, 360);
-  CollaborationMode _collaborationMode = CollaborationMode.off;
-  String _collaborationHostId = newCollaborationId('host');
-  String _collaborationUserId = newCollaborationId('user');
-  String _collaborationUserName =
-      Platform.environment['USERNAME']?.trim().isNotEmpty == true
-      ? Platform.environment['USERNAME']!.trim()
-      : 'User';
-  int _collaborationPort = 8765;
-  int _collaborationStartIndex = 1;
-  int _collaborationEndIndex = 1;
-  CollaborationPermissions _collaborationSelfPermissions =
-      const CollaborationPermissions();
-  final List<CollaborationPeer> _collaborationPeers = [];
-  final List<CollaborationDiscoveredHost> _collaborationDiscoveredHosts = [];
-  final Set<String> _pendingCollaborationJoinRequests = {};
-  String? _selectedCollaborationHostId;
-  bool _collaborationPollInFlight = false;
-  bool _applyingCollaborationAnnotationSnapshot = false;
-  bool _collaborationJoining = false;
-  bool _collaborationReconnecting = false;
-  int _collaborationReconnectAttempts = 0;
-  Timer? _collaborationReconnectTimer;
-  CollaborationDiscoveredHost? _connectedCollaborationHost;
+  late final CollaborationController _collaboration = CollaborationController(
+    defaultUserName: Platform.environment['USERNAME']?.trim().isNotEmpty == true
+        ? Platform.environment['USERNAME']!.trim()
+        : 'User',
+  );
+
+  CollaborationMode get _collaborationMode => _collaboration.mode;
+  String get _collaborationHostId => _collaboration.hostId;
+  String get _collaborationUserId => _collaboration.userId;
+  String get _collaborationUserName => _collaboration.userName;
+  int get _collaborationPort => _collaboration.port;
+  int get _collaborationStartIndex => _collaboration.assignmentStart;
+  set _collaborationStartIndex(int value) =>
+      _collaboration.assignmentStart = value;
+  int get _collaborationEndIndex => _collaboration.assignmentEnd;
+  set _collaborationEndIndex(int value) => _collaboration.assignmentEnd = value;
+  CollaborationPermissions get _collaborationSelfPermissions =>
+      _collaboration.selfPermissions;
+  set _collaborationSelfPermissions(CollaborationPermissions value) =>
+      _collaboration.selfPermissions = value;
+  List<CollaborationPeer> get _collaborationPeers => _collaboration.peers;
+  List<CollaborationDiscoveredHost> get _collaborationDiscoveredHosts =>
+      _collaboration.discoveredHosts;
+  String? get _selectedCollaborationHostId => _collaboration.selectedHostId;
+  bool get _applyingCollaborationAnnotationSnapshot =>
+      _collaboration.applyingAnnotationSnapshot;
+  set _applyingCollaborationAnnotationSnapshot(bool value) =>
+      _collaboration.applyingAnnotationSnapshot = value;
+  bool get _collaborationJoining => _collaboration.joining;
+  bool get _collaborationReconnecting => _collaboration.reconnecting;
+  int get _collaborationReconnectAttempts => _collaboration.reconnectAttempts;
+  CollaborationDiscoveredHost? get _connectedCollaborationHost =>
+      _collaboration.connectedHost;
 
   ImageItem? get _selectedImage {
     if (_images.isEmpty) {
@@ -168,28 +178,20 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     return _images[_selectedImageIndex.clamp(0, _images.length - 1)];
   }
 
-  bool get _collaborationClientMode =>
-      _collaborationMode == CollaborationMode.client;
+  bool get _collaborationClientMode => _collaboration.clientMode;
 
-  String get _currentAnnotatorName {
-    final name = _collaborationUserName.trim();
-    return name.isEmpty ? 'User' : name;
-  }
+  String get _currentAnnotatorName => _collaboration.annotatorName;
 
-  int get _currentAnnotatorColorValue =>
-      collaborationColorForId(_collaborationAuthorId).toARGB32();
+  int get _currentAnnotatorColorValue => _collaboration.annotatorColorValue;
 
-  String get _currentAnnotatorLabel =>
-      '$_currentAnnotatorName#${shortCollaborationId(_collaborationAuthorId)}';
+  String get _currentAnnotatorLabel => _collaboration.annotatorLabel;
 
-  String get _collaborationAuthorId =>
-      collaborationPeerIdFor(_collaborationHostId, _collaborationUserId);
+  String get _collaborationAuthorId => _collaboration.authorId;
 
   bool get _selectedImageAuthorized =>
       _isImageIndexAuthorized(_selectedImageIndex);
 
-  bool get _projectLockedByCollaboration =>
-      _collaborationMode == CollaborationMode.client;
+  bool get _projectLockedByCollaboration => _collaboration.projectLocked;
 
   ImageItem? get _selectedImageForLabel {
     if (!_selectedImageAuthorized) {
@@ -236,26 +238,18 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
   }
 
   bool _isImageIndexAuthorized(int zeroBasedIndex) {
-    if (!_collaborationClientMode) {
-      return true;
-    }
-    if (_images.isEmpty) {
-      return false;
-    }
-    final start = _collaborationStartIndex.clamp(1, _images.length);
-    final end = _collaborationEndIndex.clamp(start, _images.length);
-    final index = zeroBasedIndex + 1;
-    return index >= start && index <= end;
+    return _collaboration.isImageIndexAuthorized(
+      zeroBasedIndex,
+      _images.length,
+    );
   }
 
   void _moveToFirstAuthorizedCollaborationImage() {
     if (!_collaborationClientMode || _images.isEmpty) {
       return;
     }
-    final start = _collaborationStartIndex.clamp(1, _images.length).toInt();
-    final end = _collaborationEndIndex.clamp(start, _images.length).toInt();
-    _collaborationStartIndex = start;
-    _collaborationEndIndex = end;
+    _collaboration.normalizeAssignment(_images.length);
+    final start = _collaborationStartIndex;
     if (!_isImageIndexAuthorized(_selectedImageIndex)) {
       _selectedImageIndex = start - 1;
       _selectedAnnotationId = null;
@@ -389,7 +383,11 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
         this._publishCurrentCollaborationAnnotations();
       }
     } on Object catch (error) {
-      logApp('DB', 'Label database save failed: $error', level: AppLogLevel.error);
+      logApp(
+        'DB',
+        'Label database save failed: $error',
+        level: AppLogLevel.error,
+      );
     }
   }
 
@@ -433,10 +431,9 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
         ),
       );
       final loadedClasses = labelClassesFromDatabase(result['classes']);
-      final loadedAnnotations = annotationsFromDatabase(
-        result['annotations'],
-        {for (final image in _images) pathKey(image.path)},
-      );
+      final loadedAnnotations = annotationsFromDatabase(result['annotations'], {
+        for (final image in _images) pathKey(image.path),
+      });
       if (!mounted) {
         return;
       }
@@ -485,7 +482,11 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
         level: AppLogLevel.debug,
       );
     } on Object catch (error) {
-      logApp('DB', 'Label database load failed: $error', level: AppLogLevel.error);
+      logApp(
+        'DB',
+        'Label database load failed: $error',
+        level: AppLogLevel.error,
+      );
     } finally {
       _databaseApplying = false;
     }
@@ -499,26 +500,16 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
   void initState() {
     super.initState();
     _detectVideoSession.addListener(_handleDetectVideoSessionChanged);
+    _collaboration.addListener(_handleCollaborationControllerChanged);
     _loadPersistedConfig();
     _loadAvailableLanguages();
-    this._startCollaborationPolling();
+    _collaboration.startPolling(_handleCollaborationEvent);
     _resetCollaborationRuntimeForStartup();
     this._scheduleTopMenuHide();
   }
 
   void _resetCollaborationRuntimeForStartup() {
-    unawaited(
-      RustBackend.collaborationCommand(request: const {'action': 'stop'})
-          .catchError((Object error) {
-            logApp(
-              'COLLAB',
-              'Startup collaboration reset failed: $error',
-              level: AppLogLevel.debug,
-            );
-            return <String, dynamic>{};
-          })
-          .whenComplete(this._restartCollaborationDiscovery),
-    );
+    unawaited(_collaboration.resetTransportForStartup());
   }
 
   @override
@@ -527,23 +518,12 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     _topMenuHideTimer?.cancel();
     _databaseSaveTimer?.cancel();
     _labelResumeSaveTimer?.cancel();
-    _collaborationPollTimer?.cancel();
-    _collaborationReconnectTimer?.cancel();
-    unawaited(
-      RustBackend.collaborationCommand(
-        request: const {'action': 'stop'},
-      ).catchError((Object error) {
-        logApp(
-          'COLLAB',
-          'Stop on dispose failed: $error',
-          level: AppLogLevel.debug,
-        );
-        return <String, dynamic>{};
-      }),
-    );
+    unawaited(_collaboration.stopTransport(restartDiscovery: false));
     unawaited(_saveAnnotationDatabaseNow());
     _saveLabelResumePositionNow();
     appLogger.dispose();
+    _collaboration.removeListener(_handleCollaborationControllerChanged);
+    _collaboration.dispose();
     _detectVideoSession.removeListener(_handleDetectVideoSessionChanged);
     _detectVideoSession.dispose();
     _keyboardFocusNode.dispose();
@@ -560,6 +540,12 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     setState(() => _videoFullscreenVisible = visible);
   }
 
+  void _handleCollaborationControllerChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
   void _loadPersistedConfig() {
     final history = ConfigStore.loadHistory();
     final keybindings = ConfigStore.loadKeybindings();
@@ -574,8 +560,10 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
       _shortcutConfig = keybindings;
       _appSettings = settings;
       _darkMode = settings.darkMode;
-      _collaborationHostId = settings.collaborationHostId;
-      _collaborationUserId = settings.collaborationUserId;
+      _collaboration.restoreIdentity(
+        hostId: settings.collaborationHostId,
+        userId: settings.collaborationUserId,
+      );
     });
     ConfigStore.saveSettings(settings);
     themeModeNotifier.value = settings.darkMode
@@ -590,9 +578,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
   }
 
   Future<void> _loadAvailableLanguages() async {
-    final options = await LanguageOption.loadAvailable(
-      compare: naturalCompare,
-    );
+    final options = await LanguageOption.loadAvailable(compare: naturalCompare);
     if (!mounted) {
       return;
     }
@@ -613,7 +599,6 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     this._showTopMenu();
   }
 
-
   bool _touchRecent(List<RecentEntry> items, String value) {
     final trimmed = value.trim();
     if (trimmed.isEmpty) {
@@ -630,6 +615,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     }
     return true;
   }
+
   void _saveHistory() {
     ConfigStore.saveHistory(
       HistoryConfig(folders: _recentFolders, files: _recentFiles),
@@ -1956,7 +1942,11 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     }
     final id = _classSerial++;
     _labelClasses.add(
-      LabelClass(id: id, name: name, colorValue: this._nextClassColor().toARGB32()),
+      LabelClass(
+        id: id,
+        name: name,
+        colorValue: this._nextClassColor().toARGB32(),
+      ),
     );
     _activeClassId ??= id;
     return id;
@@ -2180,7 +2170,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
                               ? 5
                               : 4,
                           children: [
-                        LabelPage(
+                            LabelPage(
                               status: widget.status,
                               images: _images,
                               selectedImage: _selectedImageForLabel,
@@ -2218,7 +2208,8 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
                               onAnnotationSelected: this._selectAnnotation,
                               onAnnotationUpdated: this._updateAnnotation,
                               onAnnotationDeleted: this._deleteAnnotation,
-                              onAnnotationDragStarted: this._pushAnnotationSnapshot,
+                              onAnnotationDragStarted:
+                                  this._pushAnnotationSnapshot,
                               onClassSelected: this._selectLabelClass,
                               onClassAdded: () => this._addLabelClass(),
                               onClassEdited: this._editLabelClass,
@@ -2228,7 +2219,8 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
                               onToggleClassLabels: () => setState(
                                 () => _showClassLabels = !_showClassLabels,
                               ),
-                              onAnnotationClassChanged: this._changeAnnotationClass,
+                              onAnnotationClassChanged:
+                                  this._changeAnnotationClass,
                               onSam3ClickPrompt: _handleSam3ClickPrompt,
                               aiPanelVisible: _aiPanelVisible,
                               onAiConfigPressed: () {
@@ -2266,9 +2258,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
                               peers: _collaborationPeers,
                               onUserNameChanged: this._setCollaborationUserName,
                               onPortChanged: this._setCollaborationPort,
-                              onHostSelected: (hostId) => setState(
-                                () => _selectedCollaborationHostId = hostId,
-                              ),
+                              onHostSelected: _collaboration.selectHost,
                               onStartHost: this._startCollaborationHost,
                               onJoinClient: this._joinCollaborationHost,
                               onStop: this._stopCollaboration,
@@ -2389,7 +2379,6 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     );
   }
 }
-
 
 extension _WorkspaceShellAnnotationActions on _WorkspaceShellState {
   void _pushAnnotationSnapshot() {
@@ -2902,56 +2891,7 @@ extension _WorkspaceShellAnnotationActions on _WorkspaceShellState {
   }
 }
 
-
 extension _WorkspaceShellCollaborationActions on _WorkspaceShellState {
-  void _startCollaborationPolling() {
-    _collaborationPollTimer?.cancel();
-    _collaborationPollTimer = Timer.periodic(
-      const Duration(milliseconds: 350),
-      (_) => _pollCollaborationEvents(),
-    );
-  }
-
-  void _restartCollaborationDiscovery() {
-    if (_collaborationMode != CollaborationMode.off) {
-      return;
-    }
-    unawaited(
-      RustBackend.collaborationCommand(
-        request: {'action': 'start_discovery', 'port': _collaborationPort},
-      ).catchError((Object error) {
-        logApp(
-          'COLLAB',
-          'Discovery start failed: $error',
-          level: AppLogLevel.warning,
-        );
-        return <String, dynamic>{};
-      }),
-    );
-  }
-
-  Future<void> _pollCollaborationEvents() async {
-    if (_collaborationPollInFlight) {
-      return;
-    }
-    _collaborationPollInFlight = true;
-    try {
-      final events = await RustBackend.collaborationPollEvents(
-        maxEvents: 50,
-      );
-      if (!mounted || events.isEmpty) {
-        return;
-      }
-      for (final event in events) {
-        _handleCollaborationEvent(event);
-      }
-    } on Object catch (error) {
-      logApp('COLLAB', 'Event poll failed: $error', level: AppLogLevel.debug);
-    } finally {
-      _collaborationPollInFlight = false;
-    }
-  }
-
   void _handleCollaborationEvent(Map<String, dynamic> event) {
     switch (collaborationString(event, 'type')) {
       case 'host_found':
@@ -2979,26 +2919,9 @@ extension _WorkspaceShellCollaborationActions on _WorkspaceShellState {
         );
         if (_collaborationMode == CollaborationMode.host &&
             collaborationString(event, 'scope') == 'host_tcp') {
-          setState(() {
-            _collaborationMode = CollaborationMode.off;
-            _collaborationPeers.clear();
-            _pendingCollaborationJoinRequests.clear();
-          });
+          _collaboration.resetSession();
           _showFloatingMessage(t('collab.networkError'));
-          unawaited(
-            RustBackend.collaborationCommand(
-                  request: const {'action': 'stop'},
-                )
-                .catchError((Object error) {
-                  logApp(
-                    'COLLAB',
-                    'Stop after host TCP error failed: $error',
-                    level: AppLogLevel.debug,
-                  );
-                  return <String, dynamic>{};
-                })
-                .whenComplete(_restartCollaborationDiscovery),
-          );
+          unawaited(_collaboration.stopTransport());
         }
         break;
       default:
@@ -3007,52 +2930,16 @@ extension _WorkspaceShellCollaborationActions on _WorkspaceShellState {
   }
 
   void _upsertDiscoveredHost(Map<String, dynamic> event) {
-    if (_collaborationMode == CollaborationMode.host) {
-      return;
+    if (_collaboration.upsertDiscoveredHost(event)) {
+      setState(() {});
     }
-    final hostId = collaborationString(event, 'hostId');
-    if (hostId.isEmpty || hostId == _collaborationHostId) {
-      return;
-    }
-    final host = CollaborationDiscoveredHost(
-      hostId: hostId,
-      hostName: collaborationString(event, 'hostName').trim().isEmpty
-          ? 'Host'
-          : collaborationString(event, 'hostName'),
-      address: collaborationString(event, 'address'),
-      port: collaborationInt(event, 'port', fallback: _collaborationPort),
-      online: true,
-    );
-    setState(() {
-      final index = _collaborationDiscoveredHosts.indexWhere(
-        (item) => item.hostId == host.hostId,
-      );
-      if (index >= 0) {
-        _collaborationDiscoveredHosts[index] = host;
-      } else {
-        _collaborationDiscoveredHosts.add(host);
-      }
-      if (_selectedCollaborationHostId == null ||
-          !_collaborationDiscoveredHosts.any(
-            (item) => item.hostId == _selectedCollaborationHostId,
-          )) {
-        _selectedCollaborationHostId = host.hostId;
-      }
-      _collaborationDiscoveredHosts.sort(
-        (a, b) => a.hostName.toLowerCase().compareTo(b.hostName.toLowerCase()),
-      );
-    });
   }
 
   void _handleCollaborationJoinRequest(Map<String, dynamic> event) {
-    if (_collaborationMode != CollaborationMode.host) {
-      return;
-    }
     final userId = collaborationString(event, 'userId');
-    if (userId.isEmpty || _pendingCollaborationJoinRequests.contains(userId)) {
+    if (!_collaboration.beginJoinRequest(userId)) {
       return;
     }
-    _pendingCollaborationJoinRequests.add(userId);
     unawaited(_confirmCollaborationJoin(event));
   }
 
@@ -3086,7 +2973,7 @@ extension _WorkspaceShellCollaborationActions on _WorkspaceShellState {
         ],
       ),
     );
-    _pendingCollaborationJoinRequests.remove(userId);
+    _collaboration.finishJoinRequest(userId);
     if (!mounted) {
       return;
     }
@@ -3153,28 +3040,31 @@ extension _WorkspaceShellCollaborationActions on _WorkspaceShellState {
     final message = collaborationMap(event['message']);
     switch (collaborationString(message, 'type')) {
       case 'join_accepted':
-        setState(() {
-          _collaborationMode = CollaborationMode.client;
-          _collaborationJoining = false;
-          _collaborationReconnecting = false;
-          _collaborationReconnectAttempts = 0;
-          _collaborationReconnectTimer?.cancel();
-          _collaborationStartIndex = collaborationInt(
+        final joinPermissions = collaborationMap(message['permissions']);
+        _collaboration.completeJoin(
+          assignmentStart: collaborationInt(
             message,
             'assignmentStart',
             fallback: 1,
-          );
-          _collaborationEndIndex = collaborationInt(
+          ),
+          assignmentEnd: collaborationInt(
             message,
             'assignmentEnd',
             fallback: math.max(1, _images.length),
-          );
-          final permissions = collaborationMap(message['permissions']);
-          _collaborationSelfPermissions = CollaborationPermissions(
-            canEditOthers: collaborationBool(permissions, 'canEditOthers'),
-            canDeleteOthers: collaborationBool(permissions, 'canDeleteOthers'),
-            canChangeClass: collaborationBool(permissions, 'canChangeClass'),
-          );
+          ),
+          permissions: CollaborationPermissions(
+            canEditOthers: collaborationBool(joinPermissions, 'canEditOthers'),
+            canDeleteOthers: collaborationBool(
+              joinPermissions,
+              'canDeleteOthers',
+            ),
+            canChangeClass: collaborationBool(
+              joinPermissions,
+              'canChangeClass',
+            ),
+          ),
+        );
+        setState(() {
           final host = _connectedCollaborationHost;
           if (host != null) {
             _upsertCollaborationPeer(
@@ -3193,7 +3083,7 @@ extension _WorkspaceShellCollaborationActions on _WorkspaceShellState {
         logApp('COLLAB', 'Join accepted by host');
         break;
       case 'join_rejected':
-        setState(() => _collaborationJoining = false);
+        _collaboration.rejectJoin();
         _showFloatingMessage(t('collab.joinRejected'));
         _disconnectCollaborationClient(clearProject: true);
         break;
@@ -3657,13 +3547,11 @@ extension _WorkspaceShellCollaborationActions on _WorkspaceShellState {
     if (_collaborationMode == CollaborationMode.off) {
       return;
     }
-    final imageIndex =
-        collaborationInt(message, 'imageIndex', fallback: 0) - 1;
+    final imageIndex = collaborationInt(message, 'imageIndex', fallback: 0) - 1;
     if (imageIndex < 0 || imageIndex >= _images.length) {
       return;
     }
-    if (_collaborationMode == CollaborationMode.host &&
-        fromUserId.isNotEmpty) {
+    if (_collaborationMode == CollaborationMode.host && fromUserId.isNotEmpty) {
       final peer = _collaborationPeers
           .where((item) => item.userId == fromUserId)
           .firstOrNullValue;
@@ -3747,43 +3635,18 @@ extension _WorkspaceShellCollaborationActions on _WorkspaceShellState {
   }
 
   void _upsertCollaborationPeer(CollaborationPeer peer) {
-    final index = _collaborationPeers.indexWhere(
-      (item) => item.userId == peer.userId,
-    );
-    if (index >= 0) {
-      _collaborationPeers[index] = _collaborationPeers[index].copyWith(
-        userName: peer.userName,
-        colorValue: peer.colorValue,
-        address: peer.address,
-        online: peer.online,
-        assignmentStart: peer.assignmentStart,
-        assignmentEnd: peer.assignmentEnd,
-        permissions: peer.permissions,
-      );
-    } else {
-      _collaborationPeers.add(peer);
-    }
+    _collaboration.upsertPeer(peer);
   }
 
   void _markCollaborationPeerOffline(String userId) {
-    if (userId.isEmpty) {
-      return;
+    if (_collaboration.markPeerOffline(userId)) {
+      setState(() {});
     }
-    setState(() {
-      final index = _collaborationPeers.indexWhere(
-        (peer) => peer.userId == userId,
-      );
-      if (index >= 0) {
-        _collaborationPeers[index] = _collaborationPeers[index].copyWith(
-          online: false,
-        );
-      }
-    });
   }
 
   Future<void> _sendCollaborationCommand(Map<String, Object?> request) async {
     try {
-      await RustBackend.collaborationCommand(request: request);
+      await _collaboration.sendCommand(request);
     } on Object catch (error) {
       logApp(
         'COLLAB',
@@ -3888,13 +3751,9 @@ extension _WorkspaceShellCollaborationActions on _WorkspaceShellState {
     CollaborationPeer peer,
     int zeroBasedIndex,
   ) {
-    if (!peer.online || _images.isEmpty) {
-      return false;
-    }
-    final start = peer.assignmentStart.clamp(1, _images.length).toInt();
-    final end = peer.assignmentEnd.clamp(start, _images.length).toInt();
-    final imageIndex = zeroBasedIndex + 1;
-    return imageIndex >= start && imageIndex <= end;
+    return peer.online &&
+        _images.isNotEmpty &&
+        _collaboration.peerCanAccessImage(peer, zeroBasedIndex);
   }
 
   void _sendCollaborationMessageToAuthorizedPeers(
@@ -3917,12 +3776,12 @@ extension _WorkspaceShellCollaborationActions on _WorkspaceShellState {
   }
 
   void _setCollaborationUserName(String value) {
-    setState(() => _collaborationUserName = value.trim());
+    _collaboration.userName = value;
   }
 
   void _setCollaborationPort(int value) {
-    setState(() => _collaborationPort = value);
-    _restartCollaborationDiscovery();
+    _collaboration.updatePort(value);
+    unawaited(_collaboration.restartDiscovery());
   }
 
   void _startCollaborationHost() {
@@ -3931,29 +3790,15 @@ extension _WorkspaceShellCollaborationActions on _WorkspaceShellState {
       return;
     }
     final imageCount = _images.length;
-    setState(() {
-      _collaborationMode = CollaborationMode.host;
-      _collaborationJoining = false;
-      _collaborationPeers.clear();
-      _collaborationStartIndex = 1;
-      _collaborationEndIndex = math.max(1, imageCount);
-    });
+    _collaboration.prepareHost(imageCount);
     unawaited(_startCollaborationHostNetwork(imageCount));
   }
 
   Future<void> _startCollaborationHostNetwork(int imageCount) async {
     try {
-      await RustBackend.collaborationCommand(
-        request: {
-          'action': 'start_host',
-          'hostId': _collaborationHostId,
-          'hostName': _currentAnnotatorName,
-          'userId': _collaborationAuthorId,
-          'userName': _currentAnnotatorName,
-          'port': _collaborationPort,
-          'projectId': _databaseProjectKey(),
-          'imageCount': imageCount,
-        },
+      await _collaboration.startHostTransport(
+        projectId: _databaseProjectKey(),
+        imageCount: imageCount,
       );
       logApp(
         'COLLAB',
@@ -3963,10 +3808,10 @@ extension _WorkspaceShellCollaborationActions on _WorkspaceShellState {
       if (!mounted) {
         return;
       }
-      setState(() => _collaborationMode = CollaborationMode.off);
+      _collaboration.resetSession();
       _showFloatingMessage(t('collab.networkError'));
       logApp('COLLAB', 'Host start failed: $error', level: AppLogLevel.error);
-      _restartCollaborationDiscovery();
+      unawaited(_collaboration.restartDiscovery());
     }
   }
 
@@ -3974,9 +3819,7 @@ extension _WorkspaceShellCollaborationActions on _WorkspaceShellState {
     if (_collaborationJoining) {
       return;
     }
-    final selectedHost = _collaborationDiscoveredHosts
-        .where((host) => host.hostId == _selectedCollaborationHostId)
-        .firstOrNullValue;
+    final selectedHost = _collaboration.selectedHost;
     if (selectedHost == null) {
       _showFloatingMessage(t('collab.selectHostFirst'));
       return;
@@ -3987,24 +3830,11 @@ extension _WorkspaceShellCollaborationActions on _WorkspaceShellState {
   Future<void> _joinCollaborationHostNetwork(
     CollaborationDiscoveredHost selectedHost,
   ) async {
-    setState(() => _collaborationJoining = true);
     try {
-      _connectedCollaborationHost = selectedHost;
-      await RustBackend.collaborationCommand(
-        request: {
-          'action': 'join_host',
-          'hostId': selectedHost.hostId,
-          'address': selectedHost.address,
-          'port': selectedHost.port,
-          'userId': _collaborationAuthorId,
-          'userName': _currentAnnotatorName,
-          'colorValue': _currentAnnotatorColorValue,
-        },
-      );
+      await _collaboration.joinHost(selectedHost);
       if (!mounted) {
         return;
       }
-      setState(() => _collaborationJoining = false);
       logApp(
         'COLLAB',
         'Join request sent: user=$_currentAnnotatorLabel, host=${selectedHost.hostId}, address=${selectedHost.address}:${selectedHost.port}',
@@ -4013,11 +3843,9 @@ extension _WorkspaceShellCollaborationActions on _WorkspaceShellState {
       if (!mounted) {
         return;
       }
-      _connectedCollaborationHost = null;
-      setState(() => _collaborationJoining = false);
       _showFloatingMessage(t('collab.networkError'));
       logApp('COLLAB', 'Join failed: $error', level: AppLogLevel.error);
-      _restartCollaborationDiscovery();
+      unawaited(_collaboration.restartDiscovery());
     }
   }
 
@@ -4030,105 +3858,41 @@ extension _WorkspaceShellCollaborationActions on _WorkspaceShellState {
       _disconnectCollaborationClient(clearProject: true);
       return;
     }
-    setState(() {
-      _collaborationReconnecting = true;
-      _collaborationReconnectAttempts = 0;
-      _selectedAnnotationId = null;
-    });
+    setState(() => _selectedAnnotationId = null);
+    final started = _collaboration.beginReconnect(
+      onExhausted: () {
+        if (!mounted) {
+          return;
+        }
+        _showFloatingMessage(t('collab.reconnectFailed'));
+        _disconnectCollaborationClient(clearProject: true);
+      },
+    );
+    if (!started) {
+      return;
+    }
     logApp(
       'COLLAB',
       'Host disconnected, reconnecting: host=${host.hostId}',
       level: AppLogLevel.warning,
     );
-    _scheduleCollaborationReconnectAttempt(immediate: true);
-  }
-
-  void _scheduleCollaborationReconnectAttempt({bool immediate = false}) {
-    _collaborationReconnectTimer?.cancel();
-    _collaborationReconnectTimer = Timer(
-      immediate ? Duration.zero : const Duration(seconds: 3),
-      _attemptCollaborationReconnect,
-    );
-  }
-
-  Future<void> _attemptCollaborationReconnect() async {
-    if (!_collaborationReconnecting) {
-      return;
-    }
-    final host = _connectedCollaborationHost;
-    if (host == null) {
-      _disconnectCollaborationClient(clearProject: true);
-      return;
-    }
-    if (_collaborationReconnectAttempts >= 5) {
-      _showFloatingMessage(t('collab.reconnectFailed'));
-      _disconnectCollaborationClient(clearProject: true);
-      return;
-    }
-    setState(() => _collaborationReconnectAttempts += 1);
-    try {
-      await RustBackend.collaborationCommand(
-        request: {
-          'action': 'join_host',
-          'hostId': host.hostId,
-          'address': host.address,
-          'port': host.port,
-          'userId': _collaborationAuthorId,
-          'userName': _currentAnnotatorName,
-          'colorValue': _currentAnnotatorColorValue,
-        },
-      );
-      logApp(
-        'COLLAB',
-        'Reconnect attempt sent: $_collaborationReconnectAttempts/5',
-        level: AppLogLevel.warning,
-      );
-    } on Object catch (error) {
-      logApp(
-        'COLLAB',
-        'Reconnect attempt failed: $_collaborationReconnectAttempts/5, error=$error',
-        level: AppLogLevel.warning,
-      );
-    }
-    if (_collaborationReconnecting) {
-      _scheduleCollaborationReconnectAttempt();
-    }
   }
 
   void _cancelCollaborationReconnect() {
+    _collaboration.cancelReconnect();
     _showFloatingMessage(t('collab.reconnectCancelled'));
     _disconnectCollaborationClient(clearProject: true);
   }
 
   void _disconnectCollaborationClient({required bool clearProject}) {
-    _collaborationReconnectTimer?.cancel();
+    _collaboration.resetSession();
     setState(() {
-      _collaborationMode = CollaborationMode.off;
-      _collaborationJoining = false;
-      _collaborationReconnecting = false;
-      _collaborationReconnectAttempts = 0;
-      _collaborationPeers.clear();
-      _pendingCollaborationJoinRequests.clear();
-      _selectedCollaborationHostId = null;
-      _connectedCollaborationHost = null;
-      _collaborationSelfPermissions = const CollaborationPermissions();
       _selectedAnnotationId = null;
       if (clearProject) {
         _clearCurrentProjectState();
       }
     });
-    unawaited(
-      RustBackend.collaborationCommand(request: const {'action': 'stop'})
-          .catchError((Object error) {
-            logApp(
-              'COLLAB',
-              'Client disconnect stop failed: $error',
-              level: AppLogLevel.debug,
-            );
-            return <String, dynamic>{};
-          })
-          .whenComplete(_restartCollaborationDiscovery),
-    );
+    unawaited(_collaboration.stopTransport());
   }
 
   void _stopCollaboration() {
@@ -4137,29 +3901,14 @@ extension _WorkspaceShellCollaborationActions on _WorkspaceShellState {
       _databaseSaveTimer?.cancel();
       unawaited(_saveAnnotationDatabaseNow());
     }
+    _collaboration.resetSession();
     setState(() {
-      _collaborationMode = CollaborationMode.off;
-      _collaborationJoining = false;
-      _collaborationReconnecting = false;
-      _collaborationReconnectAttempts = 0;
-      _collaborationPeers.clear();
-      _selectedCollaborationHostId = null;
-      _connectedCollaborationHost = null;
-      _pendingCollaborationJoinRequests.clear();
       _selectedAnnotationId = null;
       if (wasClient) {
         _clearCurrentProjectState();
       }
     });
-    _collaborationReconnectTimer?.cancel();
-    unawaited(
-      RustBackend.collaborationCommand(request: const {'action': 'stop'})
-          .catchError((Object error) {
-            logApp('COLLAB', 'Stop failed: $error', level: AppLogLevel.warning);
-            return <String, dynamic>{};
-          })
-          .whenComplete(_restartCollaborationDiscovery),
-    );
+    unawaited(_collaboration.stopTransport());
     logApp('COLLAB', 'Collaboration stopped');
   }
 
@@ -4208,7 +3957,6 @@ extension _WorkspaceShellCollaborationActions on _WorkspaceShellState {
     _scheduleAnnotationDatabaseSave();
   }
 }
-
 
 extension _WorkspaceShellExportActions on _WorkspaceShellState {
   Future<void> _showExportDialog() async {
@@ -4344,7 +4092,6 @@ extension _WorkspaceShellExportActions on _WorkspaceShellState {
   }
 }
 
-
 extension _WorkspaceShellSettingsActions on _WorkspaceShellState {
   void _toggleThemeMode() {
     final nextDarkMode = !_darkMode;
@@ -4419,10 +4166,8 @@ extension _WorkspaceShellSettingsActions on _WorkspaceShellState {
         onSave: _saveAppSettings,
         onClearCache: _clearCacheData,
         logger: appLogger,
-        onLogLevelChanged: (index) => setAppLogLevel(
-          appLogLevelFromIndex(index),
-          writeLog: true,
-        ),
+        onLogLevelChanged: (index) =>
+            setAppLogLevel(appLogLevelFromIndex(index), writeLog: true),
       ),
     );
     if (mounted) {

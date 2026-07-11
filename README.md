@@ -44,8 +44,9 @@ A YOLO image labeling, training, and video processing tool built with Flutter + 
 +-- flutter/                      # Flutter frontend
 |   +-- pubspec.yaml              # Flutter dependencies and assets
 |   +-- lib/
-|       +-- main.dart             # App entry, global init, part registry
+|       +-- main.dart             # App entry and global initialization
 |       +-- app.dart              # Root app widget and top-level routing
+|       +-- controllers/          # Workspace domain state controllers
 |       +-- theme/                # Colors, dimensions, theme helpers
 |       +-- services/             # Logger, i18n, config DB, Rust backend, import/export helpers
 |       +-- models/               # Annotation, detection, training, shortcut, AI data models
@@ -295,8 +296,9 @@ All pages kept alive via `IndexedStack` — training, playback, crop state prese
 +-- flutter/                      # Flutter 前端
 |   +-- pubspec.yaml              # Flutter 依赖与资源配置
 |   +-- lib/
-|       +-- main.dart             # 应用入口、全局初始化、part 注册
+|       +-- main.dart             # 应用入口与全局初始化
 |       +-- app.dart              # 根 Widget 与顶层路由
+|       +-- controllers/          # 工作区领域状态控制器
 |       +-- theme/                # 颜色、尺寸、主题辅助函数
 |       +-- services/             # 日志、语言、配置数据库、Rust 后端、导入导出辅助
 |       +-- models/               # 标注、检测、训练、快捷键、AI 数据模型
