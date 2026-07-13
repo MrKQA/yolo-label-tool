@@ -7,17 +7,47 @@
 // 管理当前标注项目：图片列表、类别、标注区域、撤销/重做栈、编辑序列号。
 // =============================================================================
 
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 
 import '../models/annotation.dart';
+import '../models/config.dart';
 import '../models/imported_dataset.dart';
 import '../services/annotation_database_codec.dart';
+import '../services/app_runtime.dart';
+import '../services/config_store.dart';
+import '../services/image_size.dart';
+import '../services/logger.dart';
 import '../services/path_utils.dart';
+
+typedef HistoryLoader = HistoryConfig Function();
+typedef HistorySaver = void Function(HistoryConfig history);
+typedef ResumePositionLoader = LabelResumePosition? Function(String projectKey);
+typedef ResumePositionSaver = void Function(LabelResumePosition position);
 
 /// Owns the currently opened annotation project and its editing history.
 class ProjectController extends ChangeNotifier {
+  ProjectController({
+    HistoryLoader? historyLoader,
+    HistorySaver? historySaver,
+    ResumePositionLoader? resumePositionLoader,
+    ResumePositionSaver? resumePositionSaver,
+    this.resumeSaveDelay = const Duration(milliseconds: 350),
+  }) : _historyLoader = historyLoader ?? ConfigStore.loadHistory,
+       _historySaver = historySaver ?? ConfigStore.saveHistory,
+       _resumePositionLoader =
+           resumePositionLoader ?? ConfigStore.loadLabelResumePosition,
+       _resumePositionSaver =
+           resumePositionSaver ?? ConfigStore.saveLabelResumePosition;
+
+  final HistoryLoader _historyLoader;
+  final HistorySaver _historySaver;
+  final ResumePositionLoader _resumePositionLoader;
+  final ResumePositionSaver _resumePositionSaver;
+  final Duration resumeSaveDelay;
+
   final List<ImageItem> images = [];
   final List<LabelClass> labelClasses = [];
   final Map<String, List<AnnotationRegion>> annotationsByImage = {};
@@ -25,6 +55,9 @@ class ProjectController extends ChangeNotifier {
   final Map<String, Size> imageDisplaySizes = {};
   final List<List<AnnotationRegion>> undoStack = [];
   final List<List<AnnotationRegion>> redoStack = [];
+  final List<RecentEntry> recentFolders = [];
+  final List<RecentEntry> recentFiles = [];
+  Timer? _resumeSaveTimer;
 
   int selectedImageIndex = 0;
   String? selectedAnnotationId;
@@ -69,9 +102,136 @@ class ProjectController extends ChangeNotifier {
     return imageDisplaySizes[key] ?? imageDisplaySizes[path];
   }
 
+  Future<Size> ensureDisplaySizeForPath(String imagePath) async {
+    final cached = displaySizeForPath(imagePath);
+    if (cached != null && cached != Size.zero) return cached;
+    final displaySize = await computeImageDisplaySizeForPath(
+      imagePath,
+      onDecodeError: (path, error) {
+        logApp(
+          'LABEL',
+          'Image size decode failed: $path, error=$error',
+          level: AppLogLevel.warning,
+        );
+      },
+    );
+    imageDisplaySizes[pathKey(imagePath)] = displaySize;
+    notifyListeners();
+    return displaySize;
+  }
+
+  void updateSelectedImageDisplaySize(Size size) {
+    imageDisplaySize = size;
+    final key = selectedImageKey;
+    if (key != null && size != Size.zero) {
+      imageDisplaySizes[key] = size;
+    }
+    notifyListeners();
+  }
+
   int imageIndexOfPath(String path) {
     final key = pathKey(path);
     return images.indexWhere((image) => pathKey(image.path) == key);
+  }
+
+  void loadHistory() {
+    final history = _historyLoader();
+    recentFolders
+      ..clear()
+      ..addAll(history.folders);
+    recentFiles
+      ..clear()
+      ..addAll(history.files);
+    notifyListeners();
+  }
+
+  bool touchRecentFolder(String path) => _touchRecent(recentFolders, path);
+
+  bool touchRecentFile(String path) => _touchRecent(recentFiles, path);
+
+  bool removeRecentFolder(String path) => _removeRecent(recentFolders, path);
+
+  bool removeRecentFile(String path) => _removeRecent(recentFiles, path);
+
+  void clearRecentHistory() {
+    if (recentFolders.isEmpty && recentFiles.isEmpty) {
+      return;
+    }
+    recentFolders.clear();
+    recentFiles.clear();
+    _saveRecentHistory();
+    notifyListeners();
+  }
+
+  void scheduleResumeSave({required String projectKey, bool enabled = true}) {
+    if (!enabled || images.isEmpty) {
+      return;
+    }
+    _resumeSaveTimer?.cancel();
+    _resumeSaveTimer = Timer(resumeSaveDelay, () {
+      saveResumePosition(projectKey: projectKey, enabled: enabled);
+    });
+  }
+
+  void saveResumePosition({required String projectKey, bool enabled = true}) {
+    if (!enabled || images.isEmpty) {
+      return;
+    }
+    final image = selectedImage;
+    if (image == null) {
+      return;
+    }
+    try {
+      _resumePositionSaver(
+        LabelResumePosition(
+          projectKey: projectKey,
+          imagePath: image.path,
+          imageIndex: selectedImageIndex,
+          updatedAt: DateTime.now(),
+        ),
+      );
+    } on Object catch (error) {
+      logApp(
+        'LABEL',
+        'Save resume position failed: $error',
+        level: AppLogLevel.debug,
+      );
+    }
+  }
+
+  int? restoreResumePosition({
+    required String projectKey,
+    bool enabled = true,
+  }) {
+    if (!enabled || images.isEmpty) {
+      return null;
+    }
+    try {
+      final position = _resumePositionLoader(projectKey);
+      if (position == null) {
+        return null;
+      }
+      final pathIndex = imageIndexOfPath(position.imagePath);
+      final nextIndex = pathIndex >= 0
+          ? pathIndex
+          : position.imageIndex.clamp(0, images.length - 1).toInt();
+      if (nextIndex == selectedImageIndex) {
+        return null;
+      }
+      return selectImage(nextIndex) ? nextIndex : null;
+    } on Object catch (error) {
+      logApp(
+        'LABEL',
+        'Restore resume position failed: $error',
+        level: AppLogLevel.debug,
+      );
+      return null;
+    }
+  }
+
+  void cancelResumeSave() {
+    _resumeSaveTimer?.cancel();
+    _resumeSaveTimer = null;
   }
 
   void clear() {
@@ -107,10 +267,18 @@ class ProjectController extends ChangeNotifier {
   }
 
   void openSingleImage(String path) {
+    _touchRecent(recentFiles, path, notify: false);
     _clearForReplacement();
     images.add(ImageItem.fromPath(path));
     imageSplits[pathKey(path)] = 'train';
     notifyListeners();
+  }
+
+  List<String> openImageFolder(String path) {
+    final imagePaths = imageFilesInDirectory(path);
+    _touchRecent(recentFolders, path, notify: false);
+    openImages(imagePaths);
+    return imagePaths;
   }
 
   void openImages(Iterable<String> paths) {
@@ -589,6 +757,49 @@ class ProjectController extends ChangeNotifier {
     }
   }
 
+  bool _touchRecent(
+    List<RecentEntry> items,
+    String value, {
+    bool notify = true,
+  }) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) {
+      return false;
+    }
+    final key = pathKey(trimmed);
+    items.removeWhere((item) => pathKey(item.path) == key);
+    items.insert(0, RecentEntry(path: trimmed, timestamp: DateTime.now()));
+    if (items.length > configRecentHistoryLimit) {
+      items.removeRange(configRecentHistoryLimit, items.length);
+    }
+    _saveRecentHistory();
+    if (notify) {
+      notifyListeners();
+    }
+    return true;
+  }
+
+  bool _removeRecent(List<RecentEntry> items, String path) {
+    final previousLength = items.length;
+    final key = pathKey(path);
+    items.removeWhere((item) => pathKey(item.path) == key);
+    if (items.length == previousLength) {
+      return false;
+    }
+    _saveRecentHistory();
+    notifyListeners();
+    return true;
+  }
+
+  void _saveRecentHistory() {
+    _historySaver(
+      HistoryConfig(
+        folders: List<RecentEntry>.unmodifiable(recentFolders),
+        files: List<RecentEntry>.unmodifiable(recentFiles),
+      ),
+    );
+  }
+
   void _clearForReplacement() {
     images.clear();
     labelClasses.clear();
@@ -604,5 +815,11 @@ class ProjectController extends ChangeNotifier {
     imageDisplaySize = null;
     importedDataset = null;
     clearHistory();
+  }
+
+  @override
+  void dispose() {
+    cancelResumeSave();
+    super.dispose();
   }
 }

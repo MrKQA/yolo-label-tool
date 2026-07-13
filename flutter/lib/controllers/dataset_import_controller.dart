@@ -1,18 +1,9 @@
 import 'dart:ui';
 
-import '../models/export.dart';
 import '../services/app_runtime.dart';
 import '../services/import_dataset.dart';
 import '../services/logger.dart';
-import 'export_controller.dart';
 import 'project_controller.dart';
-
-export 'export_controller.dart'
-    show
-        DatasetExportMode,
-        DatasetExportWorkflowResult,
-        ImportedDatasetExporter,
-        NewDatasetExporter;
 
 typedef ImportedProjectLoader =
     Future<ImportedYoloProject?> Function({
@@ -34,23 +25,15 @@ class DatasetImportWorkflowResult {
   final Object? error;
 }
 
-/// Coordinates YOLO dataset import/export with the active project state.
-class DatasetWorkflowController {
-  DatasetWorkflowController({
+/// Imports YOLO datasets into the active annotation project.
+class DatasetImportController {
+  DatasetImportController({
     required this.project,
     ImportedProjectLoader? importLoader,
-    NewDatasetExporter? newDatasetExporter,
-    ImportedDatasetExporter? importedDatasetExporter,
-  }) : _importLoader = importLoader ?? loadImportedYoloProject,
-       _exportController = ExportController(
-         project: project,
-         newDatasetExporter: newDatasetExporter,
-         importedDatasetExporter: importedDatasetExporter,
-       );
+  }) : _importLoader = importLoader ?? loadImportedYoloProject;
 
   final ProjectController project;
   final ImportedProjectLoader _importLoader;
-  final ExportController _exportController;
 
   Future<DatasetImportWorkflowResult> importDataset({
     required String yamlPath,
@@ -100,22 +83,5 @@ class DatasetWorkflowController {
         error: error,
       );
     }
-  }
-
-  Future<DatasetExportWorkflowResult> exportDataset({
-    required DatasetExportConfig config,
-    required String exportRoot,
-    required bool overwriteImported,
-    required Size? Function(String imagePath) displaySizeForImagePath,
-    required Future<Size> Function(String imagePath)
-    ensureDisplaySizeForImagePath,
-  }) {
-    return _exportController.exportDataset(
-      config: config,
-      exportRoot: exportRoot,
-      overwriteImported: overwriteImported,
-      displaySizeForImagePath: displaySizeForImagePath,
-      ensureDisplaySizeForImagePath: ensureDisplaySizeForImagePath,
-    );
   }
 }

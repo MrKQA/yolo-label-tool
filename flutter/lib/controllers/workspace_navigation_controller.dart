@@ -4,12 +4,42 @@ import 'package:flutter/widgets.dart';
 import '../models/annotation.dart';
 import '../models/shortcut.dart';
 
-class WorkspaceNavigationController {
-  String activeSection = 'label';
-  String activeTool = 'select';
-  bool sidebarCollapsed = false;
-  bool showClassLabels = true;
-  AnnotationMode annotationMode = AnnotationMode.hbb;
+class WorkspaceNavigationController extends ChangeNotifier {
+  String _activeSection = 'label';
+  String _activeTool = 'select';
+  bool _sidebarCollapsed = false;
+  bool _showClassLabels = true;
+  AnnotationMode _annotationMode = AnnotationMode.hbb;
+
+  String get activeSection => _activeSection;
+  set activeSection(String value) {
+    if (_activeSection == value) return;
+    _activeSection = value;
+    notifyListeners();
+  }
+
+  String get activeTool => _activeTool;
+  set activeTool(String value) {
+    if (_activeTool == value) return;
+    _activeTool = value;
+    notifyListeners();
+  }
+
+  bool get sidebarCollapsed => _sidebarCollapsed;
+  set sidebarCollapsed(bool value) {
+    if (_sidebarCollapsed == value) return;
+    _sidebarCollapsed = value;
+    notifyListeners();
+  }
+
+  bool get showClassLabels => _showClassLabels;
+  set showClassLabels(bool value) {
+    if (_showClassLabels == value) return;
+    _showClassLabels = value;
+    notifyListeners();
+  }
+
+  AnnotationMode get annotationMode => _annotationMode;
 
   int get pageIndex => switch (activeSection) {
     'label' => 0,
@@ -21,8 +51,10 @@ class WorkspaceNavigationController {
   };
 
   void activateAnnotationMode(AnnotationMode mode) {
-    annotationMode = mode;
-    activeTool = 'draw';
+    final changed = _annotationMode != mode || _activeTool != 'draw';
+    _annotationMode = mode;
+    _activeTool = 'draw';
+    if (changed) notifyListeners();
   }
 
   void cancelSelection() {

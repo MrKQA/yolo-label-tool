@@ -1,57 +1,16 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../../controllers/ai_annotation_controller.dart';
+import '../../controllers/collaboration_controller.dart';
+import '../../controllers/project_controller.dart';
+import '../../controllers/workspace_navigation_controller.dart';
+import '../../controllers/workspace_viewport_controller.dart';
 import '../../models/ai_assist.dart';
 import '../../models/annotation.dart';
 import '../../models/app_status.dart';
 import '../../pages/label_page.dart';
-
-/// Immutable view data required by the annotation page.
-class LabelWorkspaceData {
-  const LabelWorkspaceData({
-    required this.status,
-    required this.images,
-    required this.selectedImage,
-    required this.selectedImageIndex,
-    required this.unauthorized,
-    required this.zoom,
-    required this.viewportOffset,
-    required this.activeTool,
-    required this.activeMode,
-    required this.imageSplit,
-    required this.activeClassId,
-    required this.labelClasses,
-    required this.annotationsByImage,
-    required this.annotations,
-    required this.sam3ClickPrompts,
-    required this.sam3PreviewAnnotations,
-    required this.selectedAnnotationId,
-    required this.showClassLabels,
-    required this.aiPanelVisible,
-    required this.classesEditable,
-  });
-
-  final BridgeStatus status;
-  final List<ImageItem> images;
-  final ImageItem? selectedImage;
-  final int selectedImageIndex;
-  final bool unauthorized;
-  final double zoom;
-  final Offset viewportOffset;
-  final String activeTool;
-  final AnnotationMode activeMode;
-  final String imageSplit;
-  final int? activeClassId;
-  final List<LabelClass> labelClasses;
-  final Map<String, List<AnnotationRegion>> annotationsByImage;
-  final List<AnnotationRegion> annotations;
-  final List<Sam3ClickPromptPoint> sam3ClickPrompts;
-  final List<AnnotationRegion> sam3PreviewAnnotations;
-  final String? selectedAnnotationId;
-  final bool showClassLabels;
-  final bool aiPanelVisible;
-  final bool classesEditable;
-}
 
 /// Commands emitted by the annotation page.
 class LabelWorkspaceActions {
@@ -123,36 +82,62 @@ class LabelWorkspaceActions {
 class LabelWorkspacePage extends StatelessWidget {
   const LabelWorkspacePage({
     super.key,
-    required this.data,
+    required this.status,
+    required this.aiPanelVisible,
     required this.actions,
   });
 
-  final LabelWorkspaceData data;
+  final BridgeStatus status;
+  final bool aiPanelVisible;
   final LabelWorkspaceActions actions;
 
   @override
   Widget build(BuildContext context) {
+    final project = context.watch<ProjectController>();
+    final collaboration = context.watch<CollaborationController>();
+    final navigation = context.watch<WorkspaceNavigationController>();
+    final viewport = context.watch<WorkspaceViewportController>();
+    final ai = context.watch<AiAnnotationController>();
+    final authorized = collaboration.isImageIndexAuthorized(
+      project.selectedImageIndex,
+      project.images.length,
+    );
+    final selectedImage = authorized ? project.selectedImage : null;
+    final config = ai.config;
+    final sam3ClickMode =
+        aiPanelVisible &&
+        config != null &&
+        config.backend == AiAssistBackend.sam3 &&
+        config.sam3PromptMode == AiSam3PromptMode.click;
+    final imagePath = selectedImage?.path;
+    final prompts = sam3ClickMode && imagePath != null
+        ? ai.promptsFor(imagePath)
+        : const <Sam3ClickPromptPoint>[];
+    final preview = sam3ClickMode && imagePath != null
+        ? ai.previewFor(imagePath)?.annotations ?? const <AnnotationRegion>[]
+        : const <AnnotationRegion>[];
+
     return LabelPage(
-      status: data.status,
-      images: data.images,
-      selectedImage: data.selectedImage,
-      selectedImageIndex: data.selectedImageIndex,
-      unauthorized: data.unauthorized,
-      zoom: data.zoom,
-      viewportOffset: data.viewportOffset,
-      activeTool: data.activeTool,
-      activeMode: data.activeMode,
-      imageSplit: data.imageSplit,
-      activeClassId: data.activeClassId,
-      labelClasses: data.labelClasses,
-      annotationsByImage: data.annotationsByImage,
-      annotations: data.annotations,
-      sam3ClickPrompts: data.sam3ClickPrompts,
-      sam3PreviewAnnotations: data.sam3PreviewAnnotations,
-      selectedAnnotationId: data.selectedAnnotationId,
-      showClassLabels: data.showClassLabels,
-      aiPanelVisible: data.aiPanelVisible,
-      classesEditable: data.classesEditable,
+      status: status,
+      images: project.images,
+      selectedImage: selectedImage,
+      selectedImageIndex: project.selectedImageIndex,
+      unauthorized: collaboration.clientMode && !authorized,
+      zoom: viewport.zoom,
+      viewportOffset: viewport.offset,
+      activeTool: navigation.activeTool,
+      activeMode: navigation.annotationMode,
+      imageSplit: project.selectedImageSplit,
+      activeClassId: project.activeClassId,
+      labelClasses: project.labelClasses,
+      annotationsByImage: project.annotationsByImage,
+      annotations: authorized ? project.currentAnnotations : const [],
+      sam3ClickPrompts: prompts,
+      sam3PreviewAnnotations: preview,
+      selectedAnnotationId: project.selectedAnnotationId,
+      showClassLabels: navigation.showClassLabels,
+      aiPanelVisible: aiPanelVisible,
+      classesEditable: !collaboration.clientMode,
       onImageSelected: actions.onImageSelected,
       onImageContextMenu: actions.onImageContextMenu,
       onPointerSignal: actions.onPointerSignal,

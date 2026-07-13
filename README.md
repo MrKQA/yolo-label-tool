@@ -46,14 +46,14 @@ A YOLO image labeling, training, and video processing tool built with Flutter + 
 |   +-- lib/
 |       +-- main.dart             # App entry and global initialization
 |       +-- app.dart              # Root app widget and top-level routing
-|       +-- controllers/          # Workspace domain state controllers
+|       +-- controllers/          # Project, collaboration, AI, export and settings controllers
 |       +-- theme/                # Colors, dimensions, theme helpers
 |       +-- services/             # Logger, i18n, config DB, Rust backend, import/export helpers
 |       +-- models/               # Annotation, detection, training, shortcut, AI data models
 |       +-- pages/                # Label, train, detect, crop, database, collaboration pages
 |       |   +-- label/            # Label-page canvas, preview, toolbar, class widgets
 |       +-- widgets/              # Reusable and page-specific widgets
-|       |   +-- common/           # Navigation, overlays, workspace shell, floating messages
+|       |   +-- common/           # Provider scope, workspace shell/view, action coordinators, overlays
 |       |   +-- database/         # Database browser sidebar, table, detail widgets
 |       |   +-- detect/           # Detect panels, playback, prediction sequence widgets
 |       |   +-- label/            # Label AI panel, grid painter, tool specs
@@ -65,6 +65,11 @@ A YOLO image labeling, training, and video processing tool built with Flutter + 
 +-- datasets/                     # Export directory (configurable)
 +-- ffmpeg/                       # FFmpeg binaries (download separately)
 ```
+
+`workspace_shell.dart` only owns controller creation, lifecycle, keyboard
+dispatch, navigation orchestration, and window-local panel state. Provider
+exposes the controllers to pages, while the `workspace_*_actions.dart` files
+coordinate dialogs and multi-controller UI workflows.
 
 ## Requirements
 

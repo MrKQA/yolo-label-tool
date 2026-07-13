@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../../controllers/collaboration_controller.dart';
+import '../../controllers/project_controller.dart';
+import '../../controllers/workspace_navigation_controller.dart';
+import '../../controllers/workspace_settings_controller.dart';
 import '../../models/collaboration.dart';
-import '../../models/config.dart';
-import '../../models/shortcut.dart';
 import '../../pages/collaboration_page.dart';
 import '../../pages/crop_page.dart';
 import '../../pages/database_page.dart';
@@ -121,21 +124,8 @@ class WorkspaceTopMenu extends StatelessWidget {
   }
 }
 
-class CollaborationPageBinding {
-  const CollaborationPageBinding({
-    required this.mode,
-    required this.hostId,
-    required this.userId,
-    required this.userName,
-    required this.userColor,
-    required this.port,
-    required this.imageCount,
-    required this.assignmentStart,
-    required this.assignmentEnd,
-    required this.discoveredHosts,
-    required this.selectedHostId,
-    required this.joining,
-    required this.peers,
+class CollaborationPageActions {
+  const CollaborationPageActions({
     required this.onUserNameChanged,
     required this.onPortChanged,
     required this.onHostSelected,
@@ -145,19 +135,6 @@ class CollaborationPageBinding {
     required this.onPeerPermissionsChanged,
   });
 
-  final CollaborationMode mode;
-  final String hostId;
-  final String userId;
-  final String userName;
-  final Color userColor;
-  final int port;
-  final int imageCount;
-  final int assignmentStart;
-  final int assignmentEnd;
-  final List<CollaborationDiscoveredHost> discoveredHosts;
-  final String? selectedHostId;
-  final bool joining;
-  final List<CollaborationPeer> peers;
   final ValueChanged<String> onUserNameChanged;
   final ValueChanged<int> onPortChanged;
   final ValueChanged<String?> onHostSelected;
@@ -166,67 +143,64 @@ class CollaborationPageBinding {
   final VoidCallback onStop;
   final ValueChanged<CollaborationPeerPermissionResult>
   onPeerPermissionsChanged;
-
-  Widget build() {
-    return CollaborationPage(
-      mode: mode,
-      hostId: hostId,
-      userId: userId,
-      userName: userName,
-      userColor: userColor,
-      port: port,
-      imageCount: imageCount,
-      assignmentStart: assignmentStart,
-      assignmentEnd: assignmentEnd,
-      discoveredHosts: discoveredHosts,
-      selectedHostId: selectedHostId,
-      joining: joining,
-      peers: peers,
-      onUserNameChanged: onUserNameChanged,
-      onPortChanged: onPortChanged,
-      onHostSelected: onHostSelected,
-      onStartHost: onStartHost,
-      onJoinClient: onJoinClient,
-      onStop: onStop,
-      onPeerPermissionsChanged: onPeerPermissionsChanged,
-    );
-  }
 }
 
 class WorkspacePageStack extends StatelessWidget {
   const WorkspacePageStack({
     super.key,
-    required this.index,
     required this.labelPage,
     required this.trainPageKey,
-    required this.settings,
-    required this.shortcutConfig,
     required this.detectVideoSession,
-    required this.collaboration,
+    required this.collaborationActions,
   });
 
   static const pageCount = 6;
 
-  final int index;
   final Widget labelPage;
   final GlobalKey<TrainPageState> trainPageKey;
-  final AppSettings settings;
-  final ShortcutConfig shortcutConfig;
   final DetectVideoSession detectVideoSession;
-  final CollaborationPageBinding collaboration;
+  final CollaborationPageActions collaborationActions;
 
   @override
   Widget build(BuildContext context) {
+    final settingsController = context.watch<WorkspaceSettingsController>();
+    final collaboration = context.watch<CollaborationController>();
+    final project = context.watch<ProjectController>();
+    final navigation = context.watch<WorkspaceNavigationController>();
+    final settings = settingsController.settings;
+    final shortcuts = settingsController.shortcuts;
+    final actions = collaborationActions;
     return IndexedStack(
-      index: index,
+      index: navigation.pageIndex,
       children: [
         labelPage,
         TrainPage(key: trainPageKey, settings: settings),
         CropPage(exportPath: settings.exportPath),
-        collaboration.build(),
+        CollaborationPage(
+          mode: collaboration.mode,
+          hostId: collaboration.hostId,
+          userId: collaboration.userId,
+          userName: collaboration.userName,
+          userColor: Color(collaboration.annotatorColorValue),
+          port: collaboration.port,
+          imageCount: project.images.length,
+          assignmentStart: collaboration.assignmentStart,
+          assignmentEnd: collaboration.assignmentEnd,
+          discoveredHosts: collaboration.discoveredHosts,
+          selectedHostId: collaboration.selectedHostId,
+          joining: collaboration.joining,
+          peers: collaboration.peers,
+          onUserNameChanged: actions.onUserNameChanged,
+          onPortChanged: actions.onPortChanged,
+          onHostSelected: actions.onHostSelected,
+          onStartHost: actions.onStartHost,
+          onJoinClient: actions.onJoinClient,
+          onStop: actions.onStop,
+          onPeerPermissionsChanged: actions.onPeerPermissionsChanged,
+        ),
         DetectVideoPage(
           settings: settings,
-          shortcutConfig: shortcutConfig,
+          shortcutConfig: shortcuts,
           session: detectVideoSession,
         ),
         const DatabasePage(),

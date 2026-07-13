@@ -1,12 +1,17 @@
+import 'dart:async';
+
 import '../models/collaboration.dart';
 import '../services/annotation_database_codec.dart';
 import '../services/app_runtime.dart';
 import '../services/logger.dart';
 import '../services/path_utils.dart';
+import '../services/rust_backend.dart';
 import 'collaboration_controller.dart';
 import 'collaboration_sync_controller.dart';
 import 'project_controller.dart';
-import 'project_persistence_controller.dart';
+
+typedef ProjectDatabaseRunner =
+    Future<Map<String, dynamic>> Function(String payload);
 
 /// Coordinates annotation database serialization, persistence, and loading.
 class AnnotationDatabaseController {
@@ -14,13 +19,20 @@ class AnnotationDatabaseController {
     required this.project,
     required this.collaboration,
     required this.collaborationSync,
-    ProjectPersistenceController? persistence,
-  }) : _persistence = persistence ?? ProjectPersistenceController();
+    ProjectDatabaseRunner? saveRunner,
+    ProjectDatabaseRunner? loadRunner,
+    this.saveDelay = const Duration(milliseconds: 700),
+  }) : _saveRunner = saveRunner ?? _save,
+       _loadRunner = loadRunner ?? _load;
 
   final ProjectController project;
   final CollaborationController collaboration;
   final CollaborationSyncController collaborationSync;
-  final ProjectPersistenceController _persistence;
+  final ProjectDatabaseRunner _saveRunner;
+  final ProjectDatabaseRunner _loadRunner;
+  final Duration saveDelay;
+  Timer? _saveTimer;
+  bool _applying = false;
   bool _disposed = false;
 
   String get projectKey => annotationDatabaseProjectKey(
@@ -50,18 +62,20 @@ class AnnotationDatabaseController {
   }
 
   void scheduleSave() {
-    if (_disposed || _persistence.applying || project.images.isEmpty) {
+    if (_disposed || _applying || project.images.isEmpty) {
       return;
     }
-    _persistence.scheduleSave(saveNow);
+    _saveTimer?.cancel();
+    _saveTimer = Timer(saveDelay, () => unawaited(saveNow()));
   }
 
   void cancelScheduledSave() {
-    _persistence.cancelScheduledSave();
+    _saveTimer?.cancel();
+    _saveTimer = null;
   }
 
   Future<void> saveNow() async {
-    if (_disposed || _persistence.applying || project.images.isEmpty) {
+    if (_disposed || _applying || project.images.isEmpty) {
       return;
     }
     if (collaboration.mode == CollaborationMode.client) {
@@ -71,7 +85,7 @@ class AnnotationDatabaseController {
       return;
     }
     try {
-      final result = await _persistence.save(payload());
+      final result = await _saveRunner(payload());
       if (_disposed) {
         return;
       }
@@ -104,7 +118,7 @@ class AnnotationDatabaseController {
     final previousApplying = collaboration.applyingAnnotationSnapshot;
     collaboration.applyingAnnotationSnapshot = true;
     try {
-      final result = await _persistence.save(payload());
+      final result = await _saveRunner(payload());
       if (_disposed) {
         return;
       }
@@ -131,9 +145,9 @@ class AnnotationDatabaseController {
     if (_disposed || project.images.isEmpty) {
       return;
     }
-    await _persistence.runApplying(() async {
+    await _runApplying(() async {
       try {
-        final result = await _persistence.load(
+        final result = await _loadRunner(
           payload(includeClasses: false, includeAnnotations: false),
         );
         if (_disposed) {
@@ -172,6 +186,24 @@ class AnnotationDatabaseController {
 
   void dispose() {
     _disposed = true;
-    _persistence.dispose();
+    cancelScheduledSave();
+  }
+
+  Future<T> _runApplying<T>(Future<T> Function() action) async {
+    cancelScheduledSave();
+    _applying = true;
+    try {
+      return await action();
+    } finally {
+      _applying = false;
+    }
+  }
+
+  static Future<Map<String, dynamic>> _save(String payload) {
+    return RustBackend.saveLabelDatabase(payload: payload);
+  }
+
+  static Future<Map<String, dynamic>> _load(String payload) {
+    return RustBackend.loadLabelDatabase(payload: payload);
   }
 }
