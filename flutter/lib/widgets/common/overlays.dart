@@ -21,10 +21,11 @@ class ImportBlockingOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = semanticColors(context);
     return AbsorbPointer(
       absorbing: true,
       child: ColoredBox(
-        color: Colors.white.withValues(alpha: 0.78),
+        color: colors.page.withValues(alpha: 0.84),
         child: Center(
           child: ExcludeSemantics(
             child: ConstrainedBox(
@@ -40,12 +41,7 @@ class ImportBlockingOverlay extends StatelessWidget {
                   const SizedBox(height: 18),
                   Text(
                     message ?? t('import.waiting'),
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF111827),
-                      fontFamily: appFontFamily,
-                    ),
+                    style: Theme.of(context).textTheme.titleLarge,
                   ),
                 ],
               ),

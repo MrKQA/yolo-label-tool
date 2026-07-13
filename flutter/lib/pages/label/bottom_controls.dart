@@ -38,15 +38,19 @@ class BottomControls extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
+    final compact = useCompactWorkspaceLayout(context);
     return Container(
-      height: bottomBarHeight,
+      height: bottomBarHeightFor(context),
       decoration: BoxDecoration(
         color: appPanelColor(dark),
         border: Border(top: BorderSide(color: appBorderColor(dark))),
       ),
       child: ListView(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 12 : 24,
+          vertical: compact ? 10 : 14,
+        ),
         children: [
           _SquareIconButton(
             icon: Icons.remove,
@@ -117,7 +121,7 @@ class _ControlButton extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(right: 10),
       child: SizedBox(
-        height: 42,
+        height: workspaceControlHeightFor(context),
         width: width,
         child: OutlinedButton(
           onPressed: onPressed,
@@ -157,7 +161,7 @@ class _ZoomValue extends StatelessWidget {
       padding: const EdgeInsets.only(right: 10),
       child: SizedBox(
         width: 72,
-        height: 42,
+        height: workspaceControlHeightFor(context),
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: appControlColor(dark),
@@ -200,7 +204,7 @@ class _SquareIconButton extends StatelessWidget {
       child: Tooltip(
         message: tooltip,
         child: SizedBox.square(
-          dimension: 42,
+          dimension: workspaceControlHeightFor(context),
           child: OutlinedButton(
             onPressed: onPressed,
             style: OutlinedButton.styleFrom(

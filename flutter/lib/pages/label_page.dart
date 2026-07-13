@@ -10,7 +10,6 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
@@ -23,6 +22,7 @@ import '../models/app_status.dart';
 import '../services/collection_utils.dart';
 import '../services/i18n.dart';
 import '../theme/dimensions.dart';
+import '../theme/colors.dart';
 import '../theme/theme_helpers.dart';
 import '../widgets/label/canvas_grid_painter.dart';
 import 'label/ai_toolbar.dart';
@@ -283,6 +283,12 @@ class _ImageCanvas extends StatefulWidget {
 
 class _ImageCanvasState extends State<_ImageCanvas> {
   final FocusNode _canvasFocusNode = FocusNode(debugLabel: 'image-canvas');
+  final GlobalKey _pointerSurfaceKey = GlobalKey(
+    debugLabel: 'annotation-pointer-surface',
+  );
+  final GlobalKey _contentSurfaceKey = GlobalKey(
+    debugLabel: 'annotation-content-surface',
+  );
   Offset? _drawStart;
   Offset? _lastMovePoint;
   Rect? _draftRect;
@@ -478,6 +484,12 @@ class _ImageCanvasState extends State<_ImageCanvas> {
   }
 
   Offset _localToContentPoint(Offset localPoint) {
+    final pointerBox = _pointerSurfaceKey.currentContext?.findRenderObject();
+    final contentBox = _contentSurfaceKey.currentContext?.findRenderObject();
+    if (pointerBox is RenderBox && contentBox is RenderBox) {
+      final globalPoint = pointerBox.localToGlobal(localPoint);
+      return contentBox.globalToLocal(globalPoint);
+    }
     final inverse = Matrix4.inverted(_contentTransform());
     return MatrixUtils.transformPoint(inverse, localPoint);
   }
@@ -1349,6 +1361,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
                   fit: StackFit.expand,
                   children: [
                     Listener(
+                      key: _pointerSurfaceKey,
                       behavior: HitTestBehavior.opaque,
                       onPointerDown: _handlePointerDown,
                       onPointerMove: _handlePointerMove,
@@ -1375,6 +1388,7 @@ class _ImageCanvasState extends State<_ImageCanvas> {
                               child: Transform(
                                 transform: _contentTransform(),
                                 child: SizedBox(
+                                  key: _contentSurfaceKey,
                                   width: annotationWorkspaceWidth,
                                   height: annotationWorkspaceHeight,
                                   child: Stack(
@@ -1679,7 +1693,7 @@ class _AnnotationPainter extends CustomPainter {
 
   void _drawImageBounds(Canvas canvas, Rect placedRect) {
     final paint = Paint()
-      ..color = darkMode ? const Color(0xFF6D5BD0) : const Color(0xFFCBD5E1)
+      ..color = darkMode ? appDarkLevel6 : appLightLevel6
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1 / scale;
     canvas.drawRect(placedRect, paint);
@@ -1910,7 +1924,7 @@ class _AnnotationPainter extends CustomPainter {
       ..color = Colors.white
       ..style = PaintingStyle.fill;
     final borderPaint = Paint()
-      ..color = const Color(0xFF334155)
+      ..color = appLightLevel3
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1 / scale;
     for (final point in [
@@ -1938,7 +1952,7 @@ class _AnnotationPainter extends CustomPainter {
       ..color = Colors.white
       ..style = PaintingStyle.fill;
     final border = Paint()
-      ..color = const Color(0xFF334155)
+      ..color = appLightLevel3
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1 / scale;
     for (final point in points) {
@@ -2126,7 +2140,7 @@ class _SelectedAnnotationOverlayPainter extends CustomPainter {
       ..color = Colors.white
       ..style = PaintingStyle.fill;
     final border = Paint()
-      ..color = const Color(0xFF334155)
+      ..color = appLightLevel3
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1 / scale;
     for (final point in points) {
@@ -2146,7 +2160,7 @@ class _SelectedAnnotationOverlayPainter extends CustomPainter {
       ..color = Colors.white
       ..style = PaintingStyle.fill;
     final border = Paint()
-      ..color = const Color(0xFF334155)
+      ..color = appLightLevel3
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1 / scale;
     for (final point in points) {

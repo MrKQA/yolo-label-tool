@@ -63,20 +63,20 @@ class _FloatingMessageState extends State<FloatingMessage>
             opacity: _opacity,
             child: DecoratedBox(
               decoration: BoxDecoration(
-                color: Theme.of(context).brightness == Brightness.dark
-                    ? const Color(0xCC30205A)
-                    : const Color(0xDDFFFFFF),
+                color: panelColor(context).withValues(alpha: 0.96),
                 border: Border.all(
                   color: appBorderColor(
                     Theme.of(context).brightness == Brightness.dark,
                   ),
                 ),
                 borderRadius: BorderRadius.circular(6),
-                boxShadow: const [
+                boxShadow: [
                   BoxShadow(
                     blurRadius: 14,
-                    color: Color(0x22000000),
-                    offset: Offset(0, 4),
+                    color: Colors.black.withValues(
+                      alpha: isDarkMode(context) ? 0.30 : 0.13,
+                    ),
+                    offset: const Offset(0, 4),
                   ),
                 ],
               ),

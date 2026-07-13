@@ -69,6 +69,10 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
   final DetectVideoSession _detectVideoSession = DetectVideoSession();
   final GlobalKey<TrainPageState> _trainPageKey = GlobalKey<TrainPageState>();
   Timer? _topMenuHideTimer;
+  DateTime? _lastPreviousBoundaryNoticeAt;
+  DateTime? _lastNextBoundaryNoticeAt;
+
+  static const _imageBoundaryNoticeInterval = Duration(milliseconds: 1800);
 
   final ProjectController _project = ProjectController();
   late final AnnotationDatabaseController _annotationDatabase;
@@ -227,12 +231,18 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
           _navigation.cancelSelection();
           _project.selectAnnotation(null);
         },
-        previousImage: (step) =>
-            _projectActions.selectPreviousImage(step: step),
-        nextImage: (step) => _projectActions.selectNextImage(step: step),
-        onNoPreviousImage: () =>
-            _showFloatingMessage(t('detect.hudNoPrevious')),
-        onNoNextImage: () => _showFloatingMessage(t('detect.hudNoNext')),
+        previousImage: (step) {
+          final changed = _projectActions.selectPreviousImage(step: step);
+          if (changed) _lastPreviousBoundaryNoticeAt = null;
+          return changed;
+        },
+        nextImage: (step) {
+          final changed = _projectActions.selectNextImage(step: step);
+          if (changed) _lastNextBoundaryNoticeAt = null;
+          return changed;
+        },
+        onNoPreviousImage: () => _showImageBoundaryNotice(previous: true),
+        onNoNextImage: () => _showImageBoundaryNotice(previous: false),
         adjustZoom: _viewport.adjustZoom,
         activateMode: _annotationActions.activateMode,
         deleteSelected: _annotationActions.deleteSelected,
@@ -338,6 +348,24 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     Future<void>.delayed(const Duration(milliseconds: 950), () {
       entry.remove();
     });
+  }
+
+  void _showImageBoundaryNotice({required bool previous}) {
+    final now = DateTime.now();
+    final last = previous
+        ? _lastPreviousBoundaryNoticeAt
+        : _lastNextBoundaryNoticeAt;
+    if (last != null && now.difference(last) < _imageBoundaryNoticeInterval) {
+      return;
+    }
+    if (previous) {
+      _lastPreviousBoundaryNoticeAt = now;
+    } else {
+      _lastNextBoundaryNoticeAt = now;
+    }
+    _showFloatingMessage(
+      t(previous ? 'detect.hudNoPrevious' : 'detect.hudNoNext'),
+    );
   }
 
   void _showTopMenu() {

@@ -14,6 +14,7 @@ import '../../models/annotation.dart';
 import '../../models/app_status.dart';
 import '../../models/imported_dataset.dart';
 import '../../services/i18n.dart';
+import '../../theme/app_theme.dart';
 import '../../theme/dimensions.dart';
 import '../../theme/theme_helpers.dart';
 
@@ -45,11 +46,14 @@ class CanvasStage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final compact = useCompactWorkspaceLayout(context);
     return Listener(
       onPointerSignal: onPointerSignal,
-      child: Container(
+      child: AnimatedContainer(
+        duration: appMotionStandard,
+        curve: appMotionCurve,
         color: workspaceColor(context),
-        padding: const EdgeInsets.all(24),
+        padding: EdgeInsets.all(compact ? 12 : 20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -63,30 +67,9 @@ class CanvasStage extends StatelessWidget {
               onModeSelected: onModeSelected,
               onImageSplitChanged: onImageSplitChanged,
             ),
-            const SizedBox(height: 16),
+            SizedBox(height: compact ? 10 : 14),
             Expanded(
-              child: ClipRect(
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final alignment = Alignment(
-                      constraints.maxWidth > annotationWorkspaceWidth
-                          ? 0.0
-                          : -1.0,
-                      constraints.maxHeight > annotationWorkspaceHeight
-                          ? 0.0
-                          : -1.0,
-                    );
-                    return Align(
-                      alignment: alignment,
-                      child: SizedBox(
-                        width: annotationWorkspaceWidth,
-                        height: annotationWorkspaceHeight,
-                        child: canvas,
-                      ),
-                    );
-                  },
-                ),
-              ),
+              child: ClipRect(child: SizedBox.expand(child: canvas)),
             ),
           ],
         ),

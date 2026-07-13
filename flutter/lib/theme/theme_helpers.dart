@@ -12,10 +12,15 @@ import 'package:flutter/material.dart';
 
 import 'colors.dart';
 
-const appFontFamily = 'Microsoft YaHei';
+const appFontFamily = 'Microsoft YaHei UI';
+const appFontFamilyFallback = <String>['Microsoft YaHei', 'Segoe UI'];
 
 bool isDarkMode(BuildContext context) =>
     Theme.of(context).brightness == Brightness.dark;
+
+AppSemanticColors semanticColors(BuildContext context) =>
+    Theme.of(context).extension<AppSemanticColors>() ??
+    (isDarkMode(context) ? AppSemanticColors.dark : AppSemanticColors.light);
 
 Color panelColor(BuildContext context) => appPanelColor(isDarkMode(context));
 
@@ -30,21 +35,27 @@ Color workspaceColor(BuildContext context) =>
 Color borderColor(BuildContext context) => appBorderColor(isDarkMode(context));
 
 Color primaryTextColor(BuildContext context) =>
-    appTextColor(isDarkMode(context));
+    semanticColors(context).textPrimary;
 
-Color appPanelColor(bool dark) => dark ? appDarkPanelBackground : Colors.white;
+Color bodyTextColor(BuildContext context) => semanticColors(context).textBody;
 
-Color appControlColor(bool dark) =>
-    dark ? appDarkControlBackground : Colors.white;
+Color secondaryTextColor(BuildContext context) =>
+    semanticColors(context).textSecondary;
 
-Color appCanvasColor(bool dark) =>
-    dark ? appDarkCanvasBackground : Colors.white;
+Color placeholderTextColor(BuildContext context) =>
+    semanticColors(context).textPlaceholder;
 
-Color appWorkspaceColor(bool dark) =>
-    dark ? appDarkWorkspaceBackground : appWorkspaceBackground;
+Color disabledTextColor(BuildContext context) =>
+    semanticColors(context).borderDisabled;
 
-Color appTextColor(bool dark) =>
-    dark ? appDarkTextColor : appMutedLightTextColor;
+Color appPanelColor(bool dark) => dark ? appDarkLevel7 : appLightLevel8;
 
-Color appBorderColor(bool dark) =>
-    dark ? appDarkBorderColor : appPanelBorderColor;
+Color appControlColor(bool dark) => dark ? appDarkLevel6 : appLightLevel8;
+
+Color appCanvasColor(bool dark) => dark ? appDarkLevel8 : appLightLevel8;
+
+Color appWorkspaceColor(bool dark) => dark ? appDarkLevel8 : appLightLevel7;
+
+Color appTextColor(bool dark) => dark ? appDarkLevel2 : appLightLevel2;
+
+Color appBorderColor(bool dark) => dark ? appDarkLevel5 : appLightLevel5;

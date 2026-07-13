@@ -44,13 +44,7 @@ class WorkspaceSettingsController extends ChangeNotifier {
            languageStringsLoader ?? AppLanguageStrings.load,
        _languageStringsApplier =
            languageStringsApplier ?? setCurrentLanguageStrings,
-       _themeModeApplier =
-           themeModeApplier ??
-           ((darkMode) {
-             themeModeNotifier.value = darkMode
-                 ? ThemeMode.dark
-                 : ThemeMode.light;
-           }),
+       _themeModeApplier = themeModeApplier ?? requestAppThemeMode,
        _logLevelApplier =
            logLevelApplier ??
            ((index) => setAppLogLevel(appLogLevelFromIndex(index)));

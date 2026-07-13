@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 
 import '../services/config_store.dart';
 import '../services/i18n.dart';
+import '../theme/colors.dart';
 
 Future<void> showLogViewerDialogForContext({
   required BuildContext context,
@@ -168,7 +169,7 @@ Future<void> showLogViewerDialogForContext({
                         width: double.infinity,
                         padding: const EdgeInsets.all(12),
                         color: Theme.of(context).brightness == Brightness.dark
-                            ? const Color(0xFF090515)
+                            ? appDarkLevel8
                             : Colors.black,
                         child: Scrollbar(
                           controller: logScrollController,
@@ -178,7 +179,7 @@ Future<void> showLogViewerDialogForContext({
                             child: SelectableText(
                               logText,
                               style: const TextStyle(
-                                color: Color(0xFFE5E7EB),
+                                color: appDarkLevel3,
                                 fontFamily: 'Consolas',
                                 fontSize: 12.5,
                                 height: 1.35,

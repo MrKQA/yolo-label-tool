@@ -16,6 +16,7 @@ import 'package:percent_indicator/percent_indicator.dart';
 
 import '../../models/training.dart';
 import '../../services/i18n.dart';
+import '../../theme/colors.dart';
 import '../../theme/theme_helpers.dart';
 
 class TrainingProgressPanel extends StatelessWidget {
@@ -373,20 +374,18 @@ Widget _metricChart(
               gridData: FlGridData(
                 show: true,
                 drawVerticalLine: true,
-                getDrawingHorizontalLine: (_) =>
-                    FlLine(
-                      color: appBorderColor(
-                        Theme.of(context).brightness == Brightness.dark,
-                      ),
-                      strokeWidth: 1,
-                    ),
-                getDrawingVerticalLine: (_) =>
-                    FlLine(
-                      color: appBorderColor(
-                        Theme.of(context).brightness == Brightness.dark,
-                      ),
-                      strokeWidth: 1,
-                    ),
+                getDrawingHorizontalLine: (_) => FlLine(
+                  color: appBorderColor(
+                    Theme.of(context).brightness == Brightness.dark,
+                  ),
+                  strokeWidth: 1,
+                ),
+                getDrawingVerticalLine: (_) => FlLine(
+                  color: appBorderColor(
+                    Theme.of(context).brightness == Brightness.dark,
+                  ),
+                  strokeWidth: 1,
+                ),
               ),
               borderData: FlBorderData(
                 show: true,
@@ -467,7 +466,7 @@ class TrainingTerminalPanel extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       color: Theme.of(context).brightness == Brightness.dark
-          ? const Color(0xFF090515)
+          ? appDarkLevel8
           : Colors.black,
       child: Scrollbar(
         child: SingleChildScrollView(
@@ -475,7 +474,7 @@ class TrainingTerminalPanel extends StatelessWidget {
           child: SelectableText(
             content,
             style: const TextStyle(
-              color: Color(0xFFE5E7EB),
+              color: appDarkLevel3,
               fontFamily: 'Consolas',
               fontSize: 12.5,
               height: 1.35,

@@ -12,7 +12,6 @@
 import 'package:flutter/material.dart';
 
 import '../../services/i18n.dart';
-import '../../theme/colors.dart';
 import '../../theme/theme_helpers.dart';
 
 const databaseTableSpecs = [
@@ -20,10 +19,7 @@ const databaseTableSpecs = [
   DatabaseTableSpec('images', Icons.image_outlined),
   DatabaseTableSpec('classes', Icons.palette_outlined),
   DatabaseTableSpec('annotations', Icons.edit_note),
-  DatabaseTableSpec(
-    'collaboration_permissions',
-    Icons.verified_user_outlined,
-  ),
+  DatabaseTableSpec('collaboration_permissions', Icons.verified_user_outlined),
   DatabaseTableSpec('app_config', Icons.tune_outlined),
   DatabaseTableSpec('app_logs', Icons.article_outlined),
   DatabaseTableSpec('training_terminal_logs', Icons.terminal),
@@ -67,9 +63,7 @@ class DatabaseRowDetailPanel extends StatelessWidget {
                     const SizedBox(height: 8),
                     DecoratedBox(
                       decoration: BoxDecoration(
-                        color: dark
-                            ? const Color(0xFF120A25)
-                            : const Color(0xFFF8FAFC),
+                        color: appControlColor(dark),
                         border: Border.all(color: appBorderColor(dark)),
                         borderRadius: BorderRadius.circular(6),
                       ),
@@ -188,14 +182,11 @@ class DatabaseTreeButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final dark = Theme.of(context).brightness == Brightness.dark;
     final foreground = selected
         ? colorScheme.primary
         : Theme.of(context).colorScheme.onSurface;
     final background = selected
-        ? (dark
-              ? appDarkControlBackground
-              : const Color(0xFFEFF6FF))
+        ? colorScheme.primaryContainer
         : Colors.transparent;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),

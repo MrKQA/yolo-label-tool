@@ -12,6 +12,7 @@ import '../../pages/database_page.dart';
 import '../../pages/detect_video_page.dart';
 import '../../pages/train_page.dart';
 import '../../services/i18n.dart';
+import '../../theme/app_theme.dart';
 import 'navigation.dart';
 
 class WorkspaceTopMenuData {
@@ -170,7 +171,7 @@ class WorkspacePageStack extends StatelessWidget {
     final settings = settingsController.settings;
     final shortcuts = settingsController.shortcuts;
     final actions = collaborationActions;
-    return IndexedStack(
+    return _AnimatedWorkspaceStack(
       index: navigation.pageIndex,
       children: [
         labelPage,
@@ -205,6 +206,83 @@ class WorkspacePageStack extends StatelessWidget {
         ),
         const DatabasePage(),
       ],
+    );
+  }
+}
+
+class _AnimatedWorkspaceStack extends StatefulWidget {
+  const _AnimatedWorkspaceStack({required this.index, required this.children});
+
+  final int index;
+  final List<Widget> children;
+
+  @override
+  State<_AnimatedWorkspaceStack> createState() =>
+      _AnimatedWorkspaceStackState();
+}
+
+class _AnimatedWorkspaceStackState extends State<_AnimatedWorkspaceStack>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _opacity;
+  late final Animation<double> _scale;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: appMotionStandard,
+      value: 1,
+    );
+    final curved = CurvedAnimation(parent: _controller, curve: appMotionCurve);
+    _opacity = curved;
+    _scale = Tween<double>(begin: 0.995, end: 1).animate(curved);
+  }
+
+  @override
+  void didUpdateWidget(covariant _AnimatedWorkspaceStack oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.index != oldWidget.index) {
+      _controller.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.children.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final activeIndex = widget.index
+        .clamp(0, widget.children.length - 1)
+        .toInt();
+    return FadeTransition(
+      opacity: _opacity,
+      child: ScaleTransition(
+        scale: _scale,
+        alignment: Alignment.center,
+        child: IndexedStack(
+          index: activeIndex,
+          sizing: StackFit.expand,
+          children: [
+            for (
+              var childIndex = 0;
+              childIndex < widget.children.length;
+              childIndex++
+            )
+              TickerMode(
+                enabled: childIndex == activeIndex,
+                child: RepaintBoundary(child: widget.children[childIndex]),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }

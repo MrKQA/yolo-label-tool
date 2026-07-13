@@ -6,6 +6,7 @@ import '../../models/ai_assist.dart';
 import '../../models/shortcut.dart';
 import '../../pages/detect_video_page.dart';
 import '../../services/i18n.dart';
+import '../../theme/app_theme.dart';
 import '../../theme/dimensions.dart';
 import '../detect/video_player_widgets.dart';
 import '../label/ai_assist_panel.dart';
@@ -38,7 +39,12 @@ class WorkspaceMainLayout extends StatelessWidget {
             ],
           ),
         ),
-        if (bottomControls != null) bottomControls!,
+        AnimatedSize(
+          duration: appMotionStandard,
+          curve: appMotionCurve,
+          alignment: Alignment.bottomCenter,
+          child: bottomControls ?? const SizedBox.shrink(),
+        ),
       ],
     );
   }
@@ -46,7 +52,7 @@ class WorkspaceMainLayout extends StatelessWidget {
 
 typedef AiPanelGeometryChanged = void Function(Size size, Offset offset);
 
-class AiAssistPanelLayer extends StatelessWidget {
+class AiAssistPanelLayer extends StatefulWidget {
   const AiAssistPanelLayer({
     super.key,
     required this.requestedSize,
@@ -73,6 +79,9 @@ class AiAssistPanelLayer extends StatelessWidget {
   final Future<void> Function(AiAssistConfig config) onSave;
   final Future<void> Function(AiAssistConfig config) onAnnotateCurrent;
   final Future<void> Function(AiAssistConfig config) onAnnotateAll;
+
+  @override
+  State<AiAssistPanelLayer> createState() => _AiAssistPanelLayerState();
 
   static Size clampSize(Size size, Size viewport) {
     final maxWidth = math.min(
@@ -106,59 +115,140 @@ class AiAssistPanelLayer extends StatelessWidget {
       offset.dy.clamp(aiAssistPanelMargin, maxY).toDouble(),
     );
   }
+}
+
+class _AiAssistPanelLayerState extends State<AiAssistPanelLayer> {
+  final ValueNotifier<Offset?> _liveOffset = ValueNotifier<Offset?>(null);
+  Size? _liveSize;
+  bool _dragging = false;
+  bool _resizing = false;
+
+  @override
+  void didUpdateWidget(covariant AiAssistPanelLayer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_dragging && oldWidget.requestedOffset != widget.requestedOffset) {
+      final committedOffset = widget.requestedOffset;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted &&
+            !_dragging &&
+            widget.requestedOffset == committedOffset) {
+          _liveOffset.value = null;
+        }
+      });
+    }
+    if (!_resizing && oldWidget.requestedSize != widget.requestedSize) {
+      _liveSize = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    _liveOffset.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final viewport = Size(constraints.maxWidth, constraints.maxHeight);
-        final panelSize = clampSize(requestedSize, viewport);
+        final panelSize = AiAssistPanelLayer.clampSize(
+          _liveSize ?? widget.requestedSize,
+          viewport,
+        );
         final defaultOffset = Offset(
           math.max(
             aiAssistPanelMargin,
-            constraints.maxWidth - panelSize.width - toolbarWidth - 16,
+            constraints.maxWidth -
+                panelSize.width -
+                toolbarWidthFor(context) -
+                16,
           ),
           topMenuHeight + 18,
         );
-        final panelOffset = clampOffset(
-          requestedOffset ?? defaultOffset,
+        final panelOffset = AiAssistPanelLayer.clampOffset(
+          widget.requestedOffset ?? defaultOffset,
           viewport,
           panelSize,
         );
+        final panel = AiAssistFloatingPanel(
+          width: panelSize.width,
+          height: panelSize.height,
+          initialConfig: widget.initialConfig,
+          imageCount: widget.imageCount,
+          pythonPath: widget.pythonPath,
+          onClose: widget.onClose,
+          onDragStart: () {
+            _dragging = true;
+            _liveOffset.value = panelOffset;
+          },
+          onDrag: (delta) {
+            _liveOffset.value = AiAssistPanelLayer.clampOffset(
+              (_liveOffset.value ?? panelOffset) + delta,
+              viewport,
+              panelSize,
+            );
+          },
+          onDragEnd: () {
+            if (!_dragging) return;
+            _dragging = false;
+            widget.onGeometryChanged(
+              panelSize,
+              _liveOffset.value ?? panelOffset,
+            );
+          },
+          onResizeStart: () {
+            _resizing = true;
+            _liveSize = panelSize;
+            _liveOffset.value ??= panelOffset;
+          },
+          onResize: (delta) {
+            setState(() {
+              final currentSize = _liveSize ?? panelSize;
+              _liveSize = AiAssistPanelLayer.clampSize(
+                Size(
+                  currentSize.width + delta.dx,
+                  currentSize.height + delta.dy,
+                ),
+                viewport,
+              );
+              _liveOffset.value = AiAssistPanelLayer.clampOffset(
+                _liveOffset.value ?? panelOffset,
+                viewport,
+                _liveSize!,
+              );
+            });
+          },
+          onResizeEnd: () {
+            if (!_resizing) return;
+            _resizing = false;
+            widget.onGeometryChanged(
+              _liveSize ?? panelSize,
+              _liveOffset.value ?? panelOffset,
+            );
+          },
+          onConfigSaved: widget.onConfigSaved,
+          onSave: widget.onSave,
+          onAnnotateCurrent: widget.onAnnotateCurrent,
+          onAnnotateAll: widget.onAnnotateAll,
+        );
         return Stack(
           children: [
-            Positioned(
-              left: panelOffset.dx,
-              top: panelOffset.dy,
-              child: AiAssistFloatingPanel(
-                width: panelSize.width,
-                height: panelSize.height,
-                initialConfig: initialConfig,
-                imageCount: imageCount,
-                pythonPath: pythonPath,
-                onClose: onClose,
-                onDrag: (delta) => onGeometryChanged(
+            ValueListenableBuilder<Offset?>(
+              valueListenable: _liveOffset,
+              child: panel,
+              builder: (context, liveOffset, child) {
+                final offset = AiAssistPanelLayer.clampOffset(
+                  liveOffset ?? panelOffset,
+                  viewport,
                   panelSize,
-                  clampOffset(panelOffset + delta, viewport, panelSize),
-                ),
-                onResize: (delta) {
-                  final nextSize = clampSize(
-                    Size(
-                      panelSize.width + delta.dx,
-                      panelSize.height + delta.dy,
-                    ),
-                    viewport,
-                  );
-                  onGeometryChanged(
-                    nextSize,
-                    clampOffset(panelOffset, viewport, nextSize),
-                  );
-                },
-                onConfigSaved: onConfigSaved,
-                onSave: onSave,
-                onAnnotateCurrent: onAnnotateCurrent,
-                onAnnotateAll: onAnnotateAll,
-              ),
+                );
+                return Positioned(
+                  left: offset.dx,
+                  top: offset.dy,
+                  child: child!,
+                );
+              },
             ),
           ],
         );

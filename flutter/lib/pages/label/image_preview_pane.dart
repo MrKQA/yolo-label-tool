@@ -16,7 +16,7 @@ import 'package:flutter/services.dart';
 import '../../models/annotation.dart';
 import '../../services/i18n.dart';
 import '../../services/path_utils.dart';
-import '../../theme/colors.dart';
+import '../../theme/app_theme.dart';
 import '../../theme/dimensions.dart';
 import '../../theme/theme_helpers.dart';
 
@@ -322,7 +322,7 @@ class _ImagePreviewPaneState extends State<ImagePreviewPane> {
   }
 
   KeyEventResult _handleFilterKeyEvent(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
     }
     final key = event.logicalKey;
@@ -434,9 +434,7 @@ class _ImagePreviewPaneState extends State<ImagePreviewPane> {
   }
 
   double _previewTileExtent(BuildContext context) {
-    final previewWidth = (MediaQuery.sizeOf(context).width * 0.22)
-        .clamp(previewPaneMinWidth, previewPaneWidth)
-        .toDouble();
+    final previewWidth = previewPaneWidthFor(context);
     final tileWidth = math.max(80.0, previewWidth - 20);
     final imageHeight = math.max(72.0, (tileWidth - 12) * 0.75);
     return imageHeight + 48;
@@ -447,9 +445,7 @@ class _ImagePreviewPaneState extends State<ImagePreviewPane> {
     final dark = Theme.of(context).brightness == Brightness.dark;
     final entries = _filteredEntries();
     final total = entries.length;
-    final previewWidth = (MediaQuery.sizeOf(context).width * 0.22)
-        .clamp(previewPaneMinWidth, previewPaneWidth)
-        .toDouble();
+    final previewWidth = previewPaneWidthFor(context);
     final tileExtent = _previewTileExtent(context);
 
     return GestureDetector(
@@ -508,16 +504,24 @@ class _ImagePreviewPaneState extends State<ImagePreviewPane> {
                   SizedBox(
                     width: double.infinity,
                     child: Listener(
-                      onPointerDown: (_) => _selectFilterTextNextFrame(),
+                      onPointerDown: (_) {
+                        if (!_filterFocusNode.hasFocus) {
+                          _filterFocusNode.requestFocus();
+                        }
+                        _selectFilterTextNextFrame();
+                      },
                       child: DropdownMenu<String>(
-                        key: ValueKey(_filterValue),
                         controller: _filterController,
                         focusNode: _filterFocusNode,
                         requestFocusOnTap: true,
+                        selectOnly: false,
+                        keyboardType: TextInputType.text,
+                        textInputAction: TextInputAction.search,
                         width: previewWidth - 20,
                         initialSelection: _filterValue,
                         textStyle: Theme.of(context).textTheme.labelSmall,
                         enableFilter: true,
+                        enableSearch: true,
                         filterCallback: _filterDropdownEntries,
                         searchCallback: _searchFilterDropdownEntry,
                         inputDecorationTheme: const InputDecorationTheme(
@@ -601,12 +605,12 @@ class _PreviewTile extends StatelessWidget {
       child: GestureDetector(
         onTap: onTap,
         onSecondaryTapDown: onContextMenu,
-        child: DecoratedBox(
+        child: AnimatedContainer(
+          duration: appMotionStandard,
+          curve: appMotionCurve,
           decoration: BoxDecoration(
             color: selected
-                ? (dark
-                      ? appDarkControlBackground
-                      : const Color(0xFFEFF6FF))
+                ? colorScheme.primaryContainer
                 : appPanelColor(dark),
             border: Border.all(
               color: selected ? colorScheme.primary : appBorderColor(dark),

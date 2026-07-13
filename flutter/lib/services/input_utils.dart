@@ -11,14 +11,18 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 bool isEditableTextFocused() {
-  final context = FocusManager.instance.primaryFocus?.context;
-  if (context == null) {
-    return false;
+  final primaryFocus = FocusManager.instance.primaryFocus;
+  if (primaryFocus == null) return false;
+  for (final node in <FocusNode>[primaryFocus, ...primaryFocus.ancestors]) {
+    final context = node.context;
+    if (context == null) continue;
+    if (context.widget is EditableText ||
+        context.findAncestorWidgetOfExactType<EditableText>() != null ||
+        context.findAncestorStateOfType<EditableTextState>() != null) {
+      return true;
+    }
   }
-  if (context.widget is EditableText) {
-    return true;
-  }
-  return context.findAncestorWidgetOfExactType<EditableText>() != null;
+  return false;
 }
 
 String keyboardLabel(LogicalKeyboardKey key) {

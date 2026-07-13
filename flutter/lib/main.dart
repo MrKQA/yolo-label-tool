@@ -14,6 +14,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:video_player_win/video_player_win.dart' as video_player_win;
 
 import 'app.dart';
+import 'services/app_runtime.dart';
 import 'services/config_store.dart';
 import 'services/i18n.dart';
 import 'services/rust_library_loader.dart';
@@ -32,6 +33,7 @@ Future<void> main() async {
   );
   await _initializeRustBackend();
   ConfigStore.ensureDefaultConfig();
+  initializeAppThemeMode(ConfigStore.loadSettings().darkMode);
   runApp(const YoloLabelApp());
 }
 

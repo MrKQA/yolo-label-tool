@@ -9,6 +9,8 @@
 
 import 'package:flutter/material.dart';
 
+import '../../theme/colors.dart';
+
 class CanvasGridPainter extends CustomPainter {
   const CanvasGridPainter(this.darkMode);
 
@@ -17,7 +19,9 @@ class CanvasGridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = darkMode ? const Color(0xFF3B2A68) : const Color(0xFFE2E8F0)
+      ..color = darkMode
+          ? appDarkLevel6.withValues(alpha: 0.72)
+          : appLightLevel6.withValues(alpha: 0.76)
       ..strokeWidth = 1;
 
     const step = 32.0;

@@ -11,7 +11,7 @@
 import 'package:flutter/material.dart';
 
 import '../../services/i18n.dart';
-import '../../theme/colors.dart';
+import '../../theme/app_theme.dart';
 import '../../theme/dimensions.dart';
 import '../../theme/theme_helpers.dart';
 
@@ -80,12 +80,14 @@ class TopMenuBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final lockedColor = Theme.of(context).disabledColor;
+    final compact = MediaQuery.sizeOf(context).width < 1040;
     return MouseRegion(
       onEnter: (_) => onPointerEnter(),
       onHover: (_) => onPointerEnter(),
       onExit: (_) => onPointerExit(),
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
+        duration: appMotionStandard,
+        curve: appMotionCurve,
         height: visible ? topMenuHeight : topMenuCollapsedHeight,
         decoration: BoxDecoration(
           color: panelColor(context),
@@ -93,18 +95,21 @@ class TopMenuBar extends StatelessWidget {
         ),
         child: ClipRect(
           child: AnimatedOpacity(
-            duration: const Duration(milliseconds: 120),
+            duration: appMotionFast,
+            curve: appMotionCurve,
             opacity: visible ? 1 : 0,
             child: IgnorePointer(
               ignoring: !visible,
               child: Row(
                 children: [
-                  const SizedBox(width: 12),
-                  Text(
-                    t('app.title'),
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                  const SizedBox(width: 16),
+                  SizedBox(width: compact ? 4 : 12),
+                  if (!compact) ...[
+                    Text(
+                      t('app.title'),
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    const SizedBox(width: 12),
+                  ],
                   MenuBar(
                     style: MenuStyle(
                       backgroundColor: WidgetStatePropertyAll(
@@ -422,9 +427,12 @@ class PrimarySidebar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final collapsedWidth = collapsedSidebarWidthFor(context);
+    final expandedWidth = expandedSidebarWidthFor(context);
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 160),
-      width: collapsed ? collapsedSidebarWidth : expandedSidebarWidth,
+      duration: appMotionStandard,
+      curve: appMotionCurve,
+      width: collapsed ? collapsedWidth : expandedWidth,
       decoration: BoxDecoration(
         color: panelColor(context),
         border: Border(right: BorderSide(color: borderColor(context))),
@@ -432,7 +440,7 @@ class PrimarySidebar extends StatelessWidget {
       child: Column(
         children: [
           SizedBox(
-            height: paneHeaderHeight,
+            height: useCompactWorkspaceLayout(context) ? 48 : paneHeaderHeight,
             child: Center(
               child: Tooltip(
                 message: collapsed
@@ -477,50 +485,58 @@ class _SidebarButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final foreground = selected
-        ? colorScheme.primary
-        : primaryTextColor(context);
+        ? primaryTextColor(context)
+        : secondaryTextColor(context);
     final background = selected
-        ? (isDarkMode(context)
-              ? appDarkControlBackground
-              : const Color(0xFFEFF6FF))
+        ? colorScheme.primary.withValues(
+            alpha: isDarkMode(context) ? 0.32 : 0.15,
+          )
         : Colors.transparent;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: Tooltip(
         message: t(section.label),
-        child: Material(
-          color: background,
-          borderRadius: BorderRadius.circular(6),
-          child: InkWell(
-            onTap: onPressed,
-            borderRadius: BorderRadius.circular(6),
-            child: SizedBox(
-              height: 44,
-              child: Row(
-                mainAxisAlignment: collapsed
-                    ? MainAxisAlignment.center
-                    : MainAxisAlignment.start,
-                children: [
-                  SizedBox(width: collapsed ? 0 : 12),
-                  Icon(section.icon, color: foreground, size: 21),
-                  if (!collapsed) ...[
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        t(section.label),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: foreground,
-                          fontWeight: selected
-                              ? FontWeight.w700
-                              : FontWeight.w500,
+        child: AnimatedContainer(
+          duration: appMotionStandard,
+          curve: appMotionCurve,
+          decoration: BoxDecoration(
+            color: background,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onPressed,
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox(
+                height: useCompactWorkspaceLayout(context) ? 40 : 44,
+                child: Row(
+                  mainAxisAlignment: collapsed
+                      ? MainAxisAlignment.center
+                      : MainAxisAlignment.start,
+                  children: [
+                    const SizedBox(width: 3, height: 24),
+                    SizedBox(width: collapsed ? 0 : 9),
+                    Icon(section.icon, color: foreground, size: 21),
+                    if (!collapsed) ...[
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          t(section.label),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: foreground,
+                            fontWeight: selected
+                                ? FontWeight.w600
+                                : FontWeight.w500,
+                          ),
                         ),
                       ),
-                    ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           ),

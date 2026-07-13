@@ -16,6 +16,7 @@ import '../../pages/detect_video_page.dart';
 import '../../pages/label/bottom_controls.dart';
 import '../../pages/train_page.dart';
 import '../../services/app_runtime.dart';
+import '../../theme/app_theme.dart';
 import '../label/label_workspace_page.dart';
 import 'navigation.dart';
 import 'workspace_ai_actions.dart';
@@ -208,22 +209,51 @@ class WorkspaceShellContent extends StatelessWidget {
                     )
                   : null,
             ),
-            if (labelPage && aiPanelVisible)
-              Positioned.fill(
-                child: AiAssistPanelLayer(
-                  requestedSize: aiAssistPanelSize,
-                  requestedOffset: aiAssistPanelOffset,
-                  initialConfig: ai.config,
-                  imageCount: project.images.length,
-                  pythonPath: settings.settings.pythonPath,
-                  onClose: () => onAiPanelVisibilityChanged(false),
-                  onGeometryChanged: onAiPanelGeometryChanged,
-                  onConfigSaved: aiActions.saveConfig,
-                  onSave: aiActions.handleSave,
-                  onAnnotateCurrent: aiActions.annotateCurrentWithConfig,
-                  onAnnotateAll: aiActions.annotateAllWithConfig,
+            Positioned.fill(
+              child: IgnorePointer(
+                ignoring: !labelPage || !aiPanelVisible,
+                child: AnimatedSwitcher(
+                  duration: appMotionStandard,
+                  reverseDuration: appMotionFast,
+                  switchInCurve: appMotionCurve,
+                  switchOutCurve: appMotionCurve,
+                  transitionBuilder: (child, animation) {
+                    return FadeTransition(
+                      opacity: animation,
+                      child: ScaleTransition(
+                        scale: Tween<double>(begin: 0.985, end: 1).animate(
+                          CurvedAnimation(
+                            parent: animation,
+                            curve: appMotionCurve,
+                          ),
+                        ),
+                        alignment: Alignment.topRight,
+                        child: child,
+                      ),
+                    );
+                  },
+                  child: labelPage && aiPanelVisible
+                      ? AiAssistPanelLayer(
+                          key: const ValueKey('ai-assist-panel'),
+                          requestedSize: aiAssistPanelSize,
+                          requestedOffset: aiAssistPanelOffset,
+                          initialConfig: ai.config,
+                          imageCount: project.images.length,
+                          pythonPath: settings.settings.pythonPath,
+                          onClose: () => onAiPanelVisibilityChanged(false),
+                          onGeometryChanged: onAiPanelGeometryChanged,
+                          onConfigSaved: aiActions.saveConfig,
+                          onSave: aiActions.handleSave,
+                          onAnnotateCurrent:
+                              aiActions.annotateCurrentWithConfig,
+                          onAnnotateAll: aiActions.annotateAllWithConfig,
+                        )
+                      : const SizedBox.shrink(
+                          key: ValueKey('ai-assist-panel-hidden'),
+                        ),
                 ),
               ),
+            ),
             Positioned.fill(
               child: WorkspaceStatusLayers(
                 importingDataset: projectActions.importingDataset,

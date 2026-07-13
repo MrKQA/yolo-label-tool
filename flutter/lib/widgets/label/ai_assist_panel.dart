@@ -33,8 +33,12 @@ class AiAssistFloatingPanel extends StatefulWidget {
     required this.width,
     required this.height,
     required this.onClose,
+    required this.onDragStart,
     required this.onDrag,
+    required this.onDragEnd,
+    required this.onResizeStart,
     required this.onResize,
+    required this.onResizeEnd,
     required this.onConfigSaved,
     required this.onSave,
     required this.onAnnotateCurrent,
@@ -47,8 +51,12 @@ class AiAssistFloatingPanel extends StatefulWidget {
   final double width;
   final double height;
   final VoidCallback onClose;
+  final VoidCallback onDragStart;
   final ValueChanged<Offset> onDrag;
+  final VoidCallback onDragEnd;
+  final VoidCallback onResizeStart;
   final ValueChanged<Offset> onResize;
+  final VoidCallback onResizeEnd;
   final ValueChanged<AiAssistConfig> onConfigSaved;
   final Future<void> Function(AiAssistConfig config) onSave;
   final Future<void> Function(AiAssistConfig config) onAnnotateCurrent;
@@ -603,17 +611,18 @@ class _AiAssistFloatingPanelState extends State<AiAssistFloatingPanel> {
                         cursor: SystemMouseCursors.move,
                         child: GestureDetector(
                           behavior: HitTestBehavior.opaque,
+                          onPanStart: (_) => widget.onDragStart(),
                           onPanUpdate: (details) =>
                               widget.onDrag(details.delta),
+                          onPanEnd: (_) => widget.onDragEnd(),
+                          onPanCancel: widget.onDragEnd,
                           child: Container(
                             height: 46,
                             padding: const EdgeInsets.symmetric(horizontal: 14),
                             decoration: BoxDecoration(
                               color: appControlColor(dark),
                               border: Border(
-                                bottom: BorderSide(
-                                  color: appBorderColor(dark),
-                                ),
+                                bottom: BorderSide(color: appBorderColor(dark)),
                               ),
                             ),
                             child: Row(
@@ -749,7 +758,10 @@ class _AiAssistFloatingPanelState extends State<AiAssistFloatingPanel> {
                 cursor: SystemMouseCursors.resizeUpLeftDownRight,
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
+                  onPanStart: (_) => widget.onResizeStart(),
                   onPanUpdate: (details) => widget.onResize(details.delta),
+                  onPanEnd: (_) => widget.onResizeEnd(),
+                  onPanCancel: widget.onResizeEnd,
                   child: SizedBox(
                     width: 28,
                     height: 28,

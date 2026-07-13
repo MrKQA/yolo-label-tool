@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 
 import '../../models/annotation.dart';
 import '../../services/i18n.dart';
+import '../../theme/app_theme.dart';
 import '../../theme/dimensions.dart';
 import '../../theme/theme_helpers.dart';
 import '../../widgets/label/tool_spec.dart';
@@ -78,8 +79,10 @@ class AiToolbar extends StatelessWidget {
     final dark = Theme.of(context).brightness == Brightness.dark;
     final showAnnotations =
         selectedAnnotationId != null || activeTool == 'annotations';
-    return Container(
-      width: toolbarWidth,
+    return AnimatedContainer(
+      duration: appMotionStandard,
+      curve: appMotionCurve,
+      width: toolbarWidthFor(context),
       clipBehavior: Clip.hardEdge,
       decoration: BoxDecoration(
         color: appPanelColor(dark),
@@ -199,36 +202,46 @@ class _ToolButton extends StatelessWidget {
 
     return Tooltip(
       message: t(tool.label),
-      child: Material(
-        color: background,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(6),
-          side: BorderSide(
-            color: selected ? colorScheme.primary : appBorderColor(dark),
+      child: AnimatedContainer(
+        duration: appMotionStandard,
+        curve: appMotionCurve,
+        decoration: ShapeDecoration(
+          color: background,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(6),
+            side: BorderSide(
+              color: selected ? colorScheme.primary : appBorderColor(dark),
+            ),
           ),
         ),
-        child: InkWell(
-          onTap: onPressed,
-          borderRadius: BorderRadius.circular(6),
-          child: SizedBox(
-            height: 42,
-            child: Row(
-              children: [
-                const SizedBox(width: 12),
-                Icon(tool.icon, size: 19, color: foreground),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    t(tool.label),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: foreground,
-                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+        child: Material(
+          color: Colors.transparent,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+          child: InkWell(
+            onTap: onPressed,
+            borderRadius: BorderRadius.circular(6),
+            child: SizedBox(
+              height: useCompactWorkspaceLayout(context) ? 38 : 42,
+              child: Row(
+                children: [
+                  const SizedBox(width: 12),
+                  Icon(tool.icon, size: 19, color: foreground),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      t(tool.label),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: foreground,
+                        fontWeight: selected
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

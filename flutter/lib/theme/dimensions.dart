@@ -1,3 +1,5 @@
+import 'package:flutter/widgets.dart';
+
 // =============================================================================
 // dimensions.dart - Layout Dimensions / 布局尺寸常量
 // =============================================================================
@@ -25,3 +27,46 @@ const aiAssistPanelMinHeight = 360.0;
 const aiAssistPanelMaxWidth = 640.0;
 const aiAssistPanelMaxHeight = 760.0;
 const aiAssistPanelMargin = 12.0;
+
+bool useCompactWorkspaceLayout(BuildContext context) =>
+    MediaQuery.sizeOf(context).width < 1120 ||
+    MediaQuery.sizeOf(context).height < 720;
+
+double previewPaneWidthFor(BuildContext context) {
+  final width = MediaQuery.sizeOf(context).width;
+  if (width < 900) return previewPaneMinWidth;
+  if (width < 1120) return 144;
+  if (width < 1500) return 168;
+  if (width >= 2100) return 212;
+  return previewPaneWidth;
+}
+
+double toolbarWidthFor(BuildContext context) {
+  final width = MediaQuery.sizeOf(context).width;
+  if (width < 900) return 152;
+  if (width < 1120) return 164;
+  if (width < 1500) return 176;
+  if (width >= 2100) return 204;
+  return toolbarWidth;
+}
+
+double expandedSidebarWidthFor(BuildContext context) {
+  final width = MediaQuery.sizeOf(context).width;
+  if (width < 900) return 88;
+  if (width < 1280) return 100;
+  if (width >= 2100) return 124;
+  return expandedSidebarWidth;
+}
+
+double collapsedSidebarWidthFor(BuildContext context) =>
+    MediaQuery.sizeOf(context).width < 1120 ? 52 : collapsedSidebarWidth;
+
+double bottomBarHeightFor(BuildContext context) {
+  final height = MediaQuery.sizeOf(context).height;
+  if (height < 720) return 62;
+  if (height < 900) return 70;
+  return bottomBarHeight;
+}
+
+double workspaceControlHeightFor(BuildContext context) =>
+    MediaQuery.sizeOf(context).height < 720 ? 36 : 40;

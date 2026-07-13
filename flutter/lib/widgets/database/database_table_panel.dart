@@ -295,6 +295,7 @@ class _DatabasePaginationBar extends StatelessWidget {
     );
   }
 }
+
 class _DatabaseActionTabs extends StatelessWidget {
   const _DatabaseActionTabs({
     required this.activeAction,
@@ -355,16 +356,15 @@ class _DatabaseBrowseToolbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
-    final selected = selectedProjectId != null &&
+    final selected =
+        selectedProjectId != null &&
             projects.any((project) => project['id'] == selectedProjectId)
         ? selectedProjectId
         : '';
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
-        color: dark
-            ? const Color(0xFF1B1038)
-            : const Color(0xFFF8FAFC),
+        color: appPanelColor(dark),
         border: Border(bottom: BorderSide(color: appBorderColor(dark))),
       ),
       child: Wrap(
@@ -396,8 +396,9 @@ class _DatabaseBrowseToolbar extends StatelessWidget {
                     ),
                   ),
               ],
-              onChanged: (value) =>
-                  onProjectSelected(value == null || value.isEmpty ? null : value),
+              onChanged: (value) => onProjectSelected(
+                value == null || value.isEmpty ? null : value,
+              ),
             ),
           ),
           if (imageFilterId != null)
@@ -446,9 +447,7 @@ class _DatabaseSqlEditor extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: dark
-            ? const Color(0xFF120A25)
-            : const Color(0xFFF8FAFC),
+        color: appPanelColor(dark),
         border: Border(bottom: BorderSide(color: appBorderColor(dark))),
       ),
       child: Column(

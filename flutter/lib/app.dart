@@ -14,8 +14,8 @@ import 'models/app_status.dart';
 import 'services/app_runtime.dart';
 import 'services/i18n.dart';
 import 'src/rust/api.dart';
-import 'theme/colors.dart';
-import 'theme/theme_helpers.dart';
+import 'theme/app_theme.dart';
+import 'theme/theme_transition.dart';
 import 'widgets/common/workspace_shell.dart';
 
 class YoloLabelApp extends StatelessWidget {
@@ -33,54 +33,25 @@ class YoloLabelApp extends StatelessWidget {
               debugShowCheckedModeBanner: false,
               title: t('app.title'),
               themeMode: themeMode,
-              theme: ThemeData(
-                colorScheme: ColorScheme.fromSeed(seedColor: appBrandColor),
-                fontFamily: appFontFamily,
-                scaffoldBackgroundColor: appWorkspaceBackground,
-                useMaterial3: true,
-              ),
-              darkTheme: ThemeData(
-                colorScheme: ColorScheme.fromSeed(
-                  seedColor: appDarkBrandColor,
-                  brightness: Brightness.dark,
-                ),
-                brightness: Brightness.dark,
-                fontFamily: appFontFamily,
-                scaffoldBackgroundColor: appDarkAppBackground,
-                dialogTheme: const DialogThemeData(
-                  backgroundColor: appDarkPanelBackground,
-                  titleTextStyle: TextStyle(
-                    color: appDarkTextColor,
-                    fontFamily: appFontFamily,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                dividerTheme: const DividerThemeData(color: appDarkBorderColor),
-                menuTheme: const MenuThemeData(
-                  style: MenuStyle(
-                    backgroundColor: WidgetStatePropertyAll(
-                      appDarkPanelBackground,
+              theme: buildAppTheme(Brightness.light),
+              darkTheme: buildAppTheme(Brightness.dark),
+              themeAnimationDuration: Duration.zero,
+              themeAnimationCurve: appMotionCurve,
+              scrollBehavior: const AppScrollBehavior(),
+              builder: (context, child) {
+                final media = MediaQuery.of(context);
+                return AppThemeRippleTransition(
+                  child: MediaQuery(
+                    data: media.copyWith(
+                      textScaler: media.textScaler.clamp(
+                        minScaleFactor: 0.90,
+                        maxScaleFactor: 1.30,
+                      ),
                     ),
-                    surfaceTintColor: WidgetStatePropertyAll(
-                      Colors.transparent,
-                    ),
+                    child: child ?? const SizedBox.shrink(),
                   ),
-                ),
-                outlinedButtonTheme: OutlinedButtonThemeData(
-                  style: OutlinedButton.styleFrom(
-                    backgroundColor: appDarkControlBackground,
-                    foregroundColor: appDarkTextColor,
-                    side: const BorderSide(color: appDarkBorderColor),
-                  ),
-                ),
-                textButtonTheme: TextButtonThemeData(
-                  style: TextButton.styleFrom(
-                    foregroundColor: appDarkBrandColor,
-                  ),
-                ),
-                useMaterial3: true,
-              ),
+                );
+              },
               home: const HomePage(),
             );
           },
