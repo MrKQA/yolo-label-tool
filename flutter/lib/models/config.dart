@@ -1,3 +1,14 @@
+// =============================================================================
+// config.dart - Configuration Data Models / 配置数据模型
+// =============================================================================
+// Models for persisted app settings, recent file/folder history, training
+// preferences, YOLO export settings, label resume positions, collaboration
+// identity, and training history records.
+//
+// 持久化配置模型：应用设置、最近文件/文件夹历史、训练偏好、YOLO 导出设置、
+// 标注恢复位置、协作身份和训练历史记录。
+// =============================================================================
+
 import 'export.dart';
 
 const configRecentHistoryLimit = 20;

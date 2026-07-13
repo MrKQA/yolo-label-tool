@@ -1,3 +1,13 @@
+// =============================================================================
+// path_utils.dart - Path & File System Utilities / 路径与文件系统工具
+// =============================================================================
+// File/path helpers: fileName extraction, extension-less basename, path key
+// normalization, image file filtering, natural sort comparison, and path
+// deduplication.
+//
+// 文件/路径工具：文件名提取、去扩展名、路径键规范化、图片文件过滤、自然排序和去重。
+// =============================================================================
+
 import 'dart:io';
 
 const _imageExtensions = {'jpg', 'jpeg', 'png', 'bmp', 'webp'};

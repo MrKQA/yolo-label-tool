@@ -1,3 +1,12 @@
+// =============================================================================
+// log_viewer_dialog.dart - Application Log Viewer / 应用日志查看器
+// =============================================================================
+// Date-based log browser with date range deletion. Reads logs from the Rust
+// backend and displays them in a selectable text area.
+//
+// 按日期浏览和删除应用日志，从 Rust 后端读取并显示在可选中文本区域。
+// =============================================================================
+
 import 'package:flutter/material.dart';
 
 import '../services/config_store.dart';

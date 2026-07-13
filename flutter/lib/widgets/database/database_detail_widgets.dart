@@ -1,3 +1,14 @@
+// =============================================================================
+// database_detail_widgets.dart - Database Detail Widgets / 数据库详情组件
+// =============================================================================
+// Shared widgets for the database page: value cells with color preview, info
+// rows, tree buttons, action tabs, browse toolbar, SQL editor, pagination bar,
+// row detail panel, and resize handle.
+//
+// 数据库页共用组件：带颜色预览的值单元格、信息行、树按钮、操作标签、浏览工具栏、
+// SQL 编辑器、分页栏、行详情面板和拖拽调整手柄。
+// =============================================================================
+
 import 'package:flutter/material.dart';
 
 import '../../services/i18n.dart';

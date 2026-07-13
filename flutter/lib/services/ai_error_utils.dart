@@ -1,3 +1,13 @@
+// =============================================================================
+// ai_error_utils.dart - AI Error Classification / AI 错误分类
+// =============================================================================
+// Classifies AI inference errors into categories (OOM, SAM3 resolution,
+// missing modules, Python/Rust error, unknown) and extracts short user-readable
+// messages from exception strings.
+//
+// 将 AI 推理错误分类为 OOM、SAM3 分辨率、模块缺失等类别，并提取用户可读的简短消息。
+// =============================================================================
+
 String classifyAiFailure(Object error) {
   final text = error.toString().toLowerCase();
   if (text.contains('out of memory') ||

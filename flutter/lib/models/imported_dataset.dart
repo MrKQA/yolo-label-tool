@@ -1,3 +1,12 @@
+// =============================================================================
+// imported_dataset.dart - Imported Dataset Models / 导入数据集模型
+// =============================================================================
+// Models for parsing YOLO data.yaml files: split sources, class names, image
+// directories, and the resulting imported project snapshot.
+//
+// 解析 YOLO data.yaml 的模型：各 split 数据源、类别名、图片目录和导入后的项目快照。
+// =============================================================================
+
 import '../services/path_utils.dart';
 
 const datasetSplits = ['train', 'val', 'test'];

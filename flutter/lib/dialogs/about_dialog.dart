@@ -1,3 +1,12 @@
+// =============================================================================
+// about_dialog.dart - About Dialog / 关于对话框
+// =============================================================================
+// Displays version info, license (GPLv3), open-source purpose, and compliance
+// warning for the YOLO Label Tool.
+//
+// 显示 YOLO Label Tool 的版本、LICENSE、开源初衷和侵权合规警告。
+// =============================================================================
+
 import 'package:flutter/material.dart';
 
 import '../services/i18n.dart';

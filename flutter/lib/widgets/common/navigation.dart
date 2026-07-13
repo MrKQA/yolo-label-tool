@@ -1,3 +1,13 @@
+// =============================================================================
+// navigation.dart - Top Menu Bar & Sidebar / 顶部菜单栏与侧边栏
+// =============================================================================
+// TopMenuBar: file/open/recent menu, import/export, undo/redo, settings, help.
+// PrimarySidebar: collapsible section switcher (Label/Train/Browse/Database).
+//
+// TopMenuBar：文件/打开/最近菜单、导入导出、撤销/重做、设置、帮助。
+// PrimarySidebar：可折叠的功能区切换器。
+// =============================================================================
+
 import 'package:flutter/material.dart';
 
 import '../../services/i18n.dart';

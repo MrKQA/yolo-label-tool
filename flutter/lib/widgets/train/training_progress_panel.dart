@@ -1,3 +1,13 @@
+// =============================================================================
+// training_progress_panel.dart - Training Progress Charts / 训练进度图表
+// =============================================================================
+// Live training metric charts using fl_chart: loss curves, mAP, precision,
+// recall, LR, and system resource usage (CPU/RAM/GPU/VRAM) gauges.
+//
+// 使用 fl_chart 绘制的实时训练指标图表：loss 曲线、mAP、precision、recall、
+// LR 和系统资源使用（CPU/RAM/GPU/VRAM）仪表。
+// =============================================================================
+
 import 'dart:math' as math;
 
 import 'package:fl_chart/fl_chart.dart';

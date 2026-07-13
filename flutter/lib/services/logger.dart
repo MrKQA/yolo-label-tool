@@ -1,3 +1,12 @@
+// =============================================================================
+// logger.dart - Application Logging System / 应用日志系统
+// =============================================================================
+// Configurable log levels (debug/info/warning/error), deferred persistence
+// via ConfigStore, and convenience helpers for tagged multi-line logging.
+//
+// 可配置日志级别，通过 ConfigStore 延迟持久化，支持带标签的多行日志。
+// =============================================================================
+
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';

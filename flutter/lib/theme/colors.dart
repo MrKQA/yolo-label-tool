@@ -1,3 +1,12 @@
+// =============================================================================
+// colors.dart - Color Palette / 颜色调色板
+// =============================================================================
+// Brand colors, dark/light mode surface colors, border/control tints, and
+// the label class color palette used for annotation rendering.
+//
+// 品牌色、暗色/亮色模式面板色、边框/控件色调和标注渲染用的类别颜色调色板。
+// =============================================================================
+
 import 'package:flutter/material.dart';
 
 const appBrandColor = Color(0xFF2563EB);

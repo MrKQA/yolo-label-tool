@@ -1,3 +1,12 @@
+// =============================================================================
+// collaboration_identity.dart - Collaboration Identity Helpers / 协作身份工具
+// =============================================================================
+// Generates stable host/user identity IDs, short display labels, and
+// deterministic color values for collaboration peers.
+//
+// 生成稳定的主机/用户身份 ID、短显示标签和协作节点颜色值。
+// =============================================================================
+
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';

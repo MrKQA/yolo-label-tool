@@ -1,3 +1,12 @@
+// =============================================================================
+// color_picker_dialog.dart - Color Picker Dialog / 颜色选择器
+// =============================================================================
+// Wraps the flex_color_picker package into a convenient dialog helper used
+// for class colors, chart series colors, and theme accents.
+//
+// 将 flex_color_picker 封装为便捷弹窗，用于类别颜色、图表颜色和主题色选择。
+// =============================================================================
+
 import 'package:flex_color_picker/flex_color_picker.dart';
 import 'package:flutter/material.dart';
 

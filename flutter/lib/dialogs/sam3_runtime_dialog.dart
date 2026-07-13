@@ -1,3 +1,12 @@
+// =============================================================================
+// sam3_runtime_dialog.dart - SAM3 Runtime Configuration / SAM3 运行时配置
+// =============================================================================
+// Dialog for configuring SAM3 inference parameters: precision, encoder,
+// batch sizes, image dimensions, resize method, and torch.compile toggle.
+//
+// 配置 SAM3 推理参数：精度、编码器、batch 大小、图片尺寸、缩放方式与编译开关。
+// =============================================================================
+
 import 'package:flutter/material.dart';
 
 import '../models/ai_assist.dart';

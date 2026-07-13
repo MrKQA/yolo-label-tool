@@ -1,3 +1,13 @@
+// =============================================================================
+// import_dataset.dart - YOLO Dataset Import / YOLO 数据集导入
+// =============================================================================
+// Parses YOLO data.yaml files, discovers label files, builds the annotation
+// project snapshot (images, classes, annotations, splits) from an existing
+// YOLO dataset directory structure.
+//
+// 解析 YOLO data.yaml、发现标签文件、从已有 YOLO 数据集构建标注项目快照。
+// =============================================================================
+
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui';

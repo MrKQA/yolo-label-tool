@@ -1,4 +1,11 @@
-// AI toolbar for the label page.
+// =============================================================================
+// ai_toolbar.dart - Label Page AI Toolbar / 标注页 AI 工具栏
+// =============================================================================
+// Right-side toolbar: drawing/selection tools, class list, annotation list panel,
+// and AI assist panel toggle.
+//
+// 右侧工具栏：绘制/选择工具、类别列表、标注列表面板和 AI 辅助面板开关。
+// =============================================================================
 
 import 'package:flutter/material.dart';
 

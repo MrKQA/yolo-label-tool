@@ -1,3 +1,12 @@
+// =============================================================================
+// dataset_summary_panel.dart - Dataset Summary Panel / 数据集摘要面板
+// =============================================================================
+// Displays class count, train/val/test image counts, class imbalance ratio,
+// recommended cls_pw, and the class name list for the loaded YOLO dataset.
+//
+// 显示当前 YOLO 数据集的类别数、各 split 图片数、不均衡比、cls_pw 和类别名。
+// =============================================================================
+
 import 'package:flutter/material.dart';
 
 import '../../models/training.dart';

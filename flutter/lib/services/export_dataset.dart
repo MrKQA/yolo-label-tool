@@ -1,3 +1,12 @@
+// =============================================================================
+// export_dataset.dart - YOLO Dataset Export / YOLO 数据集导出
+// =============================================================================
+// Exports annotations to YOLO label format with class-balanced train/val/test
+// split, optional image copying, and data.yaml generation in the output directory.
+//
+// 将标注导出为 YOLO 标签格式：类别均衡的 train/val/test 划分、图片复制和 data.yaml。
+// =============================================================================
+
 import 'dart:io';
 import 'dart:ui' show Size;
 

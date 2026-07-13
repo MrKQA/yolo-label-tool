@@ -1,3 +1,14 @@
+// =============================================================================
+// overlays.dart - Full-Screen Overlay Widgets / 全屏覆盖组件
+// =============================================================================
+// ImportBlockingOverlay: semi-transparent overlay shown during dataset import
+// or AI annotation, optionally with a status message.
+// CollaborationReconnectOverlay: reconnection progress with cancel button.
+//
+// ImportBlockingOverlay：导入/AI 标注时的半透明覆盖层。
+// CollaborationReconnectOverlay：重连进度覆盖层。
+// =============================================================================
+
 import 'package:flutter/material.dart';
 
 import '../../services/i18n.dart';

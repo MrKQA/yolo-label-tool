@@ -1,3 +1,12 @@
+// =============================================================================
+// settings_dialog.dart - Application Settings Dialog / 应用设置对话框
+// =============================================================================
+// Python environment selection with validation, output/export path
+// configuration, log level control, and cache size display with clear.
+//
+// Python 环境选择与验证、训练输出/导出路径配置、日志级别控制和缓存清理。
+// =============================================================================
+
 import 'dart:convert';
 import 'dart:io';
 

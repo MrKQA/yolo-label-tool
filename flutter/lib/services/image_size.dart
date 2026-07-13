@@ -1,3 +1,12 @@
+// =============================================================================
+// image_size.dart - Image Size Computation / 图片尺寸计算
+// =============================================================================
+// Decodes image dimensions (width/height) from files while fitting into the
+// annotation workspace dimensions, with optional error handling.
+//
+// 从文件解码图片宽高，按标注工作区尺寸缩放适配，支持错误处理回调。
+// =============================================================================
+
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui';

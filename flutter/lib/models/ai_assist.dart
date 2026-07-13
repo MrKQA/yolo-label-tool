@@ -1,3 +1,12 @@
+// =============================================================================
+// ai_assist.dart - AI-Assisted Annotation Models / AI 辅助标注模型
+// =============================================================================
+// Enums and config classes for AI backends (YOLO / SAM3), output modes (HBB/OBB/SEG),
+// prompt modes (text/click), SAM3 runtime settings, and click prompt points.
+//
+// AI 后端枚举与配置：YOLO/SAM3、输出模式、提示模式、SAM3 运行时参数和点击提示点。
+// =============================================================================
+
 import 'dart:ui';
 
 import 'annotation.dart';

@@ -1,4 +1,11 @@
-// Small support types for the label page image canvas.
+// =============================================================================
+// image_canvas_support.dart - Canvas Support Types / 画布辅助类型
+// =============================================================================
+// Helper types for the image canvas: resize handles, segment vertex handles,
+// cancel-draft intent, and sampled image data for crosshair color sampling.
+//
+// 画布辅助类型：调整手柄、分割顶点手柄、取消绘制 Intent 和十字准星颜色采样。
+// =============================================================================
 
 import 'dart:typed_data';
 import 'dart:ui' as ui;

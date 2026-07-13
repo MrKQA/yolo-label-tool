@@ -1,19 +1,44 @@
+// =============================================================================
+// workspace_shell.dart - Workspace Shell / 工作区外壳
+// =============================================================================
+// Main workspace layout: top menu bar, collapsible sidebar, IndexedStack page
+// switcher, bottom controls, floating AI assist panel, and fullscreen overlays.
+// Owns all top-level state (theme, zoom, tool, section, collaboration).
+//
+// 主工作区布局：顶栏、侧边栏、页面切换器、底栏、浮动 AI 面板和全屏覆盖层。
+// 持有顶层状态：主题、缩放、工具、当前功能区、协作。
+// =============================================================================
+
 // ignore_for_file: invalid_use_of_protected_member
 
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
-import 'dart:math' as math;
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../controllers/annotation_database_controller.dart';
+import '../../controllers/ai_annotation_controller.dart';
+import '../../controllers/ai_annotation_workflow_controller.dart';
+import '../../controllers/ai_workspace_controller.dart';
+import '../../controllers/annotation_editing_controller.dart';
 import '../../controllers/collaboration_controller.dart';
+import '../../controllers/collaboration_sync_controller.dart';
+import '../../controllers/collaboration_workspace_controller.dart';
+import '../../controllers/dataset_workflow_controller.dart';
+import '../../controllers/export_controller.dart';
+import '../../controllers/project_controller.dart';
+import '../../controllers/project_session_controller.dart';
+import '../../controllers/sam3_click_workflow_controller.dart';
+import '../../controllers/workspace_navigation_controller.dart';
+import '../../controllers/workspace_settings_controller.dart';
+import '../../controllers/workspace_viewport_controller.dart';
 import '../../dialogs/about_dialog.dart';
 import '../../dialogs/color_picker_dialog.dart';
 import '../../dialogs/export_dialog.dart';
+import '../../dialogs/label_class_dialog.dart';
 import '../../dialogs/log_viewer_dialog.dart';
 import '../../dialogs/settings_dialog.dart';
 import '../../dialogs/shortcut_dialog.dart';
@@ -23,49 +48,30 @@ import '../../models/app_status.dart';
 import '../../models/annotation.dart';
 import '../../models/collaboration.dart';
 import '../../models/config.dart';
-import '../../models/detection.dart';
 import '../../models/export.dart';
 import '../../models/imported_dataset.dart';
 import '../../models/shortcut.dart';
-import '../../pages/collaboration_page.dart';
-import '../../pages/crop_page.dart';
-import '../../pages/database_page.dart';
 import '../../pages/detect_video_page.dart';
 import '../../pages/label/bottom_controls.dart';
-import '../../pages/label_page.dart';
 import '../../pages/train_page.dart';
 import '../../services/ai_error_utils.dart';
-import '../../services/ai_geometry.dart';
-import '../../services/annotation_database_codec.dart';
 import '../../services/app_runtime.dart';
-import '../../services/collaboration_codec.dart';
 import '../../services/collaboration_identity.dart';
-import '../../services/collection_utils.dart';
 import '../../services/config_store.dart';
-import '../../services/export_dataset.dart';
 import '../../services/i18n.dart';
 import '../../services/image_size.dart';
-import '../../services/import_dataset.dart';
 import '../../services/input_utils.dart';
 import '../../services/logger.dart';
 import '../../services/path_utils.dart';
-import '../../services/rust_backend.dart';
 import '../../theme/colors.dart';
 import '../../theme/dimensions.dart';
-import '../detect/video_player_widgets.dart';
-import '../label/ai_assist_panel.dart';
+import '../label/label_workspace_page.dart';
 import 'floating_message.dart';
 import 'navigation.dart';
-import 'overlays.dart';
+import 'workspace_composition.dart';
+import 'workspace_layers.dart';
 
-const _languageCode = appDefaultLanguageCode;
-const _toolbarWidth = toolbarWidth;
 const _topMenuAutoHideDelay = topMenuAutoHideDelay;
-const _aiAssistPanelMinWidth = aiAssistPanelMinWidth;
-const _aiAssistPanelMinHeight = aiAssistPanelMinHeight;
-const _aiAssistPanelMaxWidth = aiAssistPanelMaxWidth;
-const _aiAssistPanelMaxHeight = aiAssistPanelMaxHeight;
-const _aiAssistPanelMargin = aiAssistPanelMargin;
 const _labelColorPalette = labelColorPalette;
 
 const _imageTypeGroup = XTypeGroup(
@@ -88,53 +94,28 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
   final DetectVideoSession _detectVideoSession = DetectVideoSession();
   final GlobalKey<TrainPageState> _trainPageKey = GlobalKey<TrainPageState>();
   Timer? _topMenuHideTimer;
-  Timer? _databaseSaveTimer;
-  Timer? _labelResumeSaveTimer;
 
-  final List<ImageItem> _images = [];
-  final List<RecentEntry> _recentFolders = [];
-  final List<RecentEntry> _recentFiles = [];
-  final List<LabelClass> _labelClasses = [];
-  final Map<String, List<AnnotationRegion>> _annotationsByImage = {};
-  final Map<String, String> _imageSplits = {};
-  final List<List<AnnotationRegion>> _undoStack = [];
-  final List<List<AnnotationRegion>> _redoStack = [];
-  List<LanguageOption> _languageOptions = const [
-    LanguageOption(code: _languageCode, label: 'Simplified Chinese'),
-  ];
-
-  bool _sidebarCollapsed = false;
-  bool _darkMode = false;
+  final ProjectController _project = ProjectController();
+  late final ProjectSessionController _projectSession;
+  late final AnnotationDatabaseController _annotationDatabase;
+  late final DatasetWorkflowController _datasetWorkflow;
+  late final ExportController _exportController;
+  final WorkspaceNavigationController _navigation =
+      WorkspaceNavigationController();
+  static const WorkspaceShortcutResolver _shortcutResolver =
+      WorkspaceShortcutResolver();
+  late final WorkspaceShortcutDispatcher _shortcutDispatcher;
+  late final WorkspaceSettingsController _settingsController;
+  final WorkspaceViewportController _viewport = WorkspaceViewportController();
+  final AiAnnotationController _ai = AiAnnotationController();
+  late final AiAnnotationWorkflowController _aiWorkflow;
+  late final AiWorkspaceController _aiWorkspace;
+  late final Sam3ClickWorkflowController _sam3ClickWorkflow;
   bool _shortcutDialogOpen = false;
   bool _importingDataset = false;
-  bool _databaseApplying = false;
   bool _topMenuVisible = true;
   bool _videoFullscreenVisible = false;
-  bool _zoomLocked = false;
-  double _zoom = 100;
-  Offset _labelViewportOffset = Offset.zero;
-  int _selectedImageIndex = 0;
-  String _activeSection = 'label';
-  String _activeTool = 'select';
-  String _activeLanguageCode = _languageCode;
-  String? _selectedAnnotationId;
-  bool _showClassLabels = true;
   bool _aiPanelVisible = false;
-  int? _activeClassId;
-  int _classSerial = 1;
-  int _annotationSerial = 1;
-  AnnotationMode _activeAnnotationMode = AnnotationMode.hbb;
-  AnnotationRegion? _copiedAnnotation;
-  Size? _imageDisplaySize;
-  final Map<String, Size> _imageDisplaySizes = {};
-  ShortcutConfig _shortcutConfig = ShortcutConfig.defaults();
-  AppSettings _appSettings = const AppSettings.empty();
-  ImportedDataset? _importedDataset;
-  AiAssistConfig? _aiAssistConfig;
-  bool _aiAnnotating = false;
-  final Map<String, List<Sam3ClickPromptPoint>> _sam3ClickPromptsByImage = {};
-  final Map<String, Sam3ClickPreviewState> _sam3ClickPreviewsByImage = {};
-  final Map<String, Set<String>> _sam3ClickAnnotationIdsByImage = {};
   Offset? _aiAssistPanelOffset;
   Size _aiAssistPanelSize = const Size(320, 360);
   late final CollaborationController _collaboration = CollaborationController(
@@ -142,6 +123,9 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
         ? Platform.environment['USERNAME']!.trim()
         : 'User',
   );
+  late final CollaborationSyncController _collaborationSync;
+  late final CollaborationWorkspaceController _collaborationWorkspace;
+  late final AnnotationEditingController _annotationEditing;
 
   CollaborationMode get _collaborationMode => _collaboration.mode;
   String get _collaborationHostId => _collaboration.hostId;
@@ -149,44 +133,60 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
   String get _collaborationUserName => _collaboration.userName;
   int get _collaborationPort => _collaboration.port;
   int get _collaborationStartIndex => _collaboration.assignmentStart;
-  set _collaborationStartIndex(int value) =>
-      _collaboration.assignmentStart = value;
   int get _collaborationEndIndex => _collaboration.assignmentEnd;
-  set _collaborationEndIndex(int value) => _collaboration.assignmentEnd = value;
-  CollaborationPermissions get _collaborationSelfPermissions =>
-      _collaboration.selfPermissions;
-  set _collaborationSelfPermissions(CollaborationPermissions value) =>
-      _collaboration.selfPermissions = value;
   List<CollaborationPeer> get _collaborationPeers => _collaboration.peers;
   List<CollaborationDiscoveredHost> get _collaborationDiscoveredHosts =>
       _collaboration.discoveredHosts;
   String? get _selectedCollaborationHostId => _collaboration.selectedHostId;
-  bool get _applyingCollaborationAnnotationSnapshot =>
-      _collaboration.applyingAnnotationSnapshot;
-  set _applyingCollaborationAnnotationSnapshot(bool value) =>
-      _collaboration.applyingAnnotationSnapshot = value;
   bool get _collaborationJoining => _collaboration.joining;
   bool get _collaborationReconnecting => _collaboration.reconnecting;
   int get _collaborationReconnectAttempts => _collaboration.reconnectAttempts;
-  CollaborationDiscoveredHost? get _connectedCollaborationHost =>
-      _collaboration.connectedHost;
+  List<ImageItem> get _images => _project.images;
+  double get _zoom => _viewport.zoom;
+  bool get _zoomLocked => _viewport.zoomLocked;
+  Offset get _labelViewportOffset => _viewport.offset;
+  List<LanguageOption> get _languageOptions =>
+      _settingsController.languageOptions;
+  bool get _darkMode => _settingsController.darkMode;
+  String get _activeLanguageCode => _settingsController.activeLanguageCode;
+  ShortcutConfig get _shortcutConfig => _settingsController.shortcuts;
+  AppSettings get _appSettings => _settingsController.settings;
+  String get _activeSection => _navigation.activeSection;
+  set _activeSection(String value) => _navigation.activeSection = value;
+  String get _activeTool => _navigation.activeTool;
+  set _activeTool(String value) => _navigation.activeTool = value;
+  bool get _sidebarCollapsed => _navigation.sidebarCollapsed;
+  set _sidebarCollapsed(bool value) => _navigation.sidebarCollapsed = value;
+  bool get _showClassLabels => _navigation.showClassLabels;
+  set _showClassLabels(bool value) => _navigation.showClassLabels = value;
+  AnnotationMode get _activeAnnotationMode => _navigation.annotationMode;
+  List<RecentEntry> get _recentFolders => _projectSession.recentFolders;
+  List<RecentEntry> get _recentFiles => _projectSession.recentFiles;
+  List<LabelClass> get _labelClasses => _project.labelClasses;
+  Map<String, List<AnnotationRegion>> get _annotationsByImage =>
+      _project.annotationsByImage;
+  int get _selectedImageIndex => _project.selectedImageIndex;
+  String? get _selectedAnnotationId => _project.selectedAnnotationId;
+  set _selectedAnnotationId(String? value) =>
+      _project.selectedAnnotationId = value;
+  int? get _activeClassId => _project.activeClassId;
+  set _activeClassId(int? value) => _project.activeClassId = value;
+  Size? get _imageDisplaySize => _project.imageDisplaySize;
+  set _imageDisplaySize(Size? value) => _project.imageDisplaySize = value;
+  Map<String, Size> get _imageDisplaySizes => _project.imageDisplaySizes;
+  ImportedDataset? get _importedDataset => _project.importedDataset;
+  set _importedDataset(ImportedDataset? value) =>
+      _project.importedDataset = value;
+  AiAssistConfig? get _aiAssistConfig => _ai.config;
+  bool get _aiAnnotating => _ai.annotating;
 
-  ImageItem? get _selectedImage {
-    if (_images.isEmpty) {
-      return null;
-    }
-    return _images[_selectedImageIndex.clamp(0, _images.length - 1)];
-  }
+  ImageItem? get _selectedImage => _project.selectedImage;
 
   bool get _collaborationClientMode => _collaboration.clientMode;
-
-  String get _currentAnnotatorName => _collaboration.annotatorName;
 
   int get _currentAnnotatorColorValue => _collaboration.annotatorColorValue;
 
   String get _currentAnnotatorLabel => _collaboration.annotatorLabel;
-
-  String get _collaborationAuthorId => _collaboration.authorId;
 
   bool get _selectedImageAuthorized =>
       _isImageIndexAuthorized(_selectedImageIndex);
@@ -219,22 +219,22 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     if (!_sam3ClickModeActive || !_selectedImageAuthorized) {
       return const [];
     }
-    final imageKey = _selectedImageKey;
-    if (imageKey == null) {
+    final image = _selectedImage;
+    if (image == null) {
       return const [];
     }
-    return _sam3ClickPromptsByImage[imageKey] ?? const [];
+    return _ai.promptsFor(image.path);
   }
 
   List<AnnotationRegion> get _currentSam3ClickPreviewForLabel {
     if (!_sam3ClickModeActive || !_selectedImageAuthorized) {
       return const [];
     }
-    final imageKey = _selectedImageKey;
-    if (imageKey == null) {
+    final image = _selectedImage;
+    if (image == null) {
       return const [];
     }
-    return _sam3ClickPreviewsByImage[imageKey]?.annotations ?? const [];
+    return _ai.previewFor(image.path)?.annotations ?? const [];
   }
 
   bool _isImageIndexAuthorized(int zeroBasedIndex) {
@@ -242,18 +242,6 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
       zeroBasedIndex,
       _images.length,
     );
-  }
-
-  void _moveToFirstAuthorizedCollaborationImage() {
-    if (!_collaborationClientMode || _images.isEmpty) {
-      return;
-    }
-    _collaboration.normalizeAssignment(_images.length);
-    final start = _collaborationStartIndex;
-    if (!_isImageIndexAuthorized(_selectedImageIndex)) {
-      _selectedImageIndex = start - 1;
-      _selectedAnnotationId = null;
-    }
   }
 
   bool _guardProjectChangeBlocked() {
@@ -265,242 +253,110 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
   }
 
   void _clearCurrentProjectState() {
-    _labelResumeSaveTimer?.cancel();
-    _images.clear();
-    _labelClasses.clear();
-    _annotationsByImage.clear();
-    _imageSplits.clear();
-    _imageDisplaySizes.clear();
-    _sam3ClickPromptsByImage.clear();
-    _sam3ClickPreviewsByImage.clear();
-    _sam3ClickAnnotationIdsByImage.clear();
-    _undoStack.clear();
-    _redoStack.clear();
-    _importedDataset = null;
-    _copiedAnnotation = null;
-    _selectedImageIndex = 0;
-    _selectedAnnotationId = null;
-    _activeClassId = null;
-    _classSerial = 1;
-    _annotationSerial = 1;
-    _imageDisplaySize = null;
-    _labelViewportOffset = Offset.zero;
-    _zoom = 100;
-    _activeSection = 'label';
-  }
-
-  String? get _selectedImageKey {
-    final image = _selectedImage;
-    return image == null ? null : pathKey(image.path);
-  }
-
-  List<AnnotationRegion> get _currentAnnotations {
-    final imageKey = _selectedImageKey;
-    if (imageKey == null) {
-      return const [];
-    }
-    return _annotationsByImage[imageKey] ?? const [];
-  }
-
-  String get _selectedImageSplit {
-    final image = _selectedImage;
-    if (image == null) {
-      return 'train';
-    }
-    return _imageSplits[pathKey(image.path)] ?? 'train';
-  }
-
-  List<AnnotationRegion> _annotationsForImagePath(String path) {
-    return _annotationsByImage[pathKey(path)] ?? const [];
-  }
-
-  Size? _displaySizeForImagePath(String path) {
-    final key = pathKey(path);
-    return _imageDisplaySizes[key] ?? _imageDisplaySizes[path];
-  }
-
-  String _databasePayload({
-    bool includeClasses = true,
-    bool includeAnnotations = true,
-  }) {
-    return buildAnnotationDatabasePayload(
-      images: _images,
-      labelClasses: _labelClasses,
-      annotationsByImage: _annotationsByImage,
-      imageSplits: _imageSplits,
-      imageDisplaySizes: _imageDisplaySizes,
-      importedDataset: _importedDataset,
-      collaborationMode: _collaborationMode,
-      collaborationSelfPermissions: _collaborationSelfPermissions,
-      collaborationAuthorId: _collaborationAuthorId,
-      currentAnnotatorName: _currentAnnotatorName,
-      currentAnnotatorColorValue: _currentAnnotatorColorValue,
-      collaborationStartIndex: _collaborationStartIndex,
-      collaborationEndIndex: _collaborationEndIndex,
-      collaborationPeers: _collaborationPeers,
-      includeClasses: includeClasses,
-      includeAnnotations: includeAnnotations,
-    );
-  }
-
-  String _databaseProjectKey() {
-    return annotationDatabaseProjectKey(
-      importedDataset: _importedDataset,
-      images: _images,
-    );
-  }
-
-  void _scheduleAnnotationDatabaseSave() {
-    if (_databaseApplying || _images.isEmpty) {
-      return;
-    }
-    _databaseSaveTimer?.cancel();
-    _databaseSaveTimer = Timer(const Duration(milliseconds: 700), () {
-      unawaited(_saveAnnotationDatabaseNow());
+    _projectSession.cancelResumeSave();
+    _project.clear();
+    _ai.clearProject();
+    _viewport.forceReset();
+    setState(() {
+      _activeSection = 'label';
     });
   }
 
-  Future<void> _saveAnnotationDatabaseNow() async {
-    if (_databaseApplying || _images.isEmpty) {
-      return;
-    }
-    if (_collaborationMode == CollaborationMode.client) {
-      if (!_applyingCollaborationAnnotationSnapshot) {
-        this._publishCurrentCollaborationAnnotations();
-      }
-      return;
-    }
-    try {
-      final result = await RustBackend.saveLabelDatabase(
-        payload: _databasePayload(),
-      );
-      logApp(
-        'DB',
-        'Label database saved: images=${result['images'] ?? '-'}, classes=${result['classes'] ?? '-'}, annotations=${result['annotations'] ?? '-'}',
-        level: AppLogLevel.debug,
-      );
-      if (!_applyingCollaborationAnnotationSnapshot) {
-        this._publishCurrentCollaborationAnnotations();
-      }
-    } on Object catch (error) {
-      logApp(
-        'DB',
-        'Label database save failed: $error',
-        level: AppLogLevel.error,
-      );
-    }
+  String? get _selectedImageKey {
+    return _project.selectedImageKey;
   }
 
-  Future<void> _saveCollaborationAnnotationDatabaseNow(String reason) async {
-    if (_images.isEmpty || _collaborationMode == CollaborationMode.client) {
-      return;
-    }
-    final previousApplying = _applyingCollaborationAnnotationSnapshot;
-    _applyingCollaborationAnnotationSnapshot = true;
-    try {
-      final result = await RustBackend.saveLabelDatabase(
-        payload: _databasePayload(),
-      );
-      logApp(
-        'COLLAB',
-        'Collaboration data saved: reason=$reason, images=${result['images'] ?? '-'}, classes=${result['classes'] ?? '-'}, annotations=${result['annotations'] ?? '-'}',
-        level: AppLogLevel.debug,
-      );
-    } on Object catch (error) {
-      logApp(
-        'COLLAB',
-        'Collaboration data save failed: reason=$reason, error=$error',
-        level: AppLogLevel.error,
-      );
-    } finally {
-      _applyingCollaborationAnnotationSnapshot = previousApplying;
-    }
-  }
+  List<AnnotationRegion> get _currentAnnotations => _project.currentAnnotations;
 
-  Future<void> _loadAnnotationDatabaseForCurrentImages() async {
-    if (_images.isEmpty) {
-      return;
-    }
-    _databaseSaveTimer?.cancel();
-    _databaseApplying = true;
-    try {
-      final result = await RustBackend.loadLabelDatabase(
-        payload: _databasePayload(
-          includeClasses: false,
-          includeAnnotations: false,
-        ),
-      );
-      final loadedClasses = labelClassesFromDatabase(result['classes']);
-      final loadedAnnotations = annotationsFromDatabase(result['annotations'], {
-        for (final image in _images) pathKey(image.path),
-      });
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _labelClasses
-          ..clear()
-          ..addAll(loadedClasses);
-        if (loadedClasses.isNotEmpty) {
-          var maxClassId = -1;
-          for (final labelClass in loadedClasses) {
-            if (labelClass.id > maxClassId) {
-              maxClassId = labelClass.id;
-            }
-          }
-          _classSerial = maxClassId + 1;
-          if (_activeClassId == null ||
-              !_labelClasses.any((item) => item.id == _activeClassId)) {
-            _activeClassId = _labelClasses.first.id;
-          }
-        } else {
-          _classSerial = 1;
-          _activeClassId = null;
-        }
+  String get _selectedImageSplit => _project.selectedImageSplit;
 
-        for (final image in _images) {
-          final imageKey = pathKey(image.path);
-          final annotations = loadedAnnotations[imageKey];
-          if (annotations == null || annotations.isEmpty) {
-            _annotationsByImage.remove(imageKey);
-          } else {
-            _annotationsByImage[imageKey] = annotations;
-          }
-        }
-        _annotationSerial = _nextAnnotationSerial();
-        _selectedAnnotationId = null;
-        _undoStack.clear();
-        _redoStack.clear();
-      });
-      final count = loadedAnnotations.values.fold<int>(
-        0,
-        (sum, annotations) => sum + annotations.length,
-      );
-      logApp(
-        'DB',
-        'Label database loaded: classes=${loadedClasses.length}, annotations=$count',
-        level: AppLogLevel.debug,
-      );
-    } on Object catch (error) {
-      logApp(
-        'DB',
-        'Label database load failed: $error',
-        level: AppLogLevel.error,
-      );
-    } finally {
-      _databaseApplying = false;
-    }
-  }
-
-  int _nextAnnotationSerial() {
-    return nextAnnotationSerialFor(_annotationsByImage);
+  Size? _displaySizeForImagePath(String path) {
+    return _project.displaySizeForPath(path);
   }
 
   @override
   void initState() {
     super.initState();
+    _settingsController = WorkspaceSettingsController(
+      collaboration: _collaboration,
+    );
+    _projectSession = ProjectSessionController(project: _project);
+    _datasetWorkflow = DatasetWorkflowController(project: _project);
+    _exportController = ExportController(
+      project: _project,
+      trainingLauncher: _launchExportedDatasetTraining,
+    );
+    _aiWorkflow = AiAnnotationWorkflowController(
+      runtime: _ai,
+      project: _project,
+    );
+    _sam3ClickWorkflow = Sam3ClickWorkflowController(runtime: _ai);
+    _collaborationSync = CollaborationSyncController(
+      collaboration: _collaboration,
+      project: _project,
+    );
+    _annotationDatabase = AnnotationDatabaseController(
+      project: _project,
+      collaboration: _collaboration,
+      collaborationSync: _collaborationSync,
+    );
+    _aiWorkspace = AiWorkspaceController(
+      runtime: _ai,
+      workflow: _aiWorkflow,
+      project: _project,
+      collaboration: _collaboration,
+      collaborationSync: _collaborationSync,
+      annotationDatabase: _annotationDatabase,
+    );
+    _collaborationWorkspace = CollaborationWorkspaceController(
+      collaboration: _collaboration,
+      sync: _collaborationSync,
+      project: _project,
+    );
+    _annotationEditing = AnnotationEditingController(
+      project: _project,
+      collaboration: _collaboration,
+      collaborationSync: _collaborationSync,
+      onChanged: _annotationDatabase.scheduleSave,
+    );
+    _shortcutDispatcher = WorkspaceShortcutDispatcher(
+      actions: WorkspaceShortcutActions(
+        delegateBrowse: (event) =>
+            _detectVideoSession.handleShortcutKey(event, _shortcutConfig),
+        undo: _undoAnnotationChange,
+        redo: _redoAnnotationChange,
+        copy: _copySelectedAnnotation,
+        paste: _pasteAnnotation,
+        cancelSelection: () {
+          setState(() {
+            _navigation.cancelSelection();
+            _selectedAnnotationId = null;
+          });
+        },
+        previousImage: (step) => _selectPreviousImage(step: step),
+        nextImage: (step) => _selectNextImage(step: step),
+        onNoPreviousImage: () =>
+            _showFloatingMessage(t('detect.hudNoPrevious')),
+        onNoNextImage: () => _showFloatingMessage(t('detect.hudNoNext')),
+        adjustZoom: _viewport.adjustZoom,
+        activateMode: _activateAnnotationMode,
+        deleteSelected: _deleteSelectedAnnotation,
+        toggleClassLabels: () {
+          setState(() => _showClassLabels = !_showClassLabels);
+        },
+        rotateObb: _rotateSelectedAnnotation,
+        aiAnnotateCurrent: () => unawaited(_runAiAnnotateCurrent()),
+        aiAnnotateAll: () => unawaited(_runAiAnnotateAll()),
+      ),
+    );
     _detectVideoSession.addListener(_handleDetectVideoSessionChanged);
+    _collaboration.onTransportError = _handleCollaborationTransportError;
     _collaboration.addListener(_handleCollaborationControllerChanged);
+    _settingsController.addListener(_handleSettingsChanged);
+    _viewport.addListener(_handleViewportChanged);
+    _project.addListener(_handleProjectControllerChanged);
+    _projectSession.addListener(_handleProjectSessionChanged);
+    _ai.addListener(_handleAiControllerChanged);
     _loadPersistedConfig();
     _loadAvailableLanguages();
     _collaboration.startPolling(_handleCollaborationEvent);
@@ -516,14 +372,24 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
   void dispose() {
     logApp('APP', 'Shutdown requested');
     _topMenuHideTimer?.cancel();
-    _databaseSaveTimer?.cancel();
-    _labelResumeSaveTimer?.cancel();
+    _annotationDatabase.cancelScheduledSave();
     unawaited(_collaboration.stopTransport(restartDiscovery: false));
-    unawaited(_saveAnnotationDatabaseNow());
+    unawaited(_annotationDatabase.saveNow());
+    _annotationDatabase.dispose();
     _saveLabelResumePositionNow();
     appLogger.dispose();
+    _settingsController.removeListener(_handleSettingsChanged);
+    _settingsController.dispose();
+    _viewport.removeListener(_handleViewportChanged);
+    _viewport.dispose();
     _collaboration.removeListener(_handleCollaborationControllerChanged);
     _collaboration.dispose();
+    _project.removeListener(_handleProjectControllerChanged);
+    _project.dispose();
+    _projectSession.removeListener(_handleProjectSessionChanged);
+    _projectSession.dispose();
+    _ai.removeListener(_handleAiControllerChanged);
+    _ai.dispose();
     _detectVideoSession.removeListener(_handleDetectVideoSessionChanged);
     _detectVideoSession.dispose();
     _keyboardFocusNode.dispose();
@@ -546,30 +412,48 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     }
   }
 
+  void _handleSettingsChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  void _handleViewportChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  void _handleCollaborationTransportError(
+    Map<String, Object?> request,
+    Object error,
+  ) {
+    if (mounted) {
+      _showFloatingMessage(t('collab.networkError'));
+    }
+  }
+
+  void _handleProjectControllerChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  void _handleProjectSessionChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  void _handleAiControllerChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
   void _loadPersistedConfig() {
-    final history = ConfigStore.loadHistory();
-    final keybindings = ConfigStore.loadKeybindings();
-    final settings = ConfigStore.loadSettings();
-    setState(() {
-      _recentFolders
-        ..clear()
-        ..addAll(history.folders);
-      _recentFiles
-        ..clear()
-        ..addAll(history.files);
-      _shortcutConfig = keybindings;
-      _appSettings = settings;
-      _darkMode = settings.darkMode;
-      _collaboration.restoreIdentity(
-        hostId: settings.collaborationHostId,
-        userId: settings.collaborationUserId,
-      );
-    });
-    ConfigStore.saveSettings(settings);
-    themeModeNotifier.value = settings.darkMode
-        ? ThemeMode.dark
-        : ThemeMode.light;
-    setAppLogLevel(appLogLevelFromIndex(settings.logLevelIndex));
+    _projectSession.loadHistory();
+    _settingsController.loadPersisted();
     logApp(
       'APP',
       'Config loaded: recentFolders=${_recentFolders.length}, recentFiles=${_recentFiles.length}, logLevel=${appLogger.minLevel.name}',
@@ -578,181 +462,70 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
   }
 
   Future<void> _loadAvailableLanguages() async {
-    final options = await LanguageOption.loadAvailable(compare: naturalCompare);
-    if (!mounted) {
-      return;
-    }
-    setState(() => _languageOptions = options);
+    await _settingsController.loadAvailableLanguages();
   }
 
   Future<void> _changeLanguage(String code) async {
-    if (code == _activeLanguageCode) {
+    final changed = await _settingsController.changeLanguage(code);
+    if (!changed || !mounted) {
       return;
     }
-    final strings = await AppLanguageStrings.load(code);
-    if (!mounted) {
-      return;
-    }
-    setCurrentLanguageStrings(strings);
-    setState(() => _activeLanguageCode = code);
     logApp('SETTINGS', 'Language changed: $code');
     this._showTopMenu();
   }
 
-  bool _touchRecent(List<RecentEntry> items, String value) {
-    final trimmed = value.trim();
-    if (trimmed.isEmpty) {
-      return false;
-    }
-    final key = pathKey(trimmed);
-    final existingIndex = items.indexWhere((item) => pathKey(item.path) == key);
-    if (existingIndex >= 0) {
-      items.removeAt(existingIndex);
-    }
-    items.insert(0, RecentEntry(path: trimmed, timestamp: DateTime.now()));
-    if (items.length > configRecentHistoryLimit) {
-      items.removeRange(configRecentHistoryLimit, items.length);
-    }
-    return true;
-  }
-
-  void _saveHistory() {
-    ConfigStore.saveHistory(
-      HistoryConfig(folders: _recentFolders, files: _recentFiles),
-    );
-  }
-
-  void _saveKeybindings() {
-    ConfigStore.saveKeybindings(_shortcutConfig);
-  }
-
   void _saveAppSettings(AppSettings settings) {
-    final nextSettings = settings.copyWith(
-      collaborationHostId: _collaborationHostId,
-      collaborationUserId: _collaborationUserId,
-    );
-    setState(() {
-      _appSettings = nextSettings;
-      _darkMode = nextSettings.darkMode;
-    });
-    themeModeNotifier.value = nextSettings.darkMode
-        ? ThemeMode.dark
-        : ThemeMode.light;
-    ConfigStore.saveSettings(nextSettings);
+    _settingsController.saveSettings(settings);
   }
 
   void _setZoom(double value) {
-    if (_zoomLocked) {
-      return;
-    }
-    setState(() => _zoom = value.clamp(25, 400).toDouble());
+    _viewport.setZoom(value);
   }
 
   void _setLabelViewportOffset(Offset offset) {
-    if (_labelViewportOffset == offset) {
-      return;
-    }
-    setState(() => _labelViewportOffset = offset);
+    _viewport.setOffset(offset);
   }
 
   void _resetZoomAndViewport() {
-    if (_zoomLocked) {
-      return;
-    }
-    setState(() {
-      _zoom = 100;
-      _labelViewportOffset = Offset.zero;
-    });
+    _viewport.reset();
   }
 
   void _toggleZoomLock() {
-    setState(() => _zoomLocked = !_zoomLocked);
+    _viewport.toggleZoomLock();
   }
 
   void _scheduleLabelResumePositionSave() {
-    if (_images.isEmpty || _collaborationClientMode) {
-      return;
-    }
-    _labelResumeSaveTimer?.cancel();
-    _labelResumeSaveTimer = Timer(const Duration(milliseconds: 350), () {
-      _saveLabelResumePositionNow();
-    });
+    _projectSession.scheduleResumeSave(
+      projectKey: _annotationDatabase.projectKey,
+      enabled: !_collaborationClientMode,
+    );
   }
 
   void _saveLabelResumePositionNow() {
-    if (_images.isEmpty || _collaborationClientMode) {
-      return;
-    }
-    final image = _selectedImage;
-    if (image == null) {
-      return;
-    }
-    try {
-      ConfigStore.saveLabelResumePosition(
-        LabelResumePosition(
-          projectKey: _databaseProjectKey(),
-          imagePath: image.path,
-          imageIndex: _selectedImageIndex,
-          updatedAt: DateTime.now(),
-        ),
-      );
-    } on Object catch (error) {
-      logApp(
-        'LABEL',
-        'Save resume position failed: $error',
-        level: AppLogLevel.debug,
-      );
-    }
+    _projectSession.saveResumePosition(
+      projectKey: _annotationDatabase.projectKey,
+      enabled: !_collaborationClientMode,
+    );
   }
 
   void _restoreLabelResumePosition() {
-    if (_images.isEmpty || _collaborationClientMode) {
-      return;
-    }
-    try {
-      final position = ConfigStore.loadLabelResumePosition(
-        _databaseProjectKey(),
-      );
-      if (position == null) {
-        return;
-      }
-      final pathIndex = _imageIndexOfPath(position.imagePath);
-      final nextIndex = pathIndex >= 0
-          ? pathIndex
-          : position.imageIndex.clamp(0, _images.length - 1).toInt();
-      if (nextIndex == _selectedImageIndex) {
-        return;
-      }
-      setState(() {
-        _selectedImageIndex = nextIndex;
-        _selectedAnnotationId = null;
-        _undoStack.clear();
-        _redoStack.clear();
-      });
+    final nextIndex = _projectSession.restoreResumePosition(
+      projectKey: _annotationDatabase.projectKey,
+      enabled: !_collaborationClientMode,
+    );
+    if (nextIndex != null) {
       logApp(
         'LABEL',
         'Restored image position: ${nextIndex + 1}/${_images.length}',
-        level: AppLogLevel.debug,
-      );
-    } on Object catch (error) {
-      logApp(
-        'LABEL',
-        'Restore resume position failed: $error',
         level: AppLogLevel.debug,
       );
     }
   }
 
   void _selectImage(int index) {
-    if (index < 0 || index >= _images.length) {
+    if (!_project.selectImage(index)) {
       return;
     }
-    setState(() {
-      _selectedImageIndex = index;
-      _selectedAnnotationId = null;
-      _undoStack.clear();
-      _redoStack.clear();
-    });
     _scheduleLabelResumePositionSave();
   }
 
@@ -793,37 +566,26 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     if (insertAfterIndex != null) {
       final existingIndex = _imageIndexOfPath(file.path);
       if (existingIndex >= 0) {
-        if (_touchRecent(_recentFiles, file.path)) {
-          _saveHistory();
-        }
+        _projectSession.touchRecentFile(file.path);
         _selectImage(existingIndex);
         return;
       }
 
-      if (_touchRecent(_recentFiles, file.path)) {
-        _saveHistory();
-      }
+      _projectSession.touchRecentFile(file.path);
       _importedDataset = null;
       _insertImages([file.path], insertAfterIndex: insertAfterIndex);
-      await _loadAnnotationDatabaseForCurrentImages();
+      await _annotationDatabase.loadForCurrentImages();
       return;
     }
 
-    if (_touchRecent(_recentFiles, file.path)) {
-      _saveHistory();
-    }
     await _openSingleImageProject(file.path);
   }
 
   Future<void> _openSingleImageProject(String path) async {
-    setState(() {
-      _clearCurrentProjectState();
-      _images.add(ImageItem.fromPath(path));
-      _imageSplits[pathKey(path)] = 'train';
-      _activeSection = 'label';
-    });
+    _clearCurrentProjectState();
+    _projectSession.openSingleImage(path);
     logApp('LABEL', 'Single image project opened: $path');
-    await _loadAnnotationDatabaseForCurrentImages();
+    await _annotationDatabase.loadForCurrentImages();
     _scheduleLabelResumePositionSave();
   }
 
@@ -836,33 +598,14 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
       return;
     }
 
-    final files = imageFilesInDirectory(folderPath);
+    final files = _projectSession.openImageFolder(folderPath);
     logApp(
       'LABEL',
       'Open image folder: $folderPath, images=${files.length}',
       level: files.isEmpty ? AppLogLevel.warning : AppLogLevel.info,
     );
-    if (_touchRecent(_recentFolders, folderPath)) {
-      _saveHistory();
-    }
-    setState(() {
-      _images
-        ..clear()
-        ..addAll(files.map(ImageItem.fromPath));
-      _imageSplits.clear();
-      _labelClasses.clear();
-      _annotationsByImage.clear();
-      _importedDataset = null;
-      _selectedImageIndex = 0;
-      _selectedAnnotationId = null;
-      _activeClassId = null;
-      _classSerial = 1;
-      _annotationSerial = 1;
-      _undoStack.clear();
-      _redoStack.clear();
-      _activeSection = 'label';
-    });
-    await _loadAnnotationDatabaseForCurrentImages();
+    setState(() => _activeSection = 'label');
+    await _annotationDatabase.loadForCurrentImages();
     _restoreLabelResumePosition();
   }
 
@@ -871,12 +614,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
       return;
     }
     if (!Directory(path).existsSync()) {
-      setState(() {
-        _recentFolders.removeWhere(
-          (entry) => pathKey(entry.path) == pathKey(path),
-        );
-      });
-      _saveHistory();
+      _projectSession.removeRecentFolder(path);
       logApp(
         'HISTORY',
         'Removed missing recent folder: $path',
@@ -894,12 +632,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     }
     logApp('LABEL', 'Open recent file: $path');
     if (!File(path).existsSync()) {
-      setState(() {
-        _recentFiles.removeWhere(
-          (entry) => pathKey(entry.path) == pathKey(path),
-        );
-      });
-      _saveHistory();
+      _projectSession.removeRecentFile(path);
       logApp(
         'HISTORY',
         'Removed missing recent file: $path',
@@ -908,9 +641,6 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
       _showFloatingMessage(t('recent.missingFile'));
       return;
     }
-    if (_touchRecent(_recentFiles, path)) {
-      _saveHistory();
-    }
     await _openSingleImageProject(path);
   }
 
@@ -918,39 +648,25 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     if (_guardProjectChangeBlocked()) {
       return;
     }
-    final newPaths = paths
-        .where((path) => _imageIndexOfPath(path) < 0)
-        .toList(growable: false);
-    if (newPaths.isEmpty) {
+    final inserted = _project.insertImages(
+      paths,
+      insertAfterIndex: insertAfterIndex,
+    );
+    if (inserted == 0) {
       return;
     }
-    final insertIndex = insertAfterIndex == null
-        ? _images.length
-        : (insertAfterIndex + 1).clamp(0, _images.length);
-
-    setState(() {
-      _images.insertAll(insertIndex, newPaths.map(ImageItem.fromPath));
-      for (final path in newPaths) {
-        _imageSplits.putIfAbsent(pathKey(path), () => 'train');
-      }
-      _selectedImageIndex = insertIndex;
-      _selectedAnnotationId = null;
-      _undoStack.clear();
-      _redoStack.clear();
-      _activeSection = 'label';
-    });
+    setState(() => _activeSection = 'label');
     logApp(
       'LABEL',
-      'Images inserted: count=${newPaths.length}, total=${_images.length}',
+      'Images inserted: count=$inserted, total=${_images.length}',
     );
     this._broadcastCollaborationProjectSnapshot('images inserted');
     _scheduleLabelResumePositionSave();
-    _scheduleAnnotationDatabaseSave();
+    _annotationDatabase.scheduleSave();
   }
 
   int _imageIndexOfPath(String path) {
-    final key = pathKey(path);
-    return _images.indexWhere((image) => pathKey(image.path) == key);
+    return _project.imageIndexOfPath(path);
   }
 
   void _deleteImage(int index) {
@@ -962,33 +678,21 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     }
 
     final removedPath = _images[index].path;
-    setState(() {
-      final removed = _images.removeAt(index);
-      _imageSplits.remove(pathKey(removed.path));
-      _annotationsByImage.remove(pathKey(removed.path));
-      _sam3ClickPromptsByImage.remove(pathKey(removed.path));
-      _sam3ClickPreviewsByImage.remove(pathKey(removed.path));
-      _sam3ClickAnnotationIdsByImage.remove(pathKey(removed.path));
-      _selectedImageIndex = _images.isEmpty
-          ? 0
-          : _selectedImageIndex.clamp(0, _images.length - 1);
-      _selectedAnnotationId = null;
-      _undoStack.clear();
-      _redoStack.clear();
-    });
+    final removed = _project.deleteImage(index);
+    if (removed == null) {
+      return;
+    }
+    _ai.clearImage(removed.path);
     logApp('LABEL', 'Image removed: $removedPath, total=${_images.length}');
     this._broadcastCollaborationProjectSnapshot('image deleted');
     _scheduleLabelResumePositionSave();
-    _scheduleAnnotationDatabaseSave();
+    _annotationDatabase.scheduleSave();
   }
 
   void _setSelectedImageSplit(String split) {
-    final imageKey = _selectedImageKey;
-    if (imageKey == null || !datasetSplits.contains(split)) {
-      return;
+    if (_project.setSelectedImageSplit(split, datasetSplits.toSet())) {
+      _annotationDatabase.scheduleSave();
     }
-    setState(() => _imageSplits[imageKey] = split);
-    _scheduleAnnotationDatabaseSave();
   }
 
   Future<void> _showImageContextMenu(TapDownDetails details, int? index) async {
@@ -1042,60 +746,27 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     setState(() => _importingDataset = true);
     await WidgetsBinding.instance.endOfFrame;
     try {
-      logApp('IMPORT', 'Dataset import started: ${file.path}');
-      final project = await loadImportedYoloProject(
+      final result = await _datasetWorkflow.importDataset(
         yamlPath: file.path,
         ensureImageDisplaySize: this._computeImageDisplaySize,
       );
-      if (project == null) {
-        logApp(
-          'IMPORT',
-          'Dataset import found no images: ${file.path}',
-          level: AppLogLevel.warning,
-        );
-        _showFloatingMessage(t('import.noImages'));
+      if (!mounted) {
         return;
       }
-
-      setState(() {
-        _images
-          ..clear()
-          ..addAll(project.images);
-        _annotationsByImage
-          ..clear()
-          ..addAll(project.annotationsByImage);
-        _imageSplits
-          ..clear()
-          ..addAll(project.imageSplits);
-        _labelClasses
-          ..clear()
-          ..addAll(project.labelClasses);
-        _importedDataset = project.dataset;
-        _classSerial = project.classSerial;
-        _annotationSerial = project.annotationSerial;
-        _activeClassId = project.labelClasses.isEmpty
-            ? null
-            : project.labelClasses.first.id;
-        _selectedImageIndex = 0;
-        _selectedAnnotationId = null;
-        _undoStack.clear();
-        _redoStack.clear();
-        _activeSection = 'label';
-      });
-      logApp(
-        'IMPORT',
-        'Dataset import completed: images=${project.images.length}, classes=${project.labelClasses.length}, annotations=${project.annotationCount}, yaml=${file.path}',
-      );
-      _restoreLabelResumePosition();
-      unawaited(_saveAnnotationDatabaseNow());
-      _showFloatingMessage('${t('import.done')} (${project.images.length})');
-    } on Object catch (error) {
-      logApp(
-        'IMPORT',
-        'Dataset import failed: ${file.path}, error=$error',
-        level: AppLogLevel.error,
-      );
-      _showFloatingMessage(t('import.failed'));
+      switch (result.status) {
+        case DatasetImportStatus.imported:
+          setState(() => _activeSection = 'label');
+          _restoreLabelResumePosition();
+          unawaited(_annotationDatabase.saveNow());
+          _showFloatingMessage('${t('import.done')} (${result.imageCount})');
+          break;
+        case DatasetImportStatus.noImages:
+          _showFloatingMessage(t('import.noImages'));
+          break;
+        case DatasetImportStatus.failed:
+          _showFloatingMessage(t('import.failed'));
+          break;
+      }
     } finally {
       if (mounted) {
         setState(() => _importingDataset = false);
@@ -1113,95 +784,8 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     });
   }
 
-  Size _clampAiAssistPanelSize(Size size, Size viewport) {
-    final maxWidth = math.min(
-      _aiAssistPanelMaxWidth,
-      math.max(
-        _aiAssistPanelMinWidth,
-        viewport.width - _aiAssistPanelMargin * 2,
-      ),
-    );
-    final maxHeight = math.min(
-      _aiAssistPanelMaxHeight,
-      math.max(
-        _aiAssistPanelMinHeight,
-        viewport.height - _aiAssistPanelMargin * 2,
-      ),
-    );
-    return Size(
-      size.width.clamp(_aiAssistPanelMinWidth, maxWidth).toDouble(),
-      size.height.clamp(_aiAssistPanelMinHeight, maxHeight).toDouble(),
-    );
-  }
-
-  Offset _clampAiAssistPanelOffset(
-    Offset offset,
-    Size viewport,
-    Size panelSize,
-  ) {
-    final maxX = math.max(
-      _aiAssistPanelMargin,
-      viewport.width - panelSize.width - _aiAssistPanelMargin,
-    );
-    final maxY = math.max(
-      _aiAssistPanelMargin,
-      viewport.height - panelSize.height - _aiAssistPanelMargin,
-    );
-    return Offset(
-      offset.dx.clamp(_aiAssistPanelMargin, maxX).toDouble(),
-      offset.dy.clamp(_aiAssistPanelMargin, maxY).toDouble(),
-    );
-  }
-
-  void _moveAiAssistPanel(
-    Offset delta,
-    Size viewport,
-    Size panelSize,
-    Offset fallbackOffset,
-  ) {
-    setState(() {
-      final current = _aiAssistPanelOffset ?? fallbackOffset;
-      _aiAssistPanelOffset = _clampAiAssistPanelOffset(
-        current + delta,
-        viewport,
-        panelSize,
-      );
-    });
-  }
-
-  void _resizeAiAssistPanel(
-    Offset delta,
-    Size viewport,
-    Size panelSize,
-    Offset fallbackOffset,
-  ) {
-    setState(() {
-      final currentOffset = _aiAssistPanelOffset ?? fallbackOffset;
-      final nextSize = _clampAiAssistPanelSize(
-        Size(panelSize.width + delta.dx, panelSize.height + delta.dy),
-        viewport,
-      );
-      _aiAssistPanelSize = nextSize;
-      _aiAssistPanelOffset = _clampAiAssistPanelOffset(
-        currentOffset,
-        viewport,
-        nextSize,
-      );
-    });
-  }
-
   void _saveAiAssistConfig(AiAssistConfig config) {
-    setState(() => _aiAssistConfig = config);
-    if (config.backend == AiAssistBackend.sam3) {
-      ConfigStore.saveLastSam3ModelPath(config.modelPath);
-    }
-    final sam3Detail = config.backend == AiAssistBackend.sam3
-        ? ', sam3Mode=${config.sam3OutputMode.wireName}, prompt=${config.sam3PromptMode.wireName}, ${config.sam3Runtime.logSummary}'
-        : '';
-    logApp(
-      'AI',
-      'AI assist config saved: backend=${config.backend.wireName}, model=${fileName(config.modelPath)}, classes=${config.selectedClassIds.length}, conf=${config.confThreshold.toStringAsFixed(2)}, imgsz=${config.imageSize}, range=${config.startIndex}-${config.endIndex}$sam3Detail',
-    );
+    _aiWorkspace.saveConfig(config);
   }
 
   Future<AiAssistConfig?> _ensureAiAssistConfig() async {
@@ -1251,14 +835,8 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     ], config);
   }
 
-  String _sam3ClickPointsTextForImage(String imagePath) {
-    final points = _sam3ClickPromptsByImage[pathKey(imagePath)] ?? const [];
-    return points.map((point) => point.wireLine).join('\n');
-  }
-
   bool _sam3ClickHasPositivePoint(String imagePath) {
-    final points = _sam3ClickPromptsByImage[pathKey(imagePath)] ?? const [];
-    return points.any((point) => point.positive);
+    return _ai.hasPositivePoint(imagePath);
   }
 
   Future<bool> _handleSam3ClickPrompt(
@@ -1284,17 +862,19 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
       _showFloatingMessage(t('ai.annotating'));
       return true;
     }
-    final point = Sam3ClickPromptPoint(
-      x: (imagePoint.dx / imageDisplaySize.width).clamp(0.0, 1.0).toDouble(),
-      y: (imagePoint.dy / imageDisplaySize.height).clamp(0.0, 1.0).toDouble(),
+    final addition = _sam3ClickWorkflow.addPrompt(
+      imagePath: image.path,
+      imagePoint: imagePoint,
+      displaySize: imageDisplaySize,
       positive: positive,
     );
-    final points = _sam3ClickPromptsByImage.putIfAbsent(imageKey, () => []);
-    points.add(point);
-    setState(() {});
+    if (addition == null) {
+      return false;
+    }
+    final point = addition.point;
     logApp(
       'AI',
-      'SAM3 click prompt added: image=${image.name}, point=${point.x.toStringAsFixed(4)},${point.y.toStringAsFixed(4)}, positive=$positive, total=${points.length}',
+      'SAM3 click prompt added: image=${image.name}, point=${point.x.toStringAsFixed(4)},${point.y.toStringAsFixed(4)}, positive=$positive, total=${addition.count}',
       level: AppLogLevel.debug,
     );
     if (_sam3ClickHasPositivePoint(image.path)) {
@@ -1315,76 +895,39 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
         config.sam3PromptMode != AiSam3PromptMode.click) {
       return;
     }
-    if (_appSettings.pythonPath.trim().isEmpty) {
-      logApp(
-        'AI',
-        'SAM3 click preview blocked: Python path is empty',
-        level: AppLogLevel.warning,
-      );
-      _showFloatingMessage(t('detect.pythonNotConfigured'));
-      return;
-    }
-    final samClickPointsText = _sam3ClickPointsTextForImage(image.path);
-    if (samClickPointsText.trim().isEmpty ||
-        !_sam3ClickHasPositivePoint(image.path)) {
-      logApp(
-        'AI',
-        'SAM3 click preview blocked: no positive click prompt points',
-        level: AppLogLevel.warning,
-      );
-      _showFloatingMessage(t('ai.sam3ClickRequired'));
-      return;
-    }
-    logApp(
-      'AI',
-      'SAM3 click preview started: image=${image.name}, mode=${config.sam3OutputMode.wireName}, clickPoints=${samClickPointsText.trim().split('\n').length}, ${config.sam3Runtime.logSummary}',
-    );
-    setState(() => _aiAnnotating = true);
-    await WidgetsBinding.instance.endOfFrame;
     try {
-      final result = await RustBackend.aiAnnotateImage(
-        backend: config.backend.wireName,
-        pythonPath: _appSettings.pythonPath.trim(),
-        modelPath: config.modelPath,
-        inputPath: image.path,
-        classIds: config.selectedClassIds.toList()..sort(),
-        confThreshold: config.confThreshold,
-        iouThreshold: 0.45,
-        imgsz: config.imageSize,
-        device: 'auto',
-        samMode: AiSam3OutputMode.seg.wireName,
-        samPromptMode: config.sam3PromptMode.wireName,
-        promptsText: config.sam3PromptText,
-        samClickPointsText: samClickPointsText,
-        samPrecision: config.sam3Runtime.precision,
-        samEncoder: config.sam3Runtime.encoder,
-        samImageBatchSize: config.sam3Runtime.imageBatchSize,
-        samVideoBatchSize: config.sam3Runtime.videoBatchSize,
-        samInteractiveBatchSize: config.sam3Runtime.interactiveBatchSize,
-        samMaxImageWidth: config.sam3Runtime.maxImageWidth,
-        samMaxImageHeight: config.sam3Runtime.maxImageHeight,
-        samResizeMethod: config.sam3Runtime.resizeMethod,
-        samCompile: config.sam3Runtime.compile,
+      await _sam3ClickWorkflow.runPreview(
+        config: config,
+        pythonPath: _appSettings.pythonPath,
+        imagePath: image.path,
+        classId: _activeClassId ?? -1,
+        displaySizeResolver: this._computeImageDisplaySize,
+        beforeRun: () => WidgetsBinding.instance.endOfFrame,
       );
-      final displaySize = await this._computeImageDisplaySize(image.path);
-      final annotations = _sam3PreviewAnnotationsFromResult(
-        result: result,
-        displaySize: displaySize,
-      );
-      if (!mounted) {
-        return;
+    } on Sam3ClickWorkflowException catch (error) {
+      switch (error.failure) {
+        case Sam3ClickWorkflowFailure.busy:
+          _showFloatingMessage(t('ai.annotating'));
+          return;
+        case Sam3ClickWorkflowFailure.pythonNotConfigured:
+          logApp(
+            'AI',
+            'SAM3 click preview blocked: Python path is empty',
+            level: AppLogLevel.warning,
+          );
+          _showFloatingMessage(t('detect.pythonNotConfigured'));
+          return;
+        case Sam3ClickWorkflowFailure.positivePointRequired:
+          logApp(
+            'AI',
+            'SAM3 click preview blocked: no positive click prompt points',
+            level: AppLogLevel.warning,
+          );
+          _showFloatingMessage(t('ai.sam3ClickRequired'));
+          return;
+        case Sam3ClickWorkflowFailure.invalidConfig:
+          return;
       }
-      setState(() {
-        _sam3ClickPreviewsByImage[imageKey] = Sam3ClickPreviewState(
-          result: result,
-          displaySize: displaySize,
-          annotations: annotations,
-        );
-      });
-      logApp(
-        'AI',
-        'SAM3 click preview updated: image=${image.name}, masks=${result.masks.length}, preview=${annotations.length}',
-      );
     } on Object catch (error) {
       final failure = classifyAiFailure(error);
       logApp(
@@ -1399,46 +942,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
         prefix: 'detail: ',
       );
       _showFloatingMessage('${t('ai.failed')}: ${shortAiError(error)}');
-    } finally {
-      if (mounted) {
-        setState(() => _aiAnnotating = false);
-      }
     }
-  }
-
-  List<AnnotationRegion> _sam3PreviewAnnotationsFromResult({
-    required AiAnnotationResult result,
-    required Size displaySize,
-  }) {
-    if (result.width <= 0 || result.height <= 0) {
-      return const [];
-    }
-    final annotations = <AnnotationRegion>[];
-    for (var index = 0; index < result.masks.length; index += 1) {
-      final mask = result.masks[index];
-      final points = scaleAiPoints(
-        mask.points,
-        sourceSize: Size(result.width, result.height),
-        displaySize: displaySize,
-      );
-      if (points.length < 3) {
-        continue;
-      }
-      final bounds = pointsBounds(points).intersect(Offset.zero & displaySize);
-      if (bounds.width < 2 || bounds.height < 2) {
-        continue;
-      }
-      annotations.add(
-        AnnotationRegion(
-          id: 'sam3_preview_$index',
-          mode: AnnotationMode.seg,
-          rect: bounds,
-          classId: _activeClassId ?? -1,
-          points: points,
-        ),
-      );
-    }
-    return annotations;
   }
 
   Future<void> _commitSam3ClickPreview(AiAssistConfig config) async {
@@ -1454,10 +958,10 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
       _showFloatingMessage(t('ai.sam3ClickRequired'));
       return;
     }
-    var preview = _sam3ClickPreviewsByImage[imageKey];
+    var preview = _ai.previewFor(image.path);
     if (preview == null) {
       await _runSam3ClickPreview(config);
-      preview = _sam3ClickPreviewsByImage[imageKey];
+      preview = _ai.previewFor(image.path);
     }
     if (preview == null) {
       return;
@@ -1470,26 +974,12 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     if (selectedClassName == null || selectedClassName.trim().isEmpty) {
       return;
     }
-    final classCountBefore = _labelClasses.length;
-    this._pushAnnotationSnapshot();
-    final added = _applyAiAnnotationResult(
-      imagePath: image.path,
-      displaySize: preview.displaySize,
-      result: preview.result,
+    final added = _aiWorkspace.commitClickPreview(
       config: config,
-      classNameOverride: selectedClassName.trim(),
+      imagePath: image.path,
+      className: selectedClassName,
+      nextClassColorValue: () => _nextClassColor().toARGB32(),
     );
-    setState(() {
-      _sam3ClickPreviewsByImage.remove(imageKey);
-    });
-    final classesChanged = _labelClasses.length != classCountBefore;
-    if (classesChanged) {
-      this._broadcastCollaborationClassSnapshot('sam3 click preview saved');
-    }
-    if (added > 0 || classesChanged) {
-      _scheduleAnnotationDatabaseSave();
-    }
-    logApp('AI', 'SAM3 click preview saved: image=${image.name}, added=$added');
     _showFloatingMessage('${t('ai.done')} ($added)');
   }
 
@@ -1514,61 +1004,11 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
         (_labelClasses.isNotEmpty ? _labelClasses.first.name : null) ??
         firstPrompt ??
         'sam3_click';
-    final controller = TextEditingController(text: initialName);
-    final result = await showDialog<String>(
+    return showSam3SaveClassDialog(
       context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: Text(t('ai.sam3SaveClassTitle')),
-          content: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
-            child: DropdownMenu<String>(
-              controller: controller,
-              requestFocusOnTap: true,
-              enableFilter: true,
-              width: 360,
-              label: Text(t('ai.sam3SaveClassName')),
-              hintText: t('ai.sam3SaveClassHint'),
-              dropdownMenuEntries: [
-                for (final labelClass in _labelClasses)
-                  DropdownMenuEntry<String>(
-                    value: labelClass.name,
-                    label: labelClass.name,
-                    leadingIcon: Icon(
-                      Icons.square_rounded,
-                      color: labelClass.color,
-                      size: 16,
-                    ),
-                  ),
-              ],
-              onSelected: (value) {
-                if (value != null) {
-                  controller.text = value;
-                }
-              },
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: Text(t('action.cancel')),
-            ),
-            FilledButton(
-              onPressed: () {
-                final value = controller.text.trim();
-                if (value.isEmpty) {
-                  return;
-                }
-                Navigator.of(dialogContext).pop(value);
-              },
-              child: Text(t('action.save')),
-            ),
-          ],
-        );
-      },
+      initialName: initialName,
+      labelClasses: _labelClasses,
     );
-    controller.dispose();
-    return result;
   }
 
   Future<void> _runAiAnnotateForIndices(
@@ -1578,57 +1018,80 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     if (_aiAnnotating || indices.isEmpty) {
       return;
     }
-    if (_appSettings.pythonPath.trim().isEmpty) {
-      logApp(
-        'AI',
-        'AI annotation blocked: Python path is empty',
-        level: AppLogLevel.warning,
-      );
-      _showFloatingMessage(t('detect.pythonNotConfigured'));
+    final planResult = _aiWorkflow.createPlan(
+      indices: indices,
+      config: config,
+      pythonPath: _appSettings.pythonPath,
+      promptImageIndex: _selectedImageIndex,
+    );
+    final plan = planResult.plan;
+    if (plan == null) {
+      _handleAiAnnotationPlanFailure(planResult.failure!);
       return;
     }
-    if (config.backend == AiAssistBackend.yolo &&
-        config.selectedClassIds.isEmpty) {
-      logApp(
-        'AI',
-        'AI annotation blocked: no classes selected',
-        level: AppLogLevel.warning,
-      );
-      _showFloatingMessage(t('ai.noSelectedClasses'));
+    if (plan.previewOnly) {
+      await _runSam3ClickPreview(config);
       return;
     }
-    if (config.backend == AiAssistBackend.sam3 &&
-        config.sam3PromptMode == AiSam3PromptMode.text &&
-        config.sam3PromptText.trim().isEmpty) {
-      logApp(
-        'AI',
-        'SAM3 annotation blocked: text prompt is empty',
-        level: AppLogLevel.warning,
-      );
-      _showFloatingMessage(t('ai.sam3PromptRequired'));
-      return;
-    }
-    final targetIndices = [
-      for (final index in indices)
-        if (index >= 0 && index < _images.length) index,
-    ];
-    if (targetIndices.isEmpty) {
-      logApp(
-        'AI',
-        'AI annotation blocked: no valid target indices',
-        level: AppLogLevel.warning,
-      );
-      return;
-    }
-    var samClickPointsText = '';
-    var samPromptFrameIndex = 0;
     String? samClickClassNameOverride;
-    final isSam3ClickMode =
-        config.backend == AiAssistBackend.sam3 &&
-        config.sam3PromptMode == AiSam3PromptMode.click;
-    if (isSam3ClickMode) {
-      final promptImageIndex = _selectedImageIndex;
-      if (!targetIndices.contains(promptImageIndex)) {
+    if (plan.sam3ClickMode) {
+      samClickClassNameOverride = await _promptSam3ClickSaveClassName(config);
+      if (samClickClassNameOverride == null ||
+          samClickClassNameOverride.trim().isEmpty) {
+        return;
+      }
+    }
+    final execution = await _aiWorkspace.runPlan(
+      plan: plan,
+      displaySizeResolver: this._computeImageDisplaySize,
+      nextClassColorValue: () => _nextClassColor().toARGB32(),
+      classNameOverride: samClickClassNameOverride,
+      beforeRun: () => WidgetsBinding.instance.endOfFrame,
+    );
+    final workflowResult = execution.workflowResult;
+    if (workflowResult != null) {
+      _showFloatingMessage('${t('ai.done')} (${workflowResult.addedCount})');
+    } else if (execution.error != null) {
+      _showFloatingMessage(
+        '${t('ai.failed')}: ${shortAiError(execution.error!)}',
+      );
+    }
+  }
+
+  void _handleAiAnnotationPlanFailure(AiAnnotationPlanFailure failure) {
+    switch (failure) {
+      case AiAnnotationPlanFailure.pythonNotConfigured:
+        logApp(
+          'AI',
+          'AI annotation blocked: Python path is empty',
+          level: AppLogLevel.warning,
+        );
+        _showFloatingMessage(t('detect.pythonNotConfigured'));
+        return;
+      case AiAnnotationPlanFailure.noSelectedClasses:
+        logApp(
+          'AI',
+          'AI annotation blocked: no classes selected',
+          level: AppLogLevel.warning,
+        );
+        _showFloatingMessage(t('ai.noSelectedClasses'));
+        return;
+      case AiAnnotationPlanFailure.sam3TextPromptRequired:
+        logApp(
+          'AI',
+          'SAM3 annotation blocked: text prompt is empty',
+          level: AppLogLevel.warning,
+        );
+        _showFloatingMessage(t('ai.sam3PromptRequired'));
+        return;
+      case AiAnnotationPlanFailure.noValidTargets:
+        logApp(
+          'AI',
+          'AI annotation blocked: no valid target indices',
+          level: AppLogLevel.warning,
+        );
+        return;
+      case AiAnnotationPlanFailure.sam3PromptOutsideTargets:
         logApp(
           'AI',
           'SAM3 click annotation blocked: prompt image is outside the target range',
@@ -1636,12 +1099,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
         );
         _showFloatingMessage(t('ai.sam3ClickCurrentOnly'));
         return;
-      }
-      final promptImage = _images[promptImageIndex];
-      samPromptFrameIndex = targetIndices.indexOf(promptImageIndex);
-      samClickPointsText = _sam3ClickPointsTextForImage(promptImage.path);
-      if (samClickPointsText.trim().isEmpty ||
-          !_sam3ClickHasPositivePoint(promptImage.path)) {
+      case AiAnnotationPlanFailure.sam3PositivePointRequired:
         logApp(
           'AI',
           'SAM3 click annotation blocked: no positive click prompt points',
@@ -1649,307 +1107,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
         );
         _showFloatingMessage(t('ai.sam3ClickRequired'));
         return;
-      }
-      if (targetIndices.length == 1 &&
-          targetIndices.first == promptImageIndex) {
-        await _runSam3ClickPreview(config);
-        return;
-      }
-      samClickClassNameOverride = await _promptSam3ClickSaveClassName(config);
-      if (samClickClassNameOverride == null ||
-          samClickClassNameOverride.trim().isEmpty) {
-        return;
-      }
     }
-    logApp(
-      'AI',
-      'AI annotation started: backend=${config.backend.wireName}, targets=${targetIndices.length}, model=${fileName(config.modelPath)}, classes=${config.selectedClassIds.length}, conf=${config.confThreshold.toStringAsFixed(2)}, imgsz=${config.imageSize}, sam3Mode=${config.sam3OutputMode.wireName}, prompt=${config.sam3PromptMode.wireName}, clickPoints=${samClickPointsText.trim().isEmpty ? 0 : samClickPointsText.trim().split('\n').length}, samPromptFrame=$samPromptFrameIndex, ${config.sam3Runtime.logSummary}',
-    );
-
-    setState(() => _aiAnnotating = true);
-    await WidgetsBinding.instance.endOfFrame;
-    var added = 0;
-    final classCountBefore = _labelClasses.length;
-    try {
-      if (targetIndices.length == 1 &&
-          targetIndices.first == _selectedImageIndex) {
-        this._pushAnnotationSnapshot();
-      }
-      if (targetIndices.length == 1) {
-        final image = _images[targetIndices.first];
-        final result = await RustBackend.aiAnnotateImage(
-          backend: config.backend.wireName,
-          pythonPath: _appSettings.pythonPath.trim(),
-          modelPath: config.modelPath,
-          inputPath: image.path,
-          classIds: config.selectedClassIds.toList()..sort(),
-          confThreshold: config.confThreshold,
-          iouThreshold: 0.45,
-          imgsz: config.imageSize,
-          device: 'auto',
-          samMode: config.sam3OutputMode.wireName,
-          samPromptMode: config.sam3PromptMode.wireName,
-          promptsText: config.sam3PromptText,
-          samClickPointsText: samClickPointsText,
-          samPrecision: config.sam3Runtime.precision,
-          samEncoder: config.sam3Runtime.encoder,
-          samImageBatchSize: config.sam3Runtime.imageBatchSize,
-          samVideoBatchSize: config.sam3Runtime.videoBatchSize,
-          samInteractiveBatchSize: config.sam3Runtime.interactiveBatchSize,
-          samMaxImageWidth: config.sam3Runtime.maxImageWidth,
-          samMaxImageHeight: config.sam3Runtime.maxImageHeight,
-          samResizeMethod: config.sam3Runtime.resizeMethod,
-          samCompile: config.sam3Runtime.compile,
-        );
-        final displaySize = await this._computeImageDisplaySize(image.path);
-        added += _applyAiAnnotationResult(
-          imagePath: image.path,
-          displaySize: displaySize,
-          result: result,
-          config: config,
-          classNameOverride: samClickClassNameOverride,
-        );
-      } else if (targetIndices.isNotEmpty) {
-        final targetImages = [
-          for (final index in targetIndices) _images[index],
-        ];
-        final results = await RustBackend.aiAnnotateImages(
-          backend: config.backend.wireName,
-          pythonPath: _appSettings.pythonPath.trim(),
-          modelPath: config.modelPath,
-          inputPaths: [for (final image in targetImages) image.path],
-          classIds: config.selectedClassIds.toList()..sort(),
-          confThreshold: config.confThreshold,
-          iouThreshold: 0.45,
-          imgsz: config.imageSize,
-          device: 'auto',
-          samMode: config.sam3OutputMode.wireName,
-          samPromptMode: config.sam3PromptMode.wireName,
-          promptsText: config.sam3PromptText,
-          samClickPointsText: samClickPointsText,
-          samPromptFrameIndex: samPromptFrameIndex,
-          samPrecision: config.sam3Runtime.precision,
-          samEncoder: config.sam3Runtime.encoder,
-          samImageBatchSize: config.sam3Runtime.imageBatchSize,
-          samVideoBatchSize: config.sam3Runtime.videoBatchSize,
-          samInteractiveBatchSize: config.sam3Runtime.interactiveBatchSize,
-          samMaxImageWidth: config.sam3Runtime.maxImageWidth,
-          samMaxImageHeight: config.sam3Runtime.maxImageHeight,
-          samResizeMethod: config.sam3Runtime.resizeMethod,
-          samCompile: config.sam3Runtime.compile,
-        );
-        for (final result in results) {
-          final imagePath = result.inputPath.isEmpty ? null : result.inputPath;
-          if (imagePath == null || !File(imagePath).existsSync()) {
-            continue;
-          }
-          final displaySize = await this._computeImageDisplaySize(imagePath);
-          added += _applyAiAnnotationResult(
-            imagePath: imagePath,
-            displaySize: displaySize,
-            result: result,
-            config: config,
-            classNameOverride: samClickClassNameOverride,
-          );
-        }
-      }
-      if (mounted) {
-        setState(() {});
-      }
-      logApp(
-        'AI',
-        'AI annotation completed: targets=${targetIndices.length}, added=$added',
-      );
-      final classesChanged = _labelClasses.length != classCountBefore;
-      if (classesChanged) {
-        this._broadcastCollaborationClassSnapshot('ai classes changed');
-      }
-      if (added > 0 || classesChanged || isSam3ClickMode) {
-        _scheduleAnnotationDatabaseSave();
-      }
-      _showFloatingMessage('${t('ai.done')} ($added)');
-    } on Object catch (error) {
-      final failure = classifyAiFailure(error);
-      logApp(
-        'AI',
-        'AI annotation failed: backend=${config.backend.wireName}, failure=$failure',
-        level: AppLogLevel.error,
-      );
-      logAppMultiline(
-        'AI',
-        error.toString(),
-        level: AppLogLevel.error,
-        prefix: 'detail: ',
-      );
-      _showFloatingMessage('${t('ai.failed')}: ${shortAiError(error)}');
-    } finally {
-      if (mounted) {
-        setState(() => _aiAnnotating = false);
-      }
-    }
-  }
-
-  int _applyAiAnnotationResult({
-    required String imagePath,
-    required Size displaySize,
-    required AiAnnotationResult result,
-    required AiAssistConfig config,
-    String? classNameOverride,
-  }) {
-    if (result.width <= 0 || result.height <= 0) {
-      return 0;
-    }
-    final imageKey = pathKey(imagePath);
-    final annotations = _annotationsByImage.putIfAbsent(imageKey, () => []);
-    var count = 0;
-    if (config.backend == AiAssistBackend.sam3) {
-      final replaceSam3ClickAnnotations =
-          config.sam3PromptMode == AiSam3PromptMode.click;
-      final generatedClickIds = <String>{};
-      if (replaceSam3ClickAnnotations) {
-        final previousIds = _sam3ClickAnnotationIdsByImage.remove(imageKey);
-        if (previousIds != null && previousIds.isNotEmpty) {
-          annotations.removeWhere(
-            (annotation) => previousIds.contains(annotation.id),
-          );
-        }
-      }
-      for (final mask in result.masks) {
-        final points = scaleAiPoints(
-          mask.points,
-          sourceSize: Size(result.width, result.height),
-          displaySize: displaySize,
-        );
-        if (points.length < 3) {
-          continue;
-        }
-        final classId = _ensureLabelClassByName(
-          classNameOverride?.trim().isNotEmpty == true
-              ? classNameOverride!.trim()
-              : mask.className,
-        );
-        final bounds = pointsBounds(
-          points,
-        ).intersect(Offset.zero & displaySize);
-        if (bounds.width < 2 || bounds.height < 2) {
-          continue;
-        }
-        final mode = config.sam3OutputMode.annotationMode;
-        final id = 'ann_${_annotationSerial++}';
-        if (mode == AnnotationMode.seg) {
-          annotations.add(
-            AnnotationRegion(
-              id: id,
-              mode: AnnotationMode.seg,
-              rect: bounds,
-              classId: classId,
-              points: points,
-              authorId: _collaborationAuthorId,
-              authorName: _currentAnnotatorName,
-              authorColorValue: _currentAnnotatorColorValue,
-            ),
-          );
-        } else if (mode == AnnotationMode.obb) {
-          final oriented = minimumAreaRect(points);
-          annotations.add(
-            AnnotationRegion.fromRect(
-              id: id,
-              mode: AnnotationMode.obb,
-              rect: oriented.rect.intersect(Offset.zero & displaySize),
-              classId: classId,
-              authorId: _collaborationAuthorId,
-              authorName: _currentAnnotatorName,
-              authorColorValue: _currentAnnotatorColorValue,
-            ).copyWith(rotationDegrees: oriented.rotationDegrees),
-          );
-        } else {
-          annotations.add(
-            AnnotationRegion.fromRect(
-              id: id,
-              mode: AnnotationMode.hbb,
-              rect: bounds,
-              classId: classId,
-              authorId: _collaborationAuthorId,
-              authorName: _currentAnnotatorName,
-              authorColorValue: _currentAnnotatorColorValue,
-            ),
-          );
-        }
-        if (replaceSam3ClickAnnotations) {
-          generatedClickIds.add(id);
-        }
-        count += 1;
-      }
-      if (replaceSam3ClickAnnotations) {
-        _sam3ClickAnnotationIdsByImage[imageKey] = generatedClickIds;
-      }
-      logApp(
-        'AI',
-        'SAM3 annotations applied: image=${fileName(imagePath)}, mode=${config.sam3OutputMode.wireName}, prompt=${config.sam3PromptMode.wireName}, masks=${result.masks.length}, added=$count',
-        level: AppLogLevel.debug,
-      );
-      return count;
-    }
-    for (final box in result.boxes) {
-      final annotation = _annotationFromAiBox(
-        box: box,
-        sourceSize: Size(result.width, result.height),
-        displaySize: displaySize,
-      );
-      if (annotation == null) {
-        continue;
-      }
-      annotations.add(annotation);
-      count += 1;
-    }
-    return count;
-  }
-
-  AnnotationRegion? _annotationFromAiBox({
-    required AiPredictionBox box,
-    required Size sourceSize,
-    required Size displaySize,
-  }) {
-    final classId = _ensureLabelClassByName(box.className);
-    final rect = Rect.fromLTRB(
-      box.rect.left / sourceSize.width * displaySize.width,
-      box.rect.top / sourceSize.height * displaySize.height,
-      box.rect.right / sourceSize.width * displaySize.width,
-      box.rect.bottom / sourceSize.height * displaySize.height,
-    ).intersect(Offset.zero & displaySize);
-    if (rect.width < 2 || rect.height < 2) {
-      return null;
-    }
-    return AnnotationRegion.fromRect(
-      id: 'ann_${_annotationSerial++}',
-      mode: AnnotationMode.hbb,
-      rect: rect,
-      classId: classId,
-      authorId: _collaborationAuthorId,
-      authorName: _currentAnnotatorName,
-      authorColorValue: _currentAnnotatorColorValue,
-    );
-  }
-
-  int _ensureLabelClassByName(String rawName) {
-    final name = rawName.trim().isEmpty
-        ? 'class_${_labelClasses.length}'
-        : rawName.trim();
-    for (final labelClass in _labelClasses) {
-      if (labelClass.name.toLowerCase() == name.toLowerCase()) {
-        return labelClass.id;
-      }
-    }
-    final id = _classSerial++;
-    _labelClasses.add(
-      LabelClass(
-        id: id,
-        name: name,
-        colorValue: this._nextClassColor().toARGB32(),
-      ),
-    );
-    _activeClassId ??= id;
-    return id;
   }
 
   void _handlePointerSignal(PointerSignalEvent event) {
@@ -1962,133 +1120,16 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
-    if (_collaborationReconnecting) {
-      return event is KeyDownEvent || event is KeyRepeatEvent
-          ? KeyEventResult.handled
-          : KeyEventResult.ignored;
-    }
-
-    if (_importingDataset) {
-      return event is KeyDownEvent || event is KeyRepeatEvent
-          ? KeyEventResult.handled
-          : KeyEventResult.ignored;
-    }
-
-    if (isEditableTextFocused()) {
-      return KeyEventResult.ignored;
-    }
-
-    if (_activeSection == 'browse' && !_shortcutDialogOpen) {
-      final result = _detectVideoSession.handleShortcutKey(
-        event,
-        _shortcutConfig,
-      );
-      if (result == KeyEventResult.handled) {
-        return result;
-      }
-    }
-
-    if ((event is! KeyDownEvent && event is! KeyRepeatEvent) ||
-        _activeSection != 'label' ||
-        _shortcutDialogOpen) {
-      return KeyEventResult.ignored;
-    }
-
-    final key = event.logicalKey;
-    final repeated = event is KeyRepeatEvent;
-    final imageStep = repeated ? 3 : 1;
-    if (HardwareKeyboard.instance.isControlPressed) {
-      if (key == LogicalKeyboardKey.keyZ) {
-        this._undoAnnotationChange();
-        return KeyEventResult.handled;
-      }
-      if (key == LogicalKeyboardKey.keyY) {
-        this._redoAnnotationChange();
-        return KeyEventResult.handled;
-      }
-      if (key == LogicalKeyboardKey.keyC) {
-        this._copySelectedAnnotation();
-        return KeyEventResult.handled;
-      }
-      if (key == LogicalKeyboardKey.keyV) {
-        this._pasteAnnotation();
-        return KeyEventResult.handled;
-      }
-    }
-
-    if (key == LogicalKeyboardKey.escape) {
-      setState(() {
-        _activeTool = 'select';
-        _selectedAnnotationId = null;
-      });
-      return KeyEventResult.handled;
-    }
-
-    if (_shortcutConfig.matches(ShortcutAction.previousImage, key)) {
-      if (!_selectPreviousImage(step: imageStep)) {
-        _showFloatingMessage(t('detect.hudNoPrevious'));
-      }
-      return KeyEventResult.handled;
-    }
-    if (_shortcutConfig.matches(ShortcutAction.nextImage, key)) {
-      if (!_selectNextImage(step: imageStep)) {
-        _showFloatingMessage(t('detect.hudNoNext'));
-      }
-      return KeyEventResult.handled;
-    }
-    if (_shortcutConfig.matches(ShortcutAction.zoomIn, key)) {
-      _setZoom(_zoom + 10);
-      return KeyEventResult.handled;
-    }
-    if (_shortcutConfig.matches(ShortcutAction.zoomOut, key)) {
-      _setZoom(_zoom - 10);
-      return KeyEventResult.handled;
-    }
-    if (_shortcutConfig.matches(ShortcutAction.hbbMode, key)) {
-      this._activateAnnotationMode(AnnotationMode.hbb);
-      return KeyEventResult.handled;
-    }
-    if (_shortcutConfig.matches(ShortcutAction.obbMode, key)) {
-      this._activateAnnotationMode(AnnotationMode.obb);
-      return KeyEventResult.handled;
-    }
-    if (_shortcutConfig.matches(ShortcutAction.segMode, key)) {
-      this._activateAnnotationMode(AnnotationMode.seg);
-      return KeyEventResult.handled;
-    }
-    if (_shortcutConfig.matches(ShortcutAction.deleteSelected, key)) {
-      this._deleteSelectedAnnotation();
-      return KeyEventResult.handled;
-    }
-    if (_shortcutConfig.matches(ShortcutAction.hideClassLabels, key)) {
-      setState(() => _showClassLabels = !_showClassLabels);
-      return KeyEventResult.handled;
-    }
-    if (_shortcutConfig.matches(ShortcutAction.rotateObbLeft5, key)) {
-      this._rotateSelectedAnnotation(-5);
-      return KeyEventResult.handled;
-    }
-    if (_shortcutConfig.matches(ShortcutAction.rotateObbLeft1, key)) {
-      this._rotateSelectedAnnotation(-1);
-      return KeyEventResult.handled;
-    }
-    if (_shortcutConfig.matches(ShortcutAction.rotateObbRight1, key)) {
-      this._rotateSelectedAnnotation(1);
-      return KeyEventResult.handled;
-    }
-    if (_shortcutConfig.matches(ShortcutAction.rotateObbRight5, key)) {
-      this._rotateSelectedAnnotation(5);
-      return KeyEventResult.handled;
-    }
-    if (_shortcutConfig.matches(ShortcutAction.aiAnnotateCurrent, key)) {
-      unawaited(_runAiAnnotateCurrent());
-      return KeyEventResult.handled;
-    }
-    if (_shortcutConfig.matches(ShortcutAction.aiAnnotateAll, key)) {
-      unawaited(_runAiAnnotateAll());
-      return KeyEventResult.handled;
-    }
-    return KeyEventResult.ignored;
+    final decision = _shortcutResolver.resolve(
+      event: event,
+      config: _shortcutConfig,
+      activeSection: _activeSection,
+      shortcutDialogOpen: _shortcutDialogOpen,
+      inputBlocked: _collaborationReconnecting || _importingDataset,
+      editableTextFocused: isEditableTextFocused(),
+      controlPressed: HardwareKeyboard.instance.isControlPressed,
+    );
+    return _shortcutDispatcher.dispatch(decision: decision, event: event);
   }
 
   @override
@@ -2103,9 +1144,9 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            Column(
-              children: [
-                TopMenuBar(
+            WorkspaceMainLayout(
+              topMenu: WorkspaceTopMenu(
+                data: WorkspaceTopMenuData(
                   visible: _topMenuVisible,
                   recentFolders: _recentFolders
                       .map((entry) => entry.path)
@@ -2114,6 +1155,8 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
                   languageOptions: _languageOptions,
                   activeLanguageCode: _activeLanguageCode,
                   projectActionsLocked: _projectLockedByCollaboration,
+                ),
+                actions: WorkspaceTopMenuActions(
                   onOpenFile: () => _openImageFile(),
                   onOpenFolder: () => _openImageFolder(),
                   onOpenRecentFolder: (path) =>
@@ -2138,241 +1181,161 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
                   onPointerEnter: this._showTopMenu,
                   onPointerExit: this._scheduleTopMenuHide,
                 ),
-                Expanded(
-                  child: Row(
-                    children: [
-                      PrimarySidebar(
-                        activeSection: _activeSection,
-                        collapsed: _sidebarCollapsed,
-                        onCollapseChanged: (value) {
-                          setState(() => _sidebarCollapsed = value);
-                        },
-                        onSectionSelected: (section) {
-                          logApp(
-                            'NAV',
-                            'Switched to: $section',
-                            level: AppLogLevel.debug,
-                          );
-                          setState(() => _activeSection = section);
-                        },
-                      ),
-                      Expanded(
-                        child: IndexedStack(
-                          index: _activeSection == 'label'
-                              ? 0
-                              : _activeSection == 'train'
-                              ? 1
-                              : _activeSection == 'crop'
-                              ? 2
-                              : _activeSection == 'collaboration'
-                              ? 3
-                              : _activeSection == 'database'
-                              ? 5
-                              : 4,
-                          children: [
-                            LabelPage(
-                              status: widget.status,
-                              images: _images,
-                              selectedImage: _selectedImageForLabel,
-                              selectedImageIndex: _selectedImageIndex,
-                              unauthorized:
-                                  _collaborationClientMode &&
-                                  !_selectedImageAuthorized,
-                              zoom: _zoom,
-                              viewportOffset: _labelViewportOffset,
-                              activeTool: _activeTool,
-                              activeMode: _activeAnnotationMode,
-                              imageSplit: _selectedImageSplit,
-                              activeClassId: _activeClassId,
-                              labelClasses: _labelClasses,
-                              annotationsByImage: _annotationsByImage,
-                              annotations: _currentAnnotationsForLabel,
-                              sam3ClickPrompts:
-                                  _currentSam3ClickPromptsForLabel,
-                              sam3PreviewAnnotations:
-                                  _currentSam3ClickPreviewForLabel,
-                              selectedAnnotationId: _selectedAnnotationId,
-                              showClassLabels: _showClassLabels,
-                              classesEditable: !_collaborationClientMode,
-                              onImageSelected: _selectImage,
-                              onImageContextMenu: _showImageContextMenu,
-                              onPointerSignal: _handlePointerSignal,
-                              onViewportOffsetChanged: _setLabelViewportOffset,
-                              onToolSelected: this._selectTool,
-                              onSelectMode: () => this._selectTool('select'),
-                              onModeSelected: this._activateAnnotationMode,
-                              onImageSplitChanged: _setSelectedImageSplit,
-                              onEnsureClass: this._ensureActiveClass,
-                              onAnnotationCreated: this._createAnnotation,
-                              onSegAnnotationCreated: this._createSegAnnotation,
-                              onAnnotationSelected: this._selectAnnotation,
-                              onAnnotationUpdated: this._updateAnnotation,
-                              onAnnotationDeleted: this._deleteAnnotation,
-                              onAnnotationDragStarted:
-                                  this._pushAnnotationSnapshot,
-                              onClassSelected: this._selectLabelClass,
-                              onClassAdded: () => this._addLabelClass(),
-                              onClassEdited: this._editLabelClass,
-                              onClassColorChanged: this._chooseLabelClassColor,
-                              onClassDeleted: this._deleteLabelClass,
-                              onClassReordered: this._reorderLabelClass,
-                              onToggleClassLabels: () => setState(
-                                () => _showClassLabels = !_showClassLabels,
-                              ),
-                              onAnnotationClassChanged:
-                                  this._changeAnnotationClass,
-                              onSam3ClickPrompt: _handleSam3ClickPrompt,
-                              aiPanelVisible: _aiPanelVisible,
-                              onAiConfigPressed: () {
-                                setState(
-                                  () => _aiPanelVisible = !_aiPanelVisible,
-                                );
-                              },
-                              onImageDisplaySizeChanged: (size) {
-                                _imageDisplaySize = size;
-                                final key = _selectedImageKey;
-                                if (key != null && size != Size.zero) {
-                                  _imageDisplaySizes[key] = size;
-                                  _scheduleAnnotationDatabaseSave();
-                                }
-                              },
-                            ),
-                            TrainPage(
-                              key: _trainPageKey,
-                              settings: _appSettings,
-                            ),
-                            CropPage(exportPath: _appSettings.exportPath),
-                            CollaborationPage(
-                              mode: _collaborationMode,
-                              hostId: _collaborationHostId,
-                              userId: _collaborationUserId,
-                              userName: _collaborationUserName,
-                              userColor: Color(_currentAnnotatorColorValue),
-                              port: _collaborationPort,
-                              imageCount: _images.length,
-                              assignmentStart: _collaborationStartIndex,
-                              assignmentEnd: _collaborationEndIndex,
-                              discoveredHosts: _collaborationDiscoveredHosts,
-                              selectedHostId: _selectedCollaborationHostId,
-                              joining: _collaborationJoining,
-                              peers: _collaborationPeers,
-                              onUserNameChanged: this._setCollaborationUserName,
-                              onPortChanged: this._setCollaborationPort,
-                              onHostSelected: _collaboration.selectHost,
-                              onStartHost: this._startCollaborationHost,
-                              onJoinClient: this._joinCollaborationHost,
-                              onStop: this._stopCollaboration,
-                              onPeerPermissionsChanged:
-                                  this._setCollaborationPeerPermissions,
-                            ),
-                            DetectVideoPage(
-                              settings: _appSettings,
-                              shortcutConfig: _shortcutConfig,
-                              session: _detectVideoSession,
-                            ),
-                            const DatabasePage(),
-                          ],
-                        ),
-                      ),
-                    ],
+              ),
+              sidebar: PrimarySidebar(
+                activeSection: _activeSection,
+                collapsed: _sidebarCollapsed,
+                onCollapseChanged: (value) {
+                  setState(() => _sidebarCollapsed = value);
+                },
+                onSectionSelected: (section) {
+                  logApp(
+                    'NAV',
+                    'Switched to: $section',
+                    level: AppLogLevel.debug,
+                  );
+                  setState(() => _activeSection = section);
+                },
+              ),
+              pages: WorkspacePageStack(
+                index: _navigation.pageIndex,
+                labelPage: LabelWorkspacePage(
+                  data: LabelWorkspaceData(
+                    status: widget.status,
+                    images: _images,
+                    selectedImage: _selectedImageForLabel,
+                    selectedImageIndex: _selectedImageIndex,
+                    unauthorized:
+                        _collaborationClientMode && !_selectedImageAuthorized,
+                    zoom: _zoom,
+                    viewportOffset: _labelViewportOffset,
+                    activeTool: _activeTool,
+                    activeMode: _activeAnnotationMode,
+                    imageSplit: _selectedImageSplit,
+                    activeClassId: _activeClassId,
+                    labelClasses: _labelClasses,
+                    annotationsByImage: _annotationsByImage,
+                    annotations: _currentAnnotationsForLabel,
+                    sam3ClickPrompts: _currentSam3ClickPromptsForLabel,
+                    sam3PreviewAnnotations: _currentSam3ClickPreviewForLabel,
+                    selectedAnnotationId: _selectedAnnotationId,
+                    showClassLabels: _showClassLabels,
+                    aiPanelVisible: _aiPanelVisible,
+                    classesEditable: !_collaborationClientMode,
+                  ),
+                  actions: LabelWorkspaceActions(
+                    onImageSelected: _selectImage,
+                    onImageContextMenu: _showImageContextMenu,
+                    onPointerSignal: _handlePointerSignal,
+                    onViewportOffsetChanged: _setLabelViewportOffset,
+                    onToolSelected: this._selectTool,
+                    onSelectMode: () => this._selectTool('select'),
+                    onModeSelected: this._activateAnnotationMode,
+                    onImageSplitChanged: _setSelectedImageSplit,
+                    onEnsureClass: this._ensureActiveClass,
+                    onAnnotationCreated: this._createAnnotation,
+                    onSegAnnotationCreated: this._createSegAnnotation,
+                    onAnnotationSelected: this._selectAnnotation,
+                    onAnnotationUpdated: this._updateAnnotation,
+                    onAnnotationDeleted: this._deleteAnnotation,
+                    onAnnotationDragStarted: this._pushAnnotationSnapshot,
+                    onClassSelected: this._selectLabelClass,
+                    onClassAdded: () => this._addLabelClass(),
+                    onClassEdited: this._editLabelClass,
+                    onClassColorChanged: this._chooseLabelClassColor,
+                    onClassDeleted: this._deleteLabelClass,
+                    onClassReordered: this._reorderLabelClass,
+                    onToggleClassLabels: () =>
+                        setState(() => _showClassLabels = !_showClassLabels),
+                    onAnnotationClassChanged: this._changeAnnotationClass,
+                    onSam3ClickPrompt: _handleSam3ClickPrompt,
+                    onAiConfigPressed: () {
+                      setState(() => _aiPanelVisible = !_aiPanelVisible);
+                    },
+                    onImageDisplaySizeChanged: (size) {
+                      _imageDisplaySize = size;
+                      final key = _selectedImageKey;
+                      if (key != null && size != Size.zero) {
+                        _imageDisplaySizes[key] = size;
+                        _annotationDatabase.scheduleSave();
+                      }
+                    },
                   ),
                 ),
-                if (labelPage)
-                  BottomControls(
-                    zoom: _zoom,
-                    zoomLocked: _zoomLocked,
-                    darkMode: _darkMode,
-                    onZoomChanged: _setZoom,
-                    onResetView: _resetZoomAndViewport,
-                    onToggleZoomLock: _toggleZoomLock,
-                    onToggleThemeMode: this._toggleThemeMode,
-                    onOpenKeySettings: this._showKeySettings,
-                  ),
-              ],
+                trainPageKey: _trainPageKey,
+                settings: _appSettings,
+                shortcutConfig: _shortcutConfig,
+                detectVideoSession: _detectVideoSession,
+                collaboration: CollaborationPageBinding(
+                  mode: _collaborationMode,
+                  hostId: _collaborationHostId,
+                  userId: _collaborationUserId,
+                  userName: _collaborationUserName,
+                  userColor: Color(_currentAnnotatorColorValue),
+                  port: _collaborationPort,
+                  imageCount: _images.length,
+                  assignmentStart: _collaborationStartIndex,
+                  assignmentEnd: _collaborationEndIndex,
+                  discoveredHosts: _collaborationDiscoveredHosts,
+                  selectedHostId: _selectedCollaborationHostId,
+                  joining: _collaborationJoining,
+                  peers: _collaborationPeers,
+                  onUserNameChanged: this._setCollaborationUserName,
+                  onPortChanged: this._setCollaborationPort,
+                  onHostSelected: _collaboration.selectHost,
+                  onStartHost: this._startCollaborationHost,
+                  onJoinClient: this._joinCollaborationHost,
+                  onStop: this._stopCollaboration,
+                  onPeerPermissionsChanged:
+                      this._setCollaborationPeerPermissions,
+                ),
+              ),
+              bottomControls: labelPage
+                  ? BottomControls(
+                      zoom: _zoom,
+                      zoomLocked: _zoomLocked,
+                      darkMode: _darkMode,
+                      onZoomChanged: _setZoom,
+                      onResetView: _resetZoomAndViewport,
+                      onToggleZoomLock: _toggleZoomLock,
+                      onToggleThemeMode: this._toggleThemeMode,
+                      onOpenKeySettings: this._showKeySettings,
+                    )
+                  : null,
             ),
             if (labelPage && _aiPanelVisible)
               Positioned.fill(
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final viewport = Size(
-                      constraints.maxWidth,
-                      constraints.maxHeight,
-                    );
-                    final panelSize = _clampAiAssistPanelSize(
-                      _aiAssistPanelSize,
-                      viewport,
-                    );
-                    final defaultOffset = Offset(
-                      math.max(
-                        _aiAssistPanelMargin,
-                        constraints.maxWidth -
-                            panelSize.width -
-                            _toolbarWidth -
-                            16,
-                      ),
-                      topMenuHeight + 18,
-                    );
-                    final panelOffset = _clampAiAssistPanelOffset(
-                      _aiAssistPanelOffset ?? defaultOffset,
-                      viewport,
-                      panelSize,
-                    );
-                    return Stack(
-                      children: [
-                        Positioned(
-                          left: panelOffset.dx,
-                          top: panelOffset.dy,
-                          child: AiAssistFloatingPanel(
-                            width: panelSize.width,
-                            height: panelSize.height,
-                            initialConfig: _aiAssistConfig,
-                            imageCount: _images.length,
-                            pythonPath: _appSettings.pythonPath,
-                            onClose: () =>
-                                setState(() => _aiPanelVisible = false),
-                            onDrag: (delta) => _moveAiAssistPanel(
-                              delta,
-                              viewport,
-                              panelSize,
-                              panelOffset,
-                            ),
-                            onResize: (delta) => _resizeAiAssistPanel(
-                              delta,
-                              viewport,
-                              panelSize,
-                              panelOffset,
-                            ),
-                            onConfigSaved: _saveAiAssistConfig,
-                            onSave: _handleAiAssistSave,
-                            onAnnotateCurrent: _runAiAnnotateCurrentWithConfig,
-                            onAnnotateAll: _runAiAnnotateAllWithConfig,
-                          ),
-                        ),
-                      ],
-                    );
+                child: AiAssistPanelLayer(
+                  requestedSize: _aiAssistPanelSize,
+                  requestedOffset: _aiAssistPanelOffset,
+                  initialConfig: _aiAssistConfig,
+                  imageCount: _images.length,
+                  pythonPath: _appSettings.pythonPath,
+                  onClose: () => setState(() => _aiPanelVisible = false),
+                  onGeometryChanged: (size, offset) {
+                    setState(() {
+                      _aiAssistPanelSize = size;
+                      _aiAssistPanelOffset = offset;
+                    });
                   },
+                  onConfigSaved: _saveAiAssistConfig,
+                  onSave: _handleAiAssistSave,
+                  onAnnotateCurrent: _runAiAnnotateCurrentWithConfig,
+                  onAnnotateAll: _runAiAnnotateAllWithConfig,
                 ),
               ),
-            if (_importingDataset)
-              const Positioned.fill(child: ImportBlockingOverlay()),
-            if (_aiAnnotating)
-              Positioned.fill(
-                child: ImportBlockingOverlay(message: t('ai.annotating')),
+            Positioned.fill(
+              child: WorkspaceStatusLayers(
+                importingDataset: _importingDataset,
+                aiAnnotating: _aiAnnotating,
+                collaborationReconnecting: _collaborationReconnecting,
+                reconnectAttempts: _collaborationReconnectAttempts,
+                onCancelReconnect: this._cancelCollaborationReconnect,
+                videoFullscreenVisible: _videoFullscreenVisible,
+                videoSession: _detectVideoSession,
+                shortcutConfig: _shortcutConfig,
               ),
-            if (_collaborationReconnecting)
-              Positioned.fill(
-                child: CollaborationReconnectOverlay(
-                  attempts: _collaborationReconnectAttempts,
-                  onCancel: this._cancelCollaborationReconnect,
-                ),
-              ),
-            if (_videoFullscreenVisible)
-              Positioned.fill(
-                child: VideoFullscreenOverlay(
-                  session: _detectVideoSession,
-                  shortcutConfig: _shortcutConfig,
-                ),
-              ),
+            ),
           ],
         ),
       ),
@@ -2382,51 +1345,24 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
 
 extension _WorkspaceShellAnnotationActions on _WorkspaceShellState {
   void _pushAnnotationSnapshot() {
-    _undoStack.add(List<AnnotationRegion>.of(_currentAnnotations));
-    if (_undoStack.length > 50) {
-      _undoStack.removeAt(0);
-    }
-    _redoStack.clear();
-  }
-
-  void _restoreCurrentImageAnnotations(List<AnnotationRegion> snapshot) {
-    final imageKey = _selectedImageKey;
-    if (imageKey == null) {
-      return;
-    }
-    _annotationsByImage[imageKey] = List<AnnotationRegion>.of(snapshot);
-    if (_selectedAnnotationId != null &&
-        !_currentAnnotations.any(
-          (annotation) => annotation.id == _selectedAnnotationId,
-        )) {
-      _selectedAnnotationId = null;
-    }
+    _project.pushAnnotationSnapshot();
   }
 
   void _undoAnnotationChange() {
-    if (_undoStack.isEmpty) {
-      return;
+    if (_project.undoAnnotations()) {
+      _annotationDatabase.scheduleSave();
     }
-    final snapshot = _undoStack.removeLast();
-    _redoStack.add(List<AnnotationRegion>.of(_currentAnnotations));
-    setState(() => _restoreCurrentImageAnnotations(snapshot));
-    _scheduleAnnotationDatabaseSave();
   }
 
   void _redoAnnotationChange() {
-    if (_redoStack.isEmpty) {
-      return;
+    if (_project.redoAnnotations()) {
+      _annotationDatabase.scheduleSave();
     }
-    final snapshot = _redoStack.removeLast();
-    _undoStack.add(List<AnnotationRegion>.of(_currentAnnotations));
-    setState(() => _restoreCurrentImageAnnotations(snapshot));
-    _scheduleAnnotationDatabaseSave();
   }
 
   void _activateAnnotationMode(AnnotationMode mode) {
     setState(() {
-      _activeAnnotationMode = mode;
-      _activeTool = 'draw';
+      _navigation.activateAnnotationMode(mode);
       _selectedAnnotationId = null;
     });
   }
@@ -2460,12 +1396,7 @@ extension _WorkspaceShellAnnotationActions on _WorkspaceShellState {
   }
 
   LabelClass? _classById(int id) {
-    for (final labelClass in _labelClasses) {
-      if (labelClass.id == id) {
-        return labelClass;
-      }
-    }
-    return null;
+    return _project.classById(id);
   }
 
   Color _nextClassColor() {
@@ -2487,80 +1418,36 @@ extension _WorkspaceShellAnnotationActions on _WorkspaceShellState {
     if (_guardProjectChangeBlocked()) {
       return null;
     }
-    final name = await _requestClassName(
+    final name = await showLabelClassNameDialog(
+      context: context,
       initialName: 'class_${_labelClasses.length}',
       title: t('label.createClassPrompt'),
     );
     if (name == null || name.trim().isEmpty) {
       return null;
     }
-    final id = _classSerial++;
-    final labelClass = LabelClass(
-      id: id,
+    return _annotationEditing.addLabelClass(
       name: name.trim(),
       colorValue: _nextClassColor().toARGB32(),
     );
-    setState(() {
-      _labelClasses.add(labelClass);
-      _activeClassId = id;
-    });
-    this._broadcastCollaborationClassSnapshot('class added');
-    _scheduleAnnotationDatabaseSave();
-    return id;
   }
 
   Future<void> _editLabelClass(LabelClass labelClass) async {
     if (_guardProjectChangeBlocked()) {
       return;
     }
-    final name = await _requestClassName(
+    final name = await showLabelClassNameDialog(
+      context: context,
       initialName: labelClass.name,
       title: t('label.editClass'),
     );
     if (name == null || name.trim().isEmpty) {
       return;
     }
-    setState(() {
-      final index = _labelClasses.indexWhere(
-        (item) => item.id == labelClass.id,
-      );
-      if (index >= 0) {
-        _labelClasses[index] = labelClass.copyWith(name: name.trim());
-      }
-    });
-    this._broadcastCollaborationClassSnapshot('class renamed');
-    _scheduleAnnotationDatabaseSave();
-  }
-
-  Future<String?> _requestClassName({
-    required String initialName,
-    required String title,
-  }) async {
-    final controller = TextEditingController(text: initialName);
-    final result = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: InputDecoration(labelText: t('label.className')),
-          onSubmitted: (value) => Navigator.of(context).pop(value),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text(t('label.cancelAnnotation')),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(controller.text),
-            child: Text(t('label.saveAnnotation')),
-          ),
-        ],
-      ),
+    _annotationEditing.updateLabelClass(
+      labelClass.copyWith(name: name.trim()),
+      reason: 'class renamed',
     );
-    controller.dispose();
-    return result;
   }
 
   Future<void> _chooseLabelClassColor(LabelClass labelClass) async {
@@ -2580,241 +1467,86 @@ extension _WorkspaceShellAnnotationActions on _WorkspaceShellState {
     if (selected.toARGB32() == currentColor.toARGB32()) {
       return;
     }
-    setState(() {
-      final index = _labelClasses.indexWhere(
-        (item) => item.id == labelClass.id,
-      );
-      if (index >= 0) {
-        _labelClasses[index] = labelClass.copyWith(
-          colorValue: selected.toARGB32(),
-        );
-      }
-    });
-    this._broadcastCollaborationClassSnapshot('class color changed');
-    _scheduleAnnotationDatabaseSave();
+    _annotationEditing.updateLabelClass(
+      labelClass.copyWith(colorValue: selected.toARGB32()),
+      reason: 'class color changed',
+    );
   }
 
   void _deleteLabelClass(LabelClass labelClass) {
     if (_guardProjectChangeBlocked()) {
       return;
     }
-    _pushAnnotationSnapshot();
-    setState(() {
-      _labelClasses.removeWhere((item) => item.id == labelClass.id);
-      for (final entry in _annotationsByImage.entries) {
-        entry.value.removeWhere(
-          (annotation) => annotation.classId == labelClass.id,
-        );
-      }
-      if (_activeClassId == labelClass.id) {
-        _activeClassId = _labelClasses.isEmpty ? null : _labelClasses.first.id;
-      }
-      _selectedAnnotationId = null;
-    });
-    this._broadcastCollaborationClassSnapshot('class deleted');
-    this._broadcastCollaborationAllAnnotations('class deleted');
-    _scheduleAnnotationDatabaseSave();
+    _annotationEditing.deleteLabelClass(labelClass.id);
   }
 
   void _reorderLabelClass(int oldIndex, int newIndex) {
     if (_guardProjectChangeBlocked()) {
       return;
     }
-    setState(() {
-      final item = _labelClasses.removeAt(oldIndex);
-      _labelClasses.insert(newIndex, item);
-    });
-    this._broadcastCollaborationClassSnapshot('class reordered');
-    _scheduleAnnotationDatabaseSave();
+    _annotationEditing.reorderLabelClass(oldIndex, newIndex);
   }
 
   void _selectLabelClass(int id) {
-    setState(() => _activeClassId = id);
+    _project.selectLabelClass(id);
   }
 
   void _createAnnotation(Rect rect, int classId) {
-    final imageKey = _selectedImageKey;
-    if (imageKey == null ||
-        !_selectedImageAuthorized ||
-        rect.width.abs() < 4 ||
-        rect.height.abs() < 4) {
-      return;
-    }
-    _pushAnnotationSnapshot();
-    final annotation = AnnotationRegion.fromRect(
-      id: 'ann_${_annotationSerial++}',
-      mode: _activeAnnotationMode,
+    final annotation = _annotationEditing.createRect(
       rect: rect,
       classId: classId,
-      authorId: _collaborationAuthorId,
-      authorName: _currentAnnotatorName,
-      authorColorValue: _currentAnnotatorColorValue,
+      mode: _activeAnnotationMode,
     );
-    setState(() {
-      _annotationsByImage.putIfAbsent(imageKey, () => []).add(annotation);
-      _selectedAnnotationId = null;
-      _activeTool = 'draw';
-    });
+    if (annotation == null) {
+      return;
+    }
+    setState(() => _activeTool = 'draw');
     logApp(
       'ANNOTATION',
       'Created ${annotation.mode.name}: image=${_selectedImage?.name ?? '-'}, classId=$classId',
       level: AppLogLevel.debug,
     );
-    _scheduleAnnotationDatabaseSave();
   }
 
   void _createSegAnnotation(List<Offset> points, int classId) {
-    final imageKey = _selectedImageKey;
-    if (imageKey == null || !_selectedImageAuthorized || points.length < 3) {
+    final annotation = _annotationEditing.createSeg(
+      points: points,
+      classId: classId,
+    );
+    if (annotation == null) {
       return;
     }
-    _pushAnnotationSnapshot();
-    final left = points.map((point) => point.dx).reduce(math.min);
-    final top = points.map((point) => point.dy).reduce(math.min);
-    final right = points.map((point) => point.dx).reduce(math.max);
-    final bottom = points.map((point) => point.dy).reduce(math.max);
-    final annotation = AnnotationRegion(
-      id: 'ann_${_annotationSerial++}',
-      mode: AnnotationMode.seg,
-      rect: Rect.fromLTRB(left, top, right, bottom),
-      classId: classId,
-      points: List<Offset>.of(points),
-      authorId: _collaborationAuthorId,
-      authorName: _currentAnnotatorName,
-      authorColorValue: _currentAnnotatorColorValue,
-    );
-    setState(() {
-      _annotationsByImage.putIfAbsent(imageKey, () => []).add(annotation);
-      _selectedAnnotationId = null;
-      _activeTool = 'draw';
-    });
+    setState(() => _activeTool = 'draw');
     logApp(
       'ANNOTATION',
       'Created seg: image=${_selectedImage?.name ?? '-'}, classId=$classId, points=${points.length}',
       level: AppLogLevel.debug,
     );
-    _scheduleAnnotationDatabaseSave();
   }
 
   void _selectAnnotation(String? id) {
-    if (!_selectedImageAuthorized) {
-      setState(() => _selectedAnnotationId = null);
-      return;
-    }
-    final annotation = id == null
-        ? null
-        : _currentAnnotations
-              .where((annotation) => annotation.id == id)
-              .firstOrNullValue;
-    setState(() {
-      _selectedAnnotationId = id;
-      if (annotation != null) {
-        _activeClassId = annotation.classId;
-      }
-    });
-  }
-
-  bool _canModifyAnnotation(
-    AnnotationRegion annotation, {
-    required String action,
-  }) {
-    if (_collaborationMode != CollaborationMode.client) {
-      return true;
-    }
-    if (annotation.authorId == _collaborationAuthorId) {
-      return true;
-    }
-    return switch (action) {
-      'edit' => _collaborationSelfPermissions.canEditOthers,
-      'delete' => _collaborationSelfPermissions.canDeleteOthers,
-      'class' => _collaborationSelfPermissions.canChangeClass,
-      _ => false,
-    };
+    _annotationEditing.selectAnnotation(id);
   }
 
   void _updateAnnotation(AnnotationRegion annotation) {
-    final imageKey = _selectedImageKey;
-    if (imageKey == null || !_selectedImageAuthorized) {
-      return;
-    }
-    final existing = _currentAnnotations
-        .where((item) => item.id == annotation.id)
-        .firstOrNullValue;
-    if (existing != null && !_canModifyAnnotation(existing, action: 'edit')) {
-      return;
-    }
-    setState(() {
-      final annotations = _annotationsByImage[imageKey];
-      if (annotations == null) {
-        return;
-      }
-      final index = annotations.indexWhere((item) => item.id == annotation.id);
-      if (index >= 0) {
-        annotations[index] = annotation;
-      }
-    });
-    _scheduleAnnotationDatabaseSave();
+    _annotationEditing.updateAnnotation(annotation);
   }
 
   void _changeAnnotationClass(String annotationId, int classId) {
-    final imageKey = _selectedImageKey;
-    if (imageKey == null || !_selectedImageAuthorized) {
-      return;
-    }
-    final existing = _currentAnnotations
-        .where((item) => item.id == annotationId)
-        .firstOrNullValue;
-    if (existing != null && !_canModifyAnnotation(existing, action: 'class')) {
+    final result = _annotationEditing.changeAnnotationClass(
+      annotationId,
+      classId,
+    );
+    if (result == AnnotationEditResult.permissionDenied) {
       _showFloatingMessage(t('collab.permissionDenied'));
-      return;
-    }
-    _pushAnnotationSnapshot();
-    var changed = false;
-    setState(() {
-      final annotations = _annotationsByImage[imageKey];
-      if (annotations == null) {
-        return;
-      }
-      final index = annotations.indexWhere((item) => item.id == annotationId);
-      if (index >= 0) {
-        annotations[index] = annotations[index].copyWith(classId: classId);
-        _activeClassId = classId;
-        changed = true;
-      }
-    });
-    if (changed) {
-      logApp(
-        'ANNOTATION',
-        'Class changed: annotation=$annotationId, classId=$classId',
-        level: AppLogLevel.debug,
-      );
-      _scheduleAnnotationDatabaseSave();
     }
   }
 
   void _deleteAnnotation(String id) {
-    final imageKey = _selectedImageKey;
-    if (imageKey == null || !_selectedImageAuthorized) {
-      return;
-    }
-    final existing = _currentAnnotations
-        .where((item) => item.id == id)
-        .firstOrNullValue;
-    if (existing != null && !_canModifyAnnotation(existing, action: 'delete')) {
+    final result = _annotationEditing.deleteAnnotation(id);
+    if (result == AnnotationEditResult.permissionDenied) {
       _showFloatingMessage(t('collab.permissionDenied'));
-      return;
     }
-    _pushAnnotationSnapshot();
-    setState(() {
-      _annotationsByImage[imageKey]?.removeWhere(
-        (annotation) => annotation.id == id,
-      );
-      if (_selectedAnnotationId == id) {
-        _selectedAnnotationId = null;
-      }
-    });
-    logApp('ANNOTATION', 'Deleted annotation: $id', level: AppLogLevel.debug);
-    _scheduleAnnotationDatabaseSave();
   }
 
   void _deleteSelectedAnnotation() {
@@ -2830,136 +1562,78 @@ extension _WorkspaceShellAnnotationActions on _WorkspaceShellState {
     if (selectedId == null) {
       return;
     }
-    final selected = _currentAnnotations
-        .where((annotation) => annotation.id == selectedId)
-        .firstOrNullValue;
+    final selected = _annotationEditing.copySelectedAnnotation();
     if (selected != null) {
-      setState(() => _copiedAnnotation = selected);
       _showFloatingMessage(t('feedback.copiedAnnotation'));
     }
   }
 
   void _pasteAnnotation() {
-    final imageKey = _selectedImageKey;
-    final copied = _copiedAnnotation;
-    if (imageKey == null || copied == null || !_selectedImageAuthorized) {
-      return;
-    }
-    _pushAnnotationSnapshot();
-    final pasted = copied
-        .duplicate('ann_${_annotationSerial++}')
-        .copyWith(
-          authorId: _collaborationAuthorId,
-          authorName: _currentAnnotatorName,
-          authorColorValue: _currentAnnotatorColorValue,
-        );
-    setState(() {
-      _annotationsByImage.putIfAbsent(imageKey, () => []).add(pasted);
-      _selectedAnnotationId = pasted.id;
-    });
-    logApp(
-      'ANNOTATION',
-      'Pasted annotation: source=${copied.id}, pasted=${pasted.id}',
-      level: AppLogLevel.debug,
-    );
-    _scheduleAnnotationDatabaseSave();
+    _annotationEditing.pasteAnnotation();
   }
 
   void _rotateSelectedAnnotation(double deltaDegrees) {
-    final selectedId = _selectedAnnotationId;
-    if (selectedId == null) {
-      return;
-    }
-    final selected = _currentAnnotations
-        .where((annotation) => annotation.id == selectedId)
-        .firstOrNullValue;
-    if (selected == null || selected.mode != AnnotationMode.obb) {
-      return;
-    }
-    if (!_canModifyAnnotation(selected, action: 'edit')) {
-      _showFloatingMessage(t('collab.permissionDenied'));
-      return;
-    }
-    _pushAnnotationSnapshot();
-    final rotated = selected.rotated(deltaDegrees);
-    final imageSize = _imageDisplaySize;
-    _updateAnnotation(
-      imageSize != null && imageSize != Size.zero
-          ? rotated.clampObbToImage(imageSize)
-          : rotated,
+    final result = _annotationEditing.rotateSelectedAnnotation(
+      deltaDegrees,
+      imageSize: _imageDisplaySize,
     );
+    if (result == AnnotationEditResult.permissionDenied) {
+      _showFloatingMessage(t('collab.permissionDenied'));
+    }
   }
 }
 
 extension _WorkspaceShellCollaborationActions on _WorkspaceShellState {
   void _handleCollaborationEvent(Map<String, dynamic> event) {
-    switch (collaborationString(event, 'type')) {
-      case 'host_found':
-        _upsertDiscoveredHost(event);
-        break;
-      case 'join_request':
-        _handleCollaborationJoinRequest(event);
-        break;
-      case 'tcp_message':
-        _handleCollaborationTcpMessage(event);
-        break;
-      case 'client_disconnected':
-        _markCollaborationPeerOffline(collaborationString(event, 'userId'));
-        break;
-      case 'host_disconnected':
-        if (_collaborationMode == CollaborationMode.client) {
-          _startCollaborationReconnect();
+    final result = _collaborationWorkspace.handleTransportEvent(event);
+    final saveReason = result.saveReason;
+    if (saveReason != null) {
+      unawaited(_annotationDatabase.saveCollaborationNow(saveReason));
+    }
+    if (result.activateLabelPage) {
+      setState(() => _activeSection = 'label');
+    }
+    switch (result.kind) {
+      case CollaborationWorkspaceEventKind.joinRequest:
+        final request = result.joinRequest;
+        if (request != null) {
+          unawaited(_confirmCollaborationJoin(request));
         }
         break;
-      case 'network_error':
-        logApp(
-          'COLLAB',
-          'Network error: ${event['scope'] ?? '-'} ${event['error'] ?? ''}',
-          level: AppLogLevel.warning,
-        );
-        if (_collaborationMode == CollaborationMode.host &&
-            collaborationString(event, 'scope') == 'host_tcp') {
-          _collaboration.resetSession();
-          _showFloatingMessage(t('collab.networkError'));
-          unawaited(_collaboration.stopTransport());
-        }
+      case CollaborationWorkspaceEventKind.joined:
+        _showFloatingMessage(t('collab.joined'));
+        logApp('COLLAB', 'Join accepted by host');
         break;
-      default:
+      case CollaborationWorkspaceEventKind.joinRejected:
+        _showFloatingMessage(t('collab.joinRejected'));
+        _disconnectCollaborationClient(clearProject: true);
+        break;
+      case CollaborationWorkspaceEventKind.permissionsUpdated:
+        _showFloatingMessage(t('collab.permissionsUpdated'));
+        break;
+      case CollaborationWorkspaceEventKind.reconnectRequired:
+        _startCollaborationReconnect();
+        break;
+      case CollaborationWorkspaceEventKind.networkError:
+        _showFloatingMessage(t('collab.networkError'));
+        break;
+      case CollaborationWorkspaceEventKind.assignmentUpdated:
+      case CollaborationWorkspaceEventKind.peerJoined:
+      case CollaborationWorkspaceEventKind.snapshotApplied:
+      case CollaborationWorkspaceEventKind.ignored:
         break;
     }
   }
 
-  void _upsertDiscoveredHost(Map<String, dynamic> event) {
-    if (_collaboration.upsertDiscoveredHost(event)) {
-      setState(() {});
-    }
-  }
-
-  void _handleCollaborationJoinRequest(Map<String, dynamic> event) {
-    final userId = collaborationString(event, 'userId');
-    if (!_collaboration.beginJoinRequest(userId)) {
-      return;
-    }
-    unawaited(_confirmCollaborationJoin(event));
-  }
-
-  Future<void> _confirmCollaborationJoin(Map<String, dynamic> event) async {
-    final userId = collaborationString(event, 'userId');
-    final userName = collaborationString(event, 'userName').trim().isEmpty
-        ? 'User'
-        : collaborationString(event, 'userName');
-    final address = collaborationString(event, 'address');
-    final colorValue = collaborationInt(
-      event,
-      'colorValue',
-      fallback: collaborationColorForId(userId).toARGB32(),
-    );
+  Future<void> _confirmCollaborationJoin(
+    CollaborationJoinRequest request,
+  ) async {
     final allow = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text(t('collab.joinRequestTitle')),
         content: Text(
-          '${t('collab.joinRequestBody')}\n$userName#${shortCollaborationId(userId)}\n$address',
+          '${t('collab.joinRequestBody')}\n${request.userName}#${shortCollaborationId(request.userId)}\n${request.address}',
         ),
         actions: [
           TextButton(
@@ -2973,250 +1647,31 @@ extension _WorkspaceShellCollaborationActions on _WorkspaceShellState {
         ],
       ),
     );
-    _collaboration.finishJoinRequest(userId);
     if (!mounted) {
+      _collaboration.finishJoinRequest(request.userId);
       return;
     }
     if (allow == true) {
-      final permissions = const CollaborationPermissions();
-      final assignmentStart = _collaborationStartIndex
-          .clamp(1, math.max(1, _images.length))
-          .toInt();
-      final assignmentEnd = _collaborationEndIndex
-          .clamp(assignmentStart, math.max(1, _images.length))
-          .toInt();
-      setState(() {
-        _upsertCollaborationPeer(
-          CollaborationPeer(
-            userId: userId,
-            userName: userName,
-            colorValue: colorValue,
-            address: address,
-            online: true,
-            assignmentStart: assignmentStart,
-            assignmentEnd: assignmentEnd,
-            permissions: permissions,
-          ),
-        );
-      });
-      await _sendCollaborationCommand({
-        'action': 'host_accept',
-        'userId': userId,
-        'hostId': _collaborationHostId,
-        'assignmentStart': assignmentStart,
-        'assignmentEnd': assignmentEnd,
-        'canEditOthers': permissions.canEditOthers,
-        'canDeleteOthers': permissions.canDeleteOthers,
-        'canChangeClass': permissions.canChangeClass,
-      });
-      _sendCollaborationMessageToPeer(
-        userId,
-        _collaborationProjectSnapshotMessage(
-          assignmentStart: assignmentStart,
-          assignmentEnd: assignmentEnd,
-        ),
+      final peer = await _collaboration.acceptJoinRequest(
+        request,
+        imageCount: _images.length,
+        projectSnapshotBuilder: (start, end) =>
+            _collaborationProjectSnapshotMessage(
+              assignmentStart: start,
+              assignmentEnd: end,
+            ),
       );
-      _broadcastCollaborationMessage({
-        'type': 'peer_joined',
-        'userId': userId,
-        'userName': userName,
-        'colorValue': colorValue,
-        'address': address,
-      });
-      _scheduleAnnotationDatabaseSave();
+      _annotationDatabase.scheduleSave();
       _showFloatingMessage(t('collab.joinAccepted'));
-      logApp('COLLAB', 'Join accepted: user=$userId, address=$address');
+      logApp(
+        'COLLAB',
+        'Join accepted: user=${peer.userId}, address=${peer.address}',
+      );
     } else {
-      await _sendCollaborationCommand({
-        'action': 'host_reject',
-        'userId': userId,
-        'reason': 'rejected',
-      });
-      logApp('COLLAB', 'Join rejected: user=$userId, address=$address');
-    }
-  }
-
-  void _handleCollaborationTcpMessage(Map<String, dynamic> event) {
-    final message = collaborationMap(event['message']);
-    switch (collaborationString(message, 'type')) {
-      case 'join_accepted':
-        final joinPermissions = collaborationMap(message['permissions']);
-        _collaboration.completeJoin(
-          assignmentStart: collaborationInt(
-            message,
-            'assignmentStart',
-            fallback: 1,
-          ),
-          assignmentEnd: collaborationInt(
-            message,
-            'assignmentEnd',
-            fallback: math.max(1, _images.length),
-          ),
-          permissions: CollaborationPermissions(
-            canEditOthers: collaborationBool(joinPermissions, 'canEditOthers'),
-            canDeleteOthers: collaborationBool(
-              joinPermissions,
-              'canDeleteOthers',
-            ),
-            canChangeClass: collaborationBool(
-              joinPermissions,
-              'canChangeClass',
-            ),
-          ),
-        );
-        setState(() {
-          final host = _connectedCollaborationHost;
-          if (host != null) {
-            _upsertCollaborationPeer(
-              CollaborationPeer(
-                userId: host.hostId,
-                userName: host.hostName,
-                address: '${host.address}:${host.port}',
-                colorValue: collaborationColorForId(host.hostId).toARGB32(),
-                online: true,
-              ),
-            );
-          }
-        });
-        unawaited(_saveCollaborationAnnotationDatabaseNow('join accepted'));
-        _showFloatingMessage(t('collab.joined'));
-        logApp('COLLAB', 'Join accepted by host');
-        break;
-      case 'join_rejected':
-        _collaboration.rejectJoin();
-        _showFloatingMessage(t('collab.joinRejected'));
-        _disconnectCollaborationClient(clearProject: true);
-        break;
-      case 'permission_update':
-        final permissions = collaborationMap(message['permissions']);
-        setState(() {
-          _collaborationSelfPermissions = CollaborationPermissions(
-            canEditOthers: collaborationBool(permissions, 'canEditOthers'),
-            canDeleteOthers: collaborationBool(permissions, 'canDeleteOthers'),
-            canChangeClass: collaborationBool(permissions, 'canChangeClass'),
-          );
-          _collaborationStartIndex = collaborationInt(
-            message,
-            'assignmentStart',
-            fallback: _collaborationStartIndex,
-          );
-          _collaborationEndIndex = collaborationInt(
-            message,
-            'assignmentEnd',
-            fallback: _collaborationEndIndex,
-          );
-          _moveToFirstAuthorizedCollaborationImage();
-        });
-        unawaited(
-          _saveCollaborationAnnotationDatabaseNow('permissions updated'),
-        );
-        _showFloatingMessage(t('collab.permissionsUpdated'));
-        break;
-      case 'assignment_update':
-        setState(() {
-          _collaborationStartIndex = collaborationInt(
-            message,
-            'assignmentStart',
-            fallback: _collaborationStartIndex,
-          );
-          _collaborationEndIndex = collaborationInt(
-            message,
-            'assignmentEnd',
-            fallback: _collaborationEndIndex,
-          );
-          _moveToFirstAuthorizedCollaborationImage();
-        });
-        unawaited(
-          _saveCollaborationAnnotationDatabaseNow('assignment updated'),
-        );
-        break;
-      case 'peer_joined':
-        final userId = collaborationString(message, 'userId');
-        if (userId.isNotEmpty && userId != _collaborationAuthorId) {
-          setState(() {
-            _upsertCollaborationPeer(
-              CollaborationPeer(
-                userId: userId,
-                userName: collaborationString(message, 'userName'),
-                colorValue: collaborationInt(
-                  message,
-                  'colorValue',
-                  fallback: collaborationColorForId(userId).toARGB32(),
-                ),
-                address: collaborationString(message, 'address'),
-                online: true,
-              ),
-            );
-          });
-          unawaited(_saveCollaborationAnnotationDatabaseNow('peer joined'));
-        }
-        break;
-      case 'annotation_snapshot':
-        _applyCollaborationAnnotationSnapshot(
-          message,
-          fromUserId: collaborationString(event, 'fromUserId'),
-        );
-        break;
-      case 'class_snapshot':
-        if (_collaborationMode == CollaborationMode.client) {
-          _applyCollaborationClassSnapshot(message);
-        }
-        break;
-      case 'project_snapshot':
-        if (_collaborationMode == CollaborationMode.client) {
-          _applyCollaborationProjectSnapshot(message);
-        }
-        break;
-      default:
-        break;
-    }
-  }
-
-  void _publishCurrentCollaborationAnnotations() {
-    if (_collaborationMode == CollaborationMode.off ||
-        !_selectedImageAuthorized) {
-      return;
-    }
-    final image = _selectedImage;
-    if (image == null) {
-      return;
-    }
-    final limitedToOwnAnnotations =
-        _collaborationMode == CollaborationMode.client &&
-        !_collaborationSelfPermissions.canEditOthers &&
-        !_collaborationSelfPermissions.canDeleteOthers &&
-        !_collaborationSelfPermissions.canChangeClass;
-    final annotations = limitedToOwnAnnotations
-        ? _currentAnnotations
-              .where(
-                (annotation) =>
-                    annotation.authorId.isEmpty ||
-                    annotation.authorId == _collaborationAuthorId,
-              )
-              .toList(growable: false)
-        : _currentAnnotations;
-    final message = <String, Object?>{
-      'type': 'annotation_snapshot',
-      'imagePath': image.path,
-      'imageIndex': _selectedImageIndex + 1,
-      'sourceUserId': _collaborationAuthorId,
-      'authoritative': !limitedToOwnAnnotations,
-      if (limitedToOwnAnnotations) 'authorScope': _collaborationAuthorId,
-      if (_collaborationMode == CollaborationMode.host)
-        'classes': _collaborationClassesPayload(),
-      'annotations': [
-        for (final annotation in annotations)
-          _collaborationAnnotationToJson(annotation),
-      ],
-    };
-    if (_collaborationMode == CollaborationMode.host) {
-      _sendCollaborationMessageToAuthorizedPeers(message, _selectedImageIndex);
-    } else {
-      unawaited(
-        _sendCollaborationCommand({
-          'action': 'send_host',
-          'message': jsonEncode(message),
-        }),
+      await _collaboration.rejectJoinRequest(request);
+      logApp(
+        'COLLAB',
+        'Join rejected: user=${request.userId}, address=${request.address}',
       );
     }
   }
@@ -3225,554 +1680,14 @@ extension _WorkspaceShellCollaborationActions on _WorkspaceShellState {
     int? assignmentStart,
     int? assignmentEnd,
   }) {
-    final start = assignmentStart ?? _collaborationStartIndex;
-    final end = assignmentEnd ?? _collaborationEndIndex;
-    return {
-      'type': 'project_snapshot',
-      'projectKey': _databaseProjectKey(),
-      'assignmentStart': start,
-      'assignmentEnd': end,
-      'images': [
-        for (var index = 0; index < _images.length; index++)
-          {
-            'path': _images[index].path,
-            'name': _images[index].name,
-            'split': _imageSplits[pathKey(_images[index].path)] ?? 'train',
-            'width':
-                (_displaySizeForImagePath(_images[index].path) ?? Size.zero)
-                    .width,
-            'height':
-                (_displaySizeForImagePath(_images[index].path) ?? Size.zero)
-                    .height,
-            'index': index + 1,
-            if (index + 1 >= start && index + 1 <= end)
-              'bytesBase64': _collaborationImageBytesBase64(
-                _images[index].path,
-              ),
-          },
-      ],
-      'classes': _collaborationClassesPayload(),
-      'annotationsByImage': [
-        for (var index = 0; index < _images.length; index++)
-          if (index + 1 >= start && index + 1 <= end)
-            {
-              'imageIndex': index + 1,
-              'imagePath': _images[index].path,
-              'annotations': [
-                for (final annotation in _annotationsForImagePath(
-                  _images[index].path,
-                ))
-                  _collaborationAnnotationToJson(annotation),
-              ],
-            },
-      ],
-    };
-  }
-
-  List<Map<String, Object?>> _collaborationClassesPayload() {
-    return [
-      for (final labelClass in _labelClasses)
-        {
-          'id': labelClass.id,
-          'name': labelClass.name,
-          'color': labelClass.colorValue,
-        },
-    ];
-  }
-
-  Map<String, Object?> _collaborationClassSnapshotMessage() {
-    return {
-      'type': 'class_snapshot',
-      'classes': _collaborationClassesPayload(),
-    };
-  }
-
-  void _replaceLabelClassesFromCollaboration(List<LabelClass> classes) {
-    _labelClasses
-      ..clear()
-      ..addAll(classes);
-    if (_activeClassId == null ||
-        !_labelClasses.any((item) => item.id == _activeClassId)) {
-      _activeClassId = _labelClasses.isEmpty ? null : _labelClasses.first.id;
-    }
-    _classSerial = math.max(_classSerial, nextClassSerialFor(classes));
-  }
-
-  String _collaborationImageBytesBase64(String path) {
-    try {
-      final file = File(path);
-      if (!file.existsSync()) {
-        return '';
-      }
-      return base64Encode(file.readAsBytesSync());
-    } on Object catch (error) {
-      logApp(
-        'COLLAB',
-        'Image payload read failed: path=$path, error=$error',
-        level: AppLogLevel.warning,
-      );
-      return '';
-    }
-  }
-
-  String _collaborationLocalImagePath({
-    required String remotePath,
-    required String name,
-    required String bytesBase64,
-  }) {
-    if (File(remotePath).existsSync() || bytesBase64.trim().isEmpty) {
-      return remotePath;
-    }
-    try {
-      final bytes = base64Decode(bytesBase64);
-      final cacheDir = Directory(
-        '${ConfigStore.projectDirectory.path}\\collaboration_cache',
-      );
-      if (!cacheDir.existsSync()) {
-        cacheDir.createSync(recursive: true);
-      }
-      final fileName = collaborationCacheFileName(remotePath, name);
-      final file = File('${cacheDir.path}\\$fileName');
-      file.writeAsBytesSync(bytes);
-      return file.path;
-    } on Object catch (error) {
-      logApp(
-        'COLLAB',
-        'Image payload write failed: path=$remotePath, error=$error',
-        level: AppLogLevel.warning,
-      );
-      return remotePath;
-    }
-  }
-
-  void _applyCollaborationProjectSnapshot(Map<String, dynamic> message) {
-    final rawImages = message['images'];
-    if (rawImages is! List) {
-      return;
-    }
-
-    final nextImages = <ImageItem>[];
-    final nextSplits = <String, String>{};
-    final nextSizes = <String, Size>{};
-    final remoteToLocalImagePath = <String, String>{};
-    for (final rawImage in rawImages) {
-      final image = collaborationMap(rawImage);
-      final path = collaborationString(image, 'path');
-      if (path.isEmpty) {
-        continue;
-      }
-      final name = collaborationString(image, 'name').trim().isEmpty
-          ? fileName(path)
-          : collaborationString(image, 'name');
-      final localPath = _collaborationLocalImagePath(
-        remotePath: path,
-        name: name,
-        bytesBase64: collaborationString(image, 'bytesBase64'),
-      );
-      final imageKey = pathKey(localPath);
-      remoteToLocalImagePath[pathKey(path)] = localPath;
-      nextImages.add(ImageItem(path: localPath, name: name));
-      nextSplits[imageKey] = collaborationString(image, 'split').trim().isEmpty
-          ? 'train'
-          : collaborationString(image, 'split');
-      nextSizes[imageKey] = Size(
-        collaborationDouble(image, 'width'),
-        collaborationDouble(image, 'height'),
-      );
-    }
-    if (nextImages.isEmpty) {
-      return;
-    }
-
-    final nextClasses = collaborationClassesFromJson(message['classes']);
-    final nextClassSerial = nextClassSerialFor(nextClasses);
-
-    final nextAnnotations = <String, List<AnnotationRegion>>{};
-    var maxAnnotationSerial = _annotationSerial;
-    final rawAnnotationsByImage = message['annotationsByImage'];
-    if (rawAnnotationsByImage is List) {
-      for (final rawEntry in rawAnnotationsByImage) {
-        final entry = collaborationMap(rawEntry);
-        final imagePath = collaborationString(entry, 'imagePath');
-        final imageIndex =
-            collaborationInt(entry, 'imageIndex', fallback: 0) - 1;
-        final localImagePath = imageIndex >= 0 && imageIndex < nextImages.length
-            ? nextImages[imageIndex].path
-            : remoteToLocalImagePath[pathKey(imagePath)] ?? imagePath;
-        if (localImagePath.isEmpty) {
-          continue;
-        }
-        final rawAnnotations = entry['annotations'];
-        if (rawAnnotations is! List) {
-          continue;
-        }
-        final annotations = rawAnnotations
-            .map(collaborationAnnotationFromJson)
-            .whereType<AnnotationRegion>()
-            .toList();
-        for (final annotation in annotations) {
-          final match = RegExp(r'^ann_(\d+)$').firstMatch(annotation.id);
-          if (match != null) {
-            final serial = int.tryParse(match.group(1) ?? '');
-            if (serial != null && serial >= maxAnnotationSerial) {
-              maxAnnotationSerial = serial + 1;
-            }
-          }
-        }
-        nextAnnotations[pathKey(localImagePath)] = annotations;
-      }
-    }
-
-    final snapshotStart = collaborationInt(
-      message,
-      'assignmentStart',
-      fallback: _collaborationStartIndex,
-    );
-    final snapshotEnd = collaborationInt(
-      message,
-      'assignmentEnd',
-      fallback: _collaborationEndIndex,
-    );
-    final firstAuthorizedIndex = (snapshotStart - 1)
-        .clamp(0, nextImages.length - 1)
-        .toInt();
-    setState(() {
-      _collaborationStartIndex = snapshotStart;
-      _collaborationEndIndex = snapshotEnd;
-      _images
-        ..clear()
-        ..addAll(nextImages);
-      _imageSplits
-        ..clear()
-        ..addAll(nextSplits);
-      _imageDisplaySizes
-        ..clear()
-        ..addAll(nextSizes);
-      _replaceLabelClassesFromCollaboration(nextClasses);
-      _annotationsByImage
-        ..clear()
-        ..addAll(nextAnnotations);
-      _importedDataset = null;
-      _selectedImageIndex = firstAuthorizedIndex;
-      _selectedAnnotationId = null;
-      _activeClassId = nextClasses.isEmpty ? null : nextClasses.first.id;
-      _classSerial = math.max(_classSerial, nextClassSerial);
-      _annotationSerial = math.max(_annotationSerial, maxAnnotationSerial);
-      _undoStack.clear();
-      _redoStack.clear();
-      _moveToFirstAuthorizedCollaborationImage();
-      _activeSection = 'label';
-    });
-    unawaited(_saveCollaborationAnnotationDatabaseNow('project snapshot'));
-  }
-
-  void _applyCollaborationClassSnapshot(Map<String, dynamic> message) {
-    if (message['classes'] is! List) {
-      return;
-    }
-    final nextClasses = collaborationClassesFromJson(message['classes']);
-    setState(() {
-      _replaceLabelClassesFromCollaboration(nextClasses);
-    });
-    unawaited(_saveCollaborationAnnotationDatabaseNow('class snapshot'));
-  }
-
-  Map<String, Object?> _collaborationAnnotationToJson(
-    AnnotationRegion annotation,
-  ) {
-    final rect = annotation.rect;
-    final authorId = annotation.authorId.trim().isEmpty
-        ? _collaborationAuthorId
-        : annotation.authorId;
-    final authorName = annotation.authorName.trim().isEmpty
-        ? _currentAnnotatorName
-        : annotation.authorName;
-    final authorColor = annotation.authorColorValue == 0
-        ? _currentAnnotatorColorValue
-        : annotation.authorColorValue;
-    return {
-      'id': annotation.id,
-      'mode': annotation.mode.name,
-      'classId': annotation.classId,
-      'left': rect.left,
-      'top': rect.top,
-      'right': rect.right,
-      'bottom': rect.bottom,
-      'rotation': annotation.rotationDegrees,
-      'points': [
-        for (final point in annotation.points) {'x': point.dx, 'y': point.dy},
-      ],
-      'authorId': authorId,
-      'authorName': authorName,
-      'authorColor': authorColor,
-    };
-  }
-
-  AnnotationRegion _withCollaborationAuthorFallback(
-    AnnotationRegion annotation,
-    String fallbackUserId,
-  ) {
-    final userId = annotation.authorId.trim().isEmpty
-        ? fallbackUserId.trim()
-        : annotation.authorId;
-    if (userId.isEmpty) {
-      return annotation;
-    }
-    final peer = _collaborationPeers
-        .where((item) => item.userId == userId)
-        .firstOrNullValue;
-    final peerName = peer?.userName.trim() ?? '';
-    final peerColor = peer?.colorValue;
-    final authorName = annotation.authorName.trim().isEmpty
-        ? userId == _collaborationAuthorId
-              ? _currentAnnotatorName
-              : (peerName.isNotEmpty ? peerName : 'User')
-        : annotation.authorName;
-    final authorColor = annotation.authorColorValue == 0
-        ? userId == _collaborationAuthorId
-              ? _currentAnnotatorColorValue
-              : (peerColor ?? collaborationColorForId(userId).toARGB32())
-        : annotation.authorColorValue;
-    return annotation.copyWith(
-      authorId: userId,
-      authorName: authorName,
-      authorColorValue: authorColor,
-    );
-  }
-
-  void _applyCollaborationAnnotationSnapshot(
-    Map<String, dynamic> message, {
-    required String fromUserId,
-  }) {
-    if (_collaborationMode == CollaborationMode.off) {
-      return;
-    }
-    final imageIndex = collaborationInt(message, 'imageIndex', fallback: 0) - 1;
-    if (imageIndex < 0 || imageIndex >= _images.length) {
-      return;
-    }
-    if (_collaborationMode == CollaborationMode.host && fromUserId.isNotEmpty) {
-      final peer = _collaborationPeers
-          .where((item) => item.userId == fromUserId)
-          .firstOrNullValue;
-      if (peer == null || !_collaborationPeerCanAccessImage(peer, imageIndex)) {
-        return;
-      }
-    }
-    if (_collaborationMode == CollaborationMode.client &&
-        !_isImageIndexAuthorized(imageIndex)) {
-      return;
-    }
-    final rawAnnotations = message['annotations'];
-    if (rawAnnotations is! List) {
-      return;
-    }
-    final hasClassPayload = message['classes'] is List;
-    final nextClasses = hasClassPayload
-        ? collaborationClassesFromJson(message['classes'])
-        : const <LabelClass>[];
-    final sourceUserId = fromUserId.trim().isNotEmpty
-        ? fromUserId.trim()
-        : collaborationString(message, 'sourceUserId').trim();
-    final authorScope = collaborationString(message, 'authorScope').trim();
-    final authoritative = collaborationBool(message, 'authoritative');
-    final incoming = rawAnnotations
-        .map(collaborationAnnotationFromJson)
-        .whereType<AnnotationRegion>()
-        .map(
-          (annotation) =>
-              _withCollaborationAuthorFallback(annotation, sourceUserId),
-        )
-        .toList(growable: false);
-    final imageKey = pathKey(_images[imageIndex].path);
-    final incomingIds = {for (final item in incoming) item.id};
-    final incomingAuthors = {
-      for (final item in incoming)
-        if (item.authorId.isNotEmpty) item.authorId,
-    };
-    setState(() {
-      if (hasClassPayload) {
-        _replaceLabelClassesFromCollaboration(nextClasses);
-      }
-      final annotations = _annotationsByImage.putIfAbsent(imageKey, () => []);
-      if (authoritative) {
-        annotations.removeWhere((item) => !incomingIds.contains(item.id));
-      } else {
-        final scopedAuthors = {
-          ...incomingAuthors,
-          if (authorScope.isNotEmpty) authorScope,
-          if (authorScope.isEmpty && sourceUserId.isNotEmpty) sourceUserId,
-        };
-        annotations.removeWhere(
-          (item) =>
-              scopedAuthors.contains(item.authorId) &&
-              !incomingIds.contains(item.id),
-        );
-      }
-      for (final annotation in incoming) {
-        final index = annotations.indexWhere(
-          (item) => item.id == annotation.id,
-        );
-        if (index >= 0) {
-          annotations[index] = annotation;
-        } else {
-          annotations.add(annotation);
-        }
-      }
-    });
-    unawaited(_saveCollaborationAnnotationDatabaseNow('annotation snapshot'));
-    if (_collaborationMode == CollaborationMode.host) {
-      _sendCollaborationMessageToAuthorizedPeers(
-        {
-          ...message,
-          'sourceUserId': fromUserId,
-          'classes': _collaborationClassesPayload(),
-        },
-        imageIndex,
-        excludeUserId: fromUserId,
-      );
-    }
-  }
-
-  void _upsertCollaborationPeer(CollaborationPeer peer) {
-    _collaboration.upsertPeer(peer);
-  }
-
-  void _markCollaborationPeerOffline(String userId) {
-    if (_collaboration.markPeerOffline(userId)) {
-      setState(() {});
-    }
-  }
-
-  Future<void> _sendCollaborationCommand(Map<String, Object?> request) async {
-    try {
-      await _collaboration.sendCommand(request);
-    } on Object catch (error) {
-      logApp(
-        'COLLAB',
-        'Command failed: ${request['action'] ?? '-'} $error',
-        level: AppLogLevel.warning,
-      );
-      if (mounted) {
-        _showFloatingMessage(t('collab.networkError'));
-      }
-    }
-  }
-
-  void _sendCollaborationMessageToPeer(
-    String userId,
-    Map<String, Object?> message,
-  ) {
-    unawaited(
-      _sendCollaborationCommand({
-        'action': 'send_peer',
-        'userId': userId,
-        'message': jsonEncode(message),
-      }),
-    );
-  }
-
-  void _broadcastCollaborationMessage(Map<String, Object?> message) {
-    if (_collaborationMode != CollaborationMode.host) {
-      return;
-    }
-    unawaited(
-      _sendCollaborationCommand({
-        'action': 'broadcast',
-        'message': jsonEncode(message),
-      }),
-    );
-  }
-
-  void _broadcastCollaborationClassSnapshot(String reason) {
-    if (_collaborationMode != CollaborationMode.host) {
-      return;
-    }
-    _broadcastCollaborationMessage(_collaborationClassSnapshotMessage());
-    logApp(
-      'COLLAB',
-      'Class snapshot broadcast: reason=$reason, classes=${_labelClasses.length}',
-      level: AppLogLevel.debug,
+    return _collaborationSync.projectSnapshotMessage(
+      assignmentStart: assignmentStart,
+      assignmentEnd: assignmentEnd,
     );
   }
 
   void _broadcastCollaborationProjectSnapshot(String reason) {
-    if (_collaborationMode != CollaborationMode.host) {
-      return;
-    }
-    var count = 0;
-    for (final peer in _collaborationPeers) {
-      if (!peer.online) {
-        continue;
-      }
-      _sendCollaborationMessageToPeer(
-        peer.userId,
-        _collaborationProjectSnapshotMessage(
-          assignmentStart: peer.assignmentStart,
-          assignmentEnd: peer.assignmentEnd,
-        ),
-      );
-      count += 1;
-    }
-    logApp(
-      'COLLAB',
-      'Project snapshot broadcast: reason=$reason, peers=$count, images=${_images.length}',
-      level: AppLogLevel.debug,
-    );
-  }
-
-  void _broadcastCollaborationAllAnnotations(String reason) {
-    if (_collaborationMode != CollaborationMode.host || _images.isEmpty) {
-      return;
-    }
-    for (var index = 0; index < _images.length; index++) {
-      final image = _images[index];
-      _sendCollaborationMessageToAuthorizedPeers({
-        'type': 'annotation_snapshot',
-        'imagePath': image.path,
-        'imageIndex': index + 1,
-        'sourceUserId': _collaborationAuthorId,
-        'authoritative': true,
-        'classes': _collaborationClassesPayload(),
-        'annotations': [
-          for (final annotation in _annotationsForImagePath(image.path))
-            _collaborationAnnotationToJson(annotation),
-        ],
-      }, index);
-    }
-    logApp(
-      'COLLAB',
-      'Annotation snapshots broadcast: reason=$reason, images=${_images.length}',
-      level: AppLogLevel.debug,
-    );
-  }
-
-  bool _collaborationPeerCanAccessImage(
-    CollaborationPeer peer,
-    int zeroBasedIndex,
-  ) {
-    return peer.online &&
-        _images.isNotEmpty &&
-        _collaboration.peerCanAccessImage(peer, zeroBasedIndex);
-  }
-
-  void _sendCollaborationMessageToAuthorizedPeers(
-    Map<String, Object?> message,
-    int zeroBasedImageIndex, {
-    String? excludeUserId,
-  }) {
-    if (_collaborationMode != CollaborationMode.host) {
-      return;
-    }
-    for (final peer in _collaborationPeers) {
-      if (peer.userId == excludeUserId) {
-        continue;
-      }
-      if (!_collaborationPeerCanAccessImage(peer, zeroBasedImageIndex)) {
-        continue;
-      }
-      _sendCollaborationMessageToPeer(peer.userId, message);
-    }
+    _collaborationSync.broadcastProjectSnapshot(reason);
   }
 
   void _setCollaborationUserName(String value) {
@@ -3785,81 +1700,72 @@ extension _WorkspaceShellCollaborationActions on _WorkspaceShellState {
   }
 
   void _startCollaborationHost() {
-    if (_images.isEmpty) {
-      _showFloatingMessage(t('collab.openProjectFirst'));
-      return;
-    }
-    final imageCount = _images.length;
-    _collaboration.prepareHost(imageCount);
-    unawaited(_startCollaborationHostNetwork(imageCount));
+    unawaited(_startCollaborationHostNetwork());
   }
 
-  Future<void> _startCollaborationHostNetwork(int imageCount) async {
-    try {
-      await _collaboration.startHostTransport(
-        projectId: _databaseProjectKey(),
-        imageCount: imageCount,
-      );
-      logApp(
-        'COLLAB',
-        'Host mode enabled: hostId=$_collaborationHostId, port=$_collaborationPort',
-      );
-    } on Object catch (error) {
-      if (!mounted) {
+  Future<void> _startCollaborationHostNetwork() async {
+    final result = await _collaborationWorkspace.startHostSession(
+      projectId: _annotationDatabase.projectKey,
+    );
+    if (!mounted) {
+      return;
+    }
+    switch (result.status) {
+      case CollaborationHostStartStatus.started:
+        logApp(
+          'COLLAB',
+          'Host mode enabled: hostId=$_collaborationHostId, port=$_collaborationPort',
+        );
         return;
-      }
-      _collaboration.resetSession();
-      _showFloatingMessage(t('collab.networkError'));
-      logApp('COLLAB', 'Host start failed: $error', level: AppLogLevel.error);
-      unawaited(_collaboration.restartDiscovery());
+      case CollaborationHostStartStatus.noProject:
+        _showFloatingMessage(t('collab.openProjectFirst'));
+        return;
+      case CollaborationHostStartStatus.failed:
+        _showFloatingMessage(t('collab.networkError'));
+        logApp(
+          'COLLAB',
+          'Host start failed: ${result.error}',
+          level: AppLogLevel.error,
+        );
+        return;
     }
   }
 
   void _joinCollaborationHost() {
-    if (_collaborationJoining) {
-      return;
-    }
-    final selectedHost = _collaboration.selectedHost;
-    if (selectedHost == null) {
-      _showFloatingMessage(t('collab.selectHostFirst'));
-      return;
-    }
-    unawaited(_joinCollaborationHostNetwork(selectedHost));
+    unawaited(_joinCollaborationHostNetwork());
   }
 
-  Future<void> _joinCollaborationHostNetwork(
-    CollaborationDiscoveredHost selectedHost,
-  ) async {
-    try {
-      await _collaboration.joinHost(selectedHost);
-      if (!mounted) {
+  Future<void> _joinCollaborationHostNetwork() async {
+    final result = await _collaborationWorkspace.joinSelectedHost();
+    if (!mounted) {
+      return;
+    }
+    switch (result.status) {
+      case CollaborationJoinStartStatus.sent:
+        final host = result.host!;
+        logApp(
+          'COLLAB',
+          'Join request sent: user=$_currentAnnotatorLabel, host=${host.hostId}, address=${host.address}:${host.port}',
+        );
         return;
-      }
-      logApp(
-        'COLLAB',
-        'Join request sent: user=$_currentAnnotatorLabel, host=${selectedHost.hostId}, address=${selectedHost.address}:${selectedHost.port}',
-      );
-    } on Object catch (error) {
-      if (!mounted) {
+      case CollaborationJoinStartStatus.noHostSelected:
+        _showFloatingMessage(t('collab.selectHostFirst'));
         return;
-      }
-      _showFloatingMessage(t('collab.networkError'));
-      logApp('COLLAB', 'Join failed: $error', level: AppLogLevel.error);
-      unawaited(_collaboration.restartDiscovery());
+      case CollaborationJoinStartStatus.failed:
+        _showFloatingMessage(t('collab.networkError'));
+        logApp(
+          'COLLAB',
+          'Join failed: ${result.error}',
+          level: AppLogLevel.error,
+        );
+        return;
+      case CollaborationJoinStartStatus.alreadyJoining:
+        return;
     }
   }
 
   void _startCollaborationReconnect() {
-    if (_collaborationReconnecting) {
-      return;
-    }
-    final host = _connectedCollaborationHost;
-    if (host == null) {
-      _disconnectCollaborationClient(clearProject: true);
-      return;
-    }
-    setState(() => _selectedAnnotationId = null);
-    final started = _collaboration.beginReconnect(
+    final result = _collaborationWorkspace.beginReconnect(
       onExhausted: () {
         if (!mounted) {
           return;
@@ -3868,93 +1774,71 @@ extension _WorkspaceShellCollaborationActions on _WorkspaceShellState {
         _disconnectCollaborationClient(clearProject: true);
       },
     );
-    if (!started) {
-      return;
+    switch (result.status) {
+      case CollaborationReconnectStartStatus.started:
+        setState(() => _selectedAnnotationId = null);
+        logApp(
+          'COLLAB',
+          'Host disconnected, reconnecting: host=${result.host!.hostId}',
+          level: AppLogLevel.warning,
+        );
+        return;
+      case CollaborationReconnectStartStatus.noConnectedHost:
+        _disconnectCollaborationClient(clearProject: true);
+        return;
+      case CollaborationReconnectStartStatus.alreadyReconnecting:
+      case CollaborationReconnectStartStatus.notStarted:
+        return;
     }
-    logApp(
-      'COLLAB',
-      'Host disconnected, reconnecting: host=${host.hostId}',
-      level: AppLogLevel.warning,
-    );
   }
 
   void _cancelCollaborationReconnect() {
-    _collaboration.cancelReconnect();
+    _collaborationWorkspace.cancelReconnect();
     _showFloatingMessage(t('collab.reconnectCancelled'));
     _disconnectCollaborationClient(clearProject: true);
   }
 
   void _disconnectCollaborationClient({required bool clearProject}) {
-    _collaboration.resetSession();
+    unawaited(_collaborationWorkspace.endSession());
+    if (clearProject) {
+      _clearCurrentProjectState();
+    }
     setState(() {
       _selectedAnnotationId = null;
-      if (clearProject) {
-        _clearCurrentProjectState();
-      }
     });
-    unawaited(_collaboration.stopTransport());
   }
 
   void _stopCollaboration() {
     final wasClient = _collaborationMode == CollaborationMode.client;
     if (!wasClient) {
-      _databaseSaveTimer?.cancel();
-      unawaited(_saveAnnotationDatabaseNow());
+      _annotationDatabase.cancelScheduledSave();
+      unawaited(_annotationDatabase.saveNow());
     }
-    _collaboration.resetSession();
+    unawaited(_collaborationWorkspace.endSession());
+    if (wasClient) {
+      _clearCurrentProjectState();
+    }
     setState(() {
       _selectedAnnotationId = null;
-      if (wasClient) {
-        _clearCurrentProjectState();
-      }
     });
-    unawaited(_collaboration.stopTransport());
     logApp('COLLAB', 'Collaboration stopped');
   }
 
   void _setCollaborationPeerPermissions(
     CollaborationPeerPermissionResult result,
   ) {
-    final max = math.max(1, _images.length);
-    final assignmentStart = result.assignmentStart.clamp(1, max).toInt();
-    final assignmentEnd = result.assignmentEnd
-        .clamp(assignmentStart, max)
-        .toInt();
-    setState(() {
-      final index = _collaborationPeers.indexWhere(
-        (peer) => peer.userId == result.userId,
-      );
-      if (index >= 0) {
-        _collaborationPeers[index] = _collaborationPeers[index].copyWith(
-          assignmentStart: assignmentStart,
-          assignmentEnd: assignmentEnd,
-          permissions: result.permissions,
-        );
-      }
-    });
+    final updated = _collaborationWorkspace.applyPeerPermissions(result);
+    if (updated == null) {
+      return;
+    }
+    final assignmentStart = updated.assignmentStart;
+    final assignmentEnd = updated.assignmentEnd;
     logApp(
       'COLLAB',
       'Peer permissions updated: user=${result.userId}, assignment=$assignmentStart-$assignmentEnd, edit=${result.permissions.canEditOthers}, delete=${result.permissions.canDeleteOthers}, class=${result.permissions.canChangeClass}',
       level: AppLogLevel.debug,
     );
-    _sendCollaborationMessageToPeer(result.userId, {
-      'type': 'permission_update',
-      'assignmentStart': assignmentStart,
-      'assignmentEnd': assignmentEnd,
-      'permissions': {
-        'canEditOthers': result.permissions.canEditOthers,
-        'canDeleteOthers': result.permissions.canDeleteOthers,
-        'canChangeClass': result.permissions.canChangeClass,
-      },
-    });
-    _sendCollaborationMessageToPeer(
-      result.userId,
-      _collaborationProjectSnapshotMessage(
-        assignmentStart: assignmentStart,
-        assignmentEnd: assignmentEnd,
-      ),
-    );
-    _scheduleAnnotationDatabaseSave();
+    _annotationDatabase.scheduleSave();
   }
 }
 
@@ -3966,42 +1850,55 @@ extension _WorkspaceShellExportActions on _WorkspaceShellState {
     );
     if (config == null || !mounted) return;
     final importedDataset = _importedDataset;
-    String? dataYamlPath;
+    var overwriteImported = false;
     if (importedDataset != null) {
       final overwrite = await _confirmOverwriteImportedDataset();
       if (overwrite == null || !mounted) {
         return;
       }
-      if (overwrite) {
-        dataYamlPath = await _exportImportedDataset(config, importedDataset);
-      } else {
-        dataYamlPath = await _exportAnnotations(config);
-      }
-    } else {
-      dataYamlPath = await _exportAnnotations(config);
+      overwriteImported = overwrite;
     }
-    if (config.trainAfterExport && dataYamlPath != null && mounted) {
-      await _trainFromExportedDataset(dataYamlPath);
-    }
-  }
-
-  Future<void> _trainFromExportedDataset(String dataYamlPath) async {
-    logApp('EXPORT', 'Export auto training requested: data_yaml=$dataYamlPath');
-    setState(() => _activeSection = 'train');
-    await Future<void>.delayed(Duration.zero);
+    final workflowResult = await _exportController.exportDataset(
+      config: config,
+      exportRoot: _appSettings.exportPath,
+      overwriteImported: overwriteImported,
+      displaySizeForImagePath: _displaySizeForImagePath,
+      ensureDisplaySizeForImagePath: _computeImageDisplaySize,
+    );
     if (!mounted) {
       return;
     }
-    final trainPage = _trainPageKey.currentState;
-    if (trainPage == null) {
-      logApp(
-        'EXPORT',
-        'Export auto training skipped: training page is not ready',
-        level: AppLogLevel.warning,
-      );
+    final exportResult = workflowResult.result;
+    if (exportResult == null) {
+      _showFloatingMessage(t('export.noData'));
       return;
     }
+    if (workflowResult.mode == DatasetExportMode.overwriteImported) {
+      _showFloatingMessage(t('export.done'));
+    } else {
+      _showFloatingMessage(
+        '${t('export.done')} (${t('export.folderName')}: ${config.folderName})',
+      );
+    }
+    if (config.trainAfterExport) {
+      await _exportController.startTrainingAfterExport(
+        exportResult.dataYamlPath,
+      );
+    }
+  }
+
+  Future<bool> _launchExportedDatasetTraining(String dataYamlPath) async {
+    setState(() => _activeSection = 'train');
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) {
+      return false;
+    }
+    final trainPage = _trainPageKey.currentState;
+    if (trainPage == null) {
+      return false;
+    }
     await trainPage.loadExportedDatasetAndStartTraining(dataYamlPath);
+    return true;
   }
 
   Future<bool?> _confirmOverwriteImportedDataset() async {
@@ -4022,105 +1919,23 @@ extension _WorkspaceShellExportActions on _WorkspaceShellState {
     _imageDisplaySizes[pathKey(imagePath)] = displaySize;
     return displaySize;
   }
-
-  Future<String?> _exportAnnotations(DatasetExportConfig config) async {
-    logApp(
-      'EXPORT',
-      'Export started: ${config.folderName} (train=${config.trainRatio.toStringAsFixed(0)}% val=${config.valRatio.toStringAsFixed(0)}% test=${config.testRatio.toStringAsFixed(0)}%)',
-    );
-    final result = await exportAnnotationsToNewDataset(
-      config: config,
-      exportRoot: _appSettings.exportPath,
-      images: _images,
-      labelClasses: _labelClasses,
-      annotationsByImage: _annotationsByImage,
-      displaySizeForImagePath: _displaySizeForImagePath,
-      ensureDisplaySizeForImagePath: _computeImageDisplaySize,
-    );
-    if (result == null) {
-      logApp(
-        'EXPORT',
-        'Export skipped: no images or annotations to export',
-        level: AppLogLevel.warning,
-      );
-      _showFloatingMessage(t('export.noData'));
-      return null;
-    }
-    logApp(
-      'EXPORT',
-      'Export completed: path=${result.outputPath}, images=${result.imageCount}, annotations=${result.annotationCount}, train=${result.trainCount}, val=${result.valCount}, test=${result.testCount}, exportImages=${result.exportImages}, skipEmpty=${result.skipEmpty}',
-    );
-    _showFloatingMessage(
-      '${t('export.done')} (${t('export.folderName')}: ${config.folderName})',
-    );
-    return result.dataYamlPath;
-  }
-
-  Future<String?> _exportImportedDataset(
-    DatasetExportConfig config,
-    ImportedDataset dataset,
-  ) async {
-    logApp(
-      'EXPORT',
-      'Overwrite imported dataset started: yaml=${dataset.dataYamlPath}',
-    );
-    final result = await overwriteImportedDatasetExport(
-      config: config,
-      dataset: dataset,
-      images: _images,
-      labelClasses: _labelClasses,
-      annotationsByImage: _annotationsByImage,
-      imageSplits: _imageSplits,
-      displaySizeForImagePath: _displaySizeForImagePath,
-      ensureDisplaySizeForImagePath: _computeImageDisplaySize,
-    );
-    if (result == null) {
-      logApp(
-        'EXPORT',
-        'Overwrite imported dataset skipped: no data',
-        level: AppLogLevel.warning,
-      );
-      _showFloatingMessage(t('export.noData'));
-      return null;
-    }
-    logApp(
-      'EXPORT',
-      'Overwrite imported dataset completed: yaml=${result.dataYamlPath}, images=${result.imageCount}, annotations=${result.annotationCount}, train=${result.trainCount}, val=${result.valCount}, test=${result.testCount}, exportImages=${result.exportImages}, skipEmpty=${result.skipEmpty}',
-    );
-    _showFloatingMessage(t('export.done'));
-    return result.dataYamlPath;
-  }
 }
 
 extension _WorkspaceShellSettingsActions on _WorkspaceShellState {
   void _toggleThemeMode() {
-    final nextDarkMode = !_darkMode;
-    setState(() {
-      _darkMode = nextDarkMode;
-      _appSettings = _appSettings.copyWith(darkMode: nextDarkMode);
-    });
-    themeModeNotifier.value = nextDarkMode ? ThemeMode.dark : ThemeMode.light;
-    ConfigStore.saveSettings(_appSettings);
+    _settingsController.toggleTheme();
   }
 
   void _updateShortcut(ShortcutAction action, LogicalKeyboardKey key) {
-    setState(() {
-      _shortcutConfig = _shortcutConfig.copyWith(action: action, key: key);
-    });
-    _saveKeybindings();
+    _settingsController.updateShortcut(action, key);
   }
 
   void _resetShortcuts() {
-    setState(() => _shortcutConfig = ShortcutConfig.defaults());
-    _saveKeybindings();
+    _settingsController.resetShortcuts();
   }
 
   void _clearRecentItems() {
-    setState(() {
-      _recentFolders.clear();
-      _recentFiles.clear();
-    });
-    _saveHistory();
+    _projectSession.clearHistory();
   }
 
   void _showTopMenu() {
@@ -4195,20 +2010,9 @@ extension _WorkspaceShellSettingsActions on _WorkspaceShellState {
   }
 
   Future<int> _clearCacheData() async {
-    setState(() {
-      _recentFolders.clear();
-      _recentFiles.clear();
-      _labelClasses.clear();
-      _annotationsByImage.clear();
-      _imageSplits.clear();
-      _importedDataset = null;
-      _undoStack.clear();
-      _redoStack.clear();
-      _activeClassId = null;
-      _selectedAnnotationId = null;
-    });
-    _saveHistory();
-    unawaited(_saveAnnotationDatabaseNow());
+    _project.clearAnnotationData();
+    _projectSession.clearHistory();
+    unawaited(_annotationDatabase.saveNow());
     return ConfigStore.cacheSizeInBytes();
   }
 }

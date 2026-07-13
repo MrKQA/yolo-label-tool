@@ -1,4 +1,11 @@
-// Annotation list panel for the label page.
+// =============================================================================
+// annotation_list_panel.dart - Annotation List Panel / 标注列表面板
+// =============================================================================
+// Scrollable list of all annotations on the current image with class name,
+// selection highlighting, and click-to-select support.
+//
+// 当前图片所有标注的可滚动列表：类别名、选中高亮和点击选择。
+// =============================================================================
 
 import 'package:flutter/material.dart';
 

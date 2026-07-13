@@ -1,3 +1,12 @@
+// =============================================================================
+// yolo_export_settings_dialog.dart - YOLO Model Export Dialog / YOLO 模型导出对话框
+// =============================================================================
+// Configures YOLO model export format (OpenVINO/ONNX), precision (FP32/FP16/INT8),
+// dynamic shapes, NMS, simplify, opset, and optional auto-export after training.
+//
+// 配置 YOLO 模型导出格式、精度、动态形状、NMS、simplify、opset 及训练后自动导出。
+// =============================================================================
+
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 

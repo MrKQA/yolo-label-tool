@@ -1,4 +1,10 @@
-// Viewport pan button for the label page image canvas.
+// =============================================================================
+// viewport_pan_button.dart - Viewport Pan Button / 视口平移按钮
+// =============================================================================
+// Directional button with long-press auto-repeat for panning the zoomed canvas.
+//
+// 带长按自动重复功能的方向按钮，用于平移放大后的画布视口。
+// =============================================================================
 
 import 'dart:async';
 

@@ -1,3 +1,12 @@
+// =============================================================================
+// export.dart - Dataset & Model Export Models / 数据集与模型导出模型
+// =============================================================================
+// Configuration classes for YOLO dataset export (split ratios, image copying)
+// and YOLO model export (format, precision, dynamic shapes, etc.).
+//
+// YOLO 数据集导出配置（划分比例、图片复制）和模型导出配置（格式、精度等）。
+// =============================================================================
+
 class DatasetExportConfig {
   const DatasetExportConfig({
     required this.skipEmpty,

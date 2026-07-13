@@ -1,3 +1,12 @@
+// =============================================================================
+// main.dart - Application Entry Point / 应用入口
+// =============================================================================
+// Initializes the Rust backend, loads localized strings, registers platform
+// plugins, and launches the Flutter app.
+//
+// 初始化 Rust 后端、加载本地化字符串、注册平台插件并启动 Flutter 应用。
+// =============================================================================
+
 import 'dart:io';
 
 import 'package:flutter/material.dart';

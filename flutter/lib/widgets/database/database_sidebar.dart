@@ -1,3 +1,12 @@
+// =============================================================================
+// database_sidebar.dart - Database Explorer Sidebar / 数据库浏览侧边栏
+// =============================================================================
+// Collapsible table explorer sidebar listing all whitelisted database tables
+// with row counts, icons, and active-table highlighting.
+//
+// 可折叠的表浏览侧边栏：列出所有白名单数据库表，含行数、图标和当前表高亮。
+// =============================================================================
+
 import 'package:flutter/material.dart';
 
 import '../../services/i18n.dart';

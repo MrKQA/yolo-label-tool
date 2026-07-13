@@ -1,3 +1,13 @@
+// =============================================================================
+// app.dart - Root Application Widget / 根应用组件
+// =============================================================================
+// Defines YoloLabelApp with Material theme configuration, dark/light mode
+// support, and the workspace shell as its home page.
+//
+// 定义 YoloLabelApp 根组件：Material 主题配置、暗色/亮色模式支持、
+// 以 WorkspaceShell 为主页面。
+// =============================================================================
+
 import 'package:flutter/material.dart';
 
 import 'models/app_status.dart';

@@ -1,3 +1,14 @@
+// =============================================================================
+// ai_assist_panel.dart - AI Assist Floating Panel / AI 辅助浮动面板
+// =============================================================================
+// Draggable, resizable floating panel for AI-assisted annotation: backend
+// selection (YOLO/SAM3), model picker, class filtering, confidence, image
+// range, SAM3 prompt mode (text/click), runtime config, and annotate buttons.
+//
+// 可拖拽/缩放浮动面板：后端选择、模型选择、类别过滤、置信度、图片范围、
+// SAM3 提示模式（文本/点击）、运行时配置和标注按钮。
+// =============================================================================
+
 import 'dart:async';
 import 'dart:math' as math;
 

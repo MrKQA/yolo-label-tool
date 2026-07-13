@@ -1,3 +1,14 @@
+// =============================================================================
+// rust_ffi.dart - Rust FFI Bindings / Rust FFI 底层绑定
+// =============================================================================
+// Raw FFI bindings to yolo_label_bridge.dll: function typedefs, dynamic library
+// lookup, RustVideoBindings class, and WindowsHeapAllocator for cross-boundary
+// memory management.
+//
+// yolo_label_bridge.dll 的原始 FFI 绑定：函数 typedef、动态库查找、
+// RustVideoBindings 类和跨边界内存管理的 WindowsHeapAllocator。
+// =============================================================================
+
 import 'dart:convert';
 import 'dart:ffi' as ffi;
 import 'dart:io';

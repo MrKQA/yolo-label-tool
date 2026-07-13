@@ -1,3 +1,12 @@
+// =============================================================================
+// rust_library_loader.dart - Rust DLL Loader / Rust DLL 加载器
+// =============================================================================
+// Searches common paths (executable dir, target/release, target/debug) for
+// yolo_label_bridge.dll and returns an ExternalLibrary or error message.
+//
+// 在常见路径中搜索 yolo_label_bridge.dll，返回 ExternalLibrary 或错误信息。
+// =============================================================================
+
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';

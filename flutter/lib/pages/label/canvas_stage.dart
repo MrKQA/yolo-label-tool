@@ -1,4 +1,11 @@
-// Canvas stage and header controls for the label page.
+// =============================================================================
+// canvas_stage.dart - Annotation Canvas Stage / 标注画布舞台
+// =============================================================================
+// Central workspace: mode buttons, split selector header, and fixed-size canvas
+// container that hosts the image canvas with zoom/pan support.
+//
+// 工作区核心：模式按钮、split 选择器标题栏和承载画布的固定尺寸容器。
+// =============================================================================
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';

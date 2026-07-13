@@ -1,4 +1,11 @@
-// Bottom controls for the label page.
+// =============================================================================
+// bottom_controls.dart - Label Page Bottom Bar / 标注页底部控制栏
+// =============================================================================
+// Zoom slider, zoom lock, reset viewport, dark/light mode toggle, and
+// keyboard shortcut settings button.
+//
+// 缩放滑块、缩放锁定、重置视图、暗色/亮色模式和快捷键设置按钮。
+// =============================================================================
 
 import 'package:flutter/material.dart';
 

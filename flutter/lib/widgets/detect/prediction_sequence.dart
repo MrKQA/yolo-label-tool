@@ -1,3 +1,12 @@
+// =============================================================================
+// prediction_sequence.dart - Prediction Frame Sequence / 预测帧序列播放
+// =============================================================================
+// Plays back predicted frame sequences from a JSON manifest with pause/seek,
+// frame timing display, and waiting indicator during active prediction.
+//
+// 播放预测帧序列（JSON manifest）：暂停/跳转、帧耗时显示和预测等待指示器。
+// =============================================================================
+
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;

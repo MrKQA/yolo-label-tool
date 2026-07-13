@@ -1,3 +1,13 @@
+// =============================================================================
+// training.dart - Training Data Models / 训练数据模型
+// =============================================================================
+// Models for training parameters, batch modes, device options, metrics, chart
+// points, dataset summary, resume info, resource usage, and export settings.
+//
+// 训练参数、批处理模式、设备选项、训练指标、图表数据点、数据集摘要、续训信息、
+// 资源使用和导出设置的数据模型。
+// =============================================================================
+
 enum BatchMode { fixed, autoGpu60, autoGpuRatio }
 
 const trainingImageSizeOptions = [320, 416, 640, 800, 960, 1280];

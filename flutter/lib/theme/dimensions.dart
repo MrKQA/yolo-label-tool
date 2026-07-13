@@ -1,3 +1,12 @@
+// =============================================================================
+// dimensions.dart - Layout Dimensions / 布局尺寸常量
+// =============================================================================
+// Named constants for all fixed layout dimensions: pane widths/heights,
+// workspace size, toolbar width, menu height, sidebar sizing, and margins.
+//
+// 所有固定布局尺寸的命名常量：面板宽高、工作区尺寸、工具栏宽度、菜单高度等。
+// =============================================================================
+
 const previewPaneWidth = 188.0;
 const previewPaneMinWidth = 128.0;
 const annotationWorkspaceWidth = 960.0;

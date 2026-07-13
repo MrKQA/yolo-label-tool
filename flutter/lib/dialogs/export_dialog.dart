@@ -51,9 +51,13 @@ class _ExportDialogState extends State<ExportDialog> {
   bool _skipEmpty = true;
   bool _exportImages = true;
   bool _trainAfterExport = false;
-  double _valPercent = 20;
-  double _testPercent = 0;
+  RangeValues _splitBoundaries = const RangeValues(80, 100);
   late final TextEditingController _folderNameController;
+
+  double get _trainPercent => _splitBoundaries.start;
+  double get _valPercent =>
+      _splitBoundaries.end - _splitBoundaries.start;
+  double get _testPercent => 100 - _splitBoundaries.end;
 
   @override
   void initState() {
@@ -73,7 +77,7 @@ class _ExportDialogState extends State<ExportDialog> {
       DatasetExportConfig(
         skipEmpty: _skipEmpty,
         exportImages: _exportImages,
-        trainRatio: (100 - _valPercent - _testPercent).clamp(0, 100) / 100,
+        trainRatio: _trainPercent / 100,
         valRatio: _valPercent / 100,
         testRatio: _testPercent / 100,
         folderName: name.isEmpty ? 'dataset' : name,
@@ -84,7 +88,6 @@ class _ExportDialogState extends State<ExportDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final trainPercent = (100 - _valPercent - _testPercent).clamp(0, 100);
     return Focus(
       autofocus: true,
       onKeyEvent: (node, event) {
@@ -151,37 +154,40 @@ class _ExportDialogState extends State<ExportDialog> {
               const SizedBox(height: 8),
               Row(
                 children: [
-                  _RatioBadge(label: 'train', value: trainPercent.round()),
-                  _RatioBadge(label: 'val', value: _valPercent.round()),
-                  _RatioBadge(label: 'test', value: _testPercent.round()),
+                  Expanded(
+                    child: _RatioBadge(
+                      label: 'train',
+                      value: _trainPercent.round(),
+                      alignment: Alignment.centerLeft,
+                    ),
+                  ),
+                  Expanded(
+                    child: _RatioBadge(
+                      label: 'val',
+                      value: _valPercent.round(),
+                      alignment: Alignment.center,
+                    ),
+                  ),
+                  Expanded(
+                    child: _RatioBadge(
+                      label: 'test',
+                      value: _testPercent.round(),
+                      alignment: Alignment.centerRight,
+                    ),
+                  ),
                 ],
               ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  const Text('val ', style: TextStyle(fontSize: 12)),
-                  Expanded(
-                    child: Slider(
-                      value: _valPercent,
-                      min: 0,
-                      max: 50,
-                      divisions: 50,
-                      label: '${_valPercent.round()}%',
-                      onChanged: (v) => setState(() => _valPercent = v),
-                    ),
-                  ),
-                  const Text(' test ', style: TextStyle(fontSize: 12)),
-                  Expanded(
-                    child: Slider(
-                      value: _testPercent,
-                      min: 0,
-                      max: 30,
-                      divisions: 30,
-                      label: '${_testPercent.round()}%',
-                      onChanged: (v) => setState(() => _testPercent = v),
-                    ),
-                  ),
-                ],
+              RangeSlider(
+                values: _splitBoundaries,
+                min: 0,
+                max: 100,
+                divisions: 100,
+                labels: RangeLabels(
+                  'train ${_trainPercent.round()}%',
+                  'test ${_testPercent.round()}%',
+                ),
+                onChanged: (values) =>
+                    setState(() => _splitBoundaries = values),
               ),
             ],
           ),
@@ -199,25 +205,32 @@ class _ExportDialogState extends State<ExportDialog> {
 }
 
 class _RatioBadge extends StatelessWidget {
-  const _RatioBadge({required this.label, required this.value});
+  const _RatioBadge({
+    required this.label,
+    required this.value,
+    required this.alignment,
+  });
 
   final String label;
   final int value;
+  final Alignment alignment;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(right: 12),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.primaryContainer,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        '$label $value%',
-        style: TextStyle(
-          fontSize: 12,
-          color: Theme.of(context).colorScheme.onPrimaryContainer,
+    return Align(
+      alignment: alignment,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.primaryContainer,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          '$label $value%',
+          style: TextStyle(
+            fontSize: 12,
+            color: Theme.of(context).colorScheme.onPrimaryContainer,
+          ),
         ),
       ),
     );

@@ -1,4 +1,11 @@
-// Image preview pane for the label page.
+// =============================================================================
+// image_preview_pane.dart - Image Preview Pane / 图片预览面板
+// =============================================================================
+// Left thumbnail strip with index input, class-based filter dropdown, and
+// auto-scroll tracking for the selected image.
+//
+// 左侧缩略图列表：序号输入、按类别筛选下拉框和选中图片自动滚动跟踪。
+// =============================================================================
 
 import 'dart:io';
 import 'dart:math' as math;

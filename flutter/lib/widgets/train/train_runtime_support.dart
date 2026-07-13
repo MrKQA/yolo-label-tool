@@ -1,3 +1,14 @@
+// =============================================================================
+// train_runtime_support.dart - Training Runtime Support / 训练运行时支持
+// =============================================================================
+// Helper functions for the training page: parameter validation ranges,
+// min/max/normalize logic, resume info detection from checkpoint files,
+// results.csv parsing, and epoch reading from args.yaml.
+//
+// 训练页辅助函数：参数验证范围、min/max/normalize 逻辑、checkpoint 续训检测、
+// results.csv 解析和 args.yaml epoch 读取。
+// =============================================================================
+
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;

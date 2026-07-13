@@ -1,3 +1,12 @@
+// =============================================================================
+// shortcut_dialog.dart - Keyboard Shortcut Editor / 快捷键编辑器
+// =============================================================================
+// Lists all configurable shortcut actions grouped by scope, allowing the user
+// to press a key to rebind each action. Supports reset to defaults.
+//
+// 列出所有可配置快捷键（按作用域分组），用户按下按键即可重新绑定，支持恢复默认。
+// =============================================================================
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 

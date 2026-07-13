@@ -1,3 +1,14 @@
+// =============================================================================
+// rust_backend.dart - Rust Bridge API Layer / Rust 桥接 API 层
+// =============================================================================
+// High-level Dart API wrapping Rust FFI calls: YOLO training lifecycle,
+// detection, model export, AI annotation (SAM3/YOLO), video frame decoding,
+// database operations, and collaboration transport.
+//
+// 封装 Rust FFI 调用的高层 Dart API：训练生命周期、检测、模型导出、
+// AI 标注、视频帧解码、数据库操作和协作传输。
+// =============================================================================
+
 // ignore_for_file: file_names, unused_element, invalid_use_of_internal_member
 
 import 'dart:convert';

@@ -1,3 +1,13 @@
+// =============================================================================
+// video_player_widgets.dart - Video Player Widgets / 视频播放器组件
+// =============================================================================
+// VideoPlayerPanel, VideoPlayerShell with auto-hide controls, ScaledVideoSurface
+// with aspect-ratio fitting, VideoFullscreenOverlay, and shortcut HUD overlay.
+//
+// VideoPlayerPanel、带自动隐藏控件的 VideoPlayerShell、缩放视频画面、
+// 全屏覆盖层和快捷键 HUD。
+// =============================================================================
+
 import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' as ui;

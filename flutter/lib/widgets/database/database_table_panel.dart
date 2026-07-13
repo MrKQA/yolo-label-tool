@@ -1,3 +1,12 @@
+// =============================================================================
+// database_table_panel.dart - Database Table Panel / 数据库表主面板
+// =============================================================================
+// Main table browser: action tabs (browse/structure/SQL), project filter,
+// scrollable DataTable with row selection, and pagination controls.
+//
+// 主表浏览器：操作标签（浏览/结构/SQL）、项目过滤器、可滚动 DataTable 和分页控件。
+// =============================================================================
+
 import 'package:flutter/material.dart';
 
 import '../../services/i18n.dart';

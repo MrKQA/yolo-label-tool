@@ -1,3 +1,12 @@
+// =============================================================================
+// detect_playback_surface.dart - Detection Playback Surface / 检测播放画面
+// =============================================================================
+// Displays the current media: static image, video player, or predicted frame
+// sequence panel. Shows prediction result status overlay.
+//
+// 显示当前媒体：静态图片、视频播放器或预测帧序列面板，含预测结果状态覆盖层。
+// =============================================================================
+
 import 'dart:io';
 
 import 'package:flutter/material.dart';

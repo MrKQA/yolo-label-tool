@@ -1,3 +1,13 @@
+// =============================================================================
+// theme_helpers.dart - Theme Helper Functions / 主题辅助函数
+// =============================================================================
+// Convenience functions: isDarkMode, panelColor, controlColor, canvasColor,
+// workspaceColor, borderColor, and primaryTextColor — each reads the current
+// theme brightness to return the correct color token.
+//
+// 便捷函数：isDarkMode、panelColor、controlColor 等，根据当前主题亮度返回正确的颜色。
+// =============================================================================
+
 import 'package:flutter/material.dart';
 
 import 'colors.dart';

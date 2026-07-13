@@ -1,3 +1,13 @@
+// =============================================================================
+// ai_geometry.dart - AI Geometry Utilities / AI 几何工具
+// =============================================================================
+// Scales AI prediction points between source and display sizes, computes
+// oriented bounding boxes (minimum-area rectangles) from polygon points,
+// and calculates point-set bounding rectangles.
+//
+// AI 预测点缩放（源尺寸↔显示尺寸）、最小面积旋转矩形计算和点集包围盒计算。
+// =============================================================================
+
 import 'dart:math' as math;
 import 'dart:ui';
 

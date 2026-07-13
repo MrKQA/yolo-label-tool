@@ -1,3 +1,12 @@
+// =============================================================================
+// floating_message.dart - Floating Toast Message / 浮动提示消息
+// =============================================================================
+// Lightweight overlay widget that fades and slides upward, used for short
+// feedback like "copied", "saved", or "operation complete".
+//
+// 轻量覆盖层组件：渐隐并上滑消失，用于"已复制""已保存"等短反馈。
+// =============================================================================
+
 // ignore_for_file: file_names
 
 import 'package:flutter/material.dart';

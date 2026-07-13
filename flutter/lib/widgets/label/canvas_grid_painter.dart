@@ -1,3 +1,12 @@
+// =============================================================================
+// canvas_grid_painter.dart - Canvas Grid Background / 画布网格背景
+// =============================================================================
+// CustomPainter that draws a subtle grid pattern on the annotation canvas
+// background to help users gauge scale and alignment.
+//
+// 自定义绘制器，在标注画布背景上绘制细微网格，帮助用户判断比例和对齐。
+// =============================================================================
+
 import 'package:flutter/material.dart';
 
 class CanvasGridPainter extends CustomPainter {

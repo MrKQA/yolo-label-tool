@@ -1,3 +1,12 @@
+// =============================================================================
+// training_history_dialog.dart - Training History Dialog / 训练历史对话框
+// =============================================================================
+// Displays recent training actions (start, resume, stop) with timestamps,
+// model paths, dataset paths, and epoch ranges.
+//
+// 显示最近的训练操作记录（启动、继续、停止），含时间戳、模型路径、数据集路径和 epoch。
+// =============================================================================
+
 import 'package:flutter/material.dart';
 
 import '../models/training.dart';

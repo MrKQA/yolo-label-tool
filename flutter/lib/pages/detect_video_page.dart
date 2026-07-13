@@ -1,3 +1,13 @@
+// =============================================================================
+// detect_video_page.dart - Video Playback & Detection Page / 视频播放与检测页面
+// =============================================================================
+// Combined media browser with video playback, YOLO detection on images/videos,
+// prediction frame sequence preview, device selection (CUDA/OpenVINO/CPU), and
+// result save/export.
+//
+// 集成视频播放、YOLO 图片/视频检测、预测帧序列预览、设备选择和结果保存/导出。
+// =============================================================================
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';

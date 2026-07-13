@@ -1,3 +1,12 @@
+// =============================================================================
+// collaboration.dart - Collaboration Data Models / 协作数据模型
+// =============================================================================
+// Models for collaboration mode, peer identity, permissions, discovered hosts,
+// and assignment ranges used by the team annotation feature.
+//
+// 协作模式、节点身份、权限、发现的主机和分配范围等团队标注功能的数据模型。
+// =============================================================================
+
 enum CollaborationMode { off, host, client }
 
 class CollaborationPermissions {

@@ -1,4 +1,11 @@
-// Class manager for the label page.
+// =============================================================================
+// class_manager.dart - Label Class Manager / 标注类别管理器
+// =============================================================================
+// Class list with drag-to-reorder, inline rename, color picker, add/delete,
+// and class label visibility toggle.
+//
+// 类别列表：拖拽排序、内联重命名、颜色选择、添加/删除和标签可见性开关。
+// =============================================================================
 
 import 'package:flutter/material.dart';
 

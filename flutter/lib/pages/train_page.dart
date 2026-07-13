@@ -1,3 +1,14 @@
+// =============================================================================
+// train_page.dart - YOLO Training Page / YOLO 训练页面
+// =============================================================================
+// YOLO model training interface: model/dataset selection, hyperparameter
+// editing, device selection (GPU/CPU), batch mode configuration, live
+// training progress charts, terminal log viewer, and model export.
+//
+// YOLO 训练界面：模型/数据集选择、超参数编辑、设备选择、batch 模式配置、
+// 训练过程实时图表、终端日志和模型导出。
+// =============================================================================
+
 import 'dart:async';
 import 'dart:io';
 

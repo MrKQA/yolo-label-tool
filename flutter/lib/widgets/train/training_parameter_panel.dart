@@ -1,3 +1,14 @@
+// =============================================================================
+// training_parameter_panel.dart - Training Parameter Panel / 训练面板
+// =============================================================================
+// Right-side parameter panel for the training page: batch mode editor, AMP
+// toggle, device selector chips, per-parameter sliders with numeric fields,
+// string parameter dropdowns, reset button, and training tuning tips.
+//
+// 训练页右侧面板：batch 模式编辑、AMP 开关、设备选择芯片、参数滑块+数值字段、
+// 字符串参数下拉框、重置按钮和调参建议。
+// =============================================================================
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 

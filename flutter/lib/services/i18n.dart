@@ -1,3 +1,12 @@
+// =============================================================================
+// i18n.dart - Internationalization / 国际化
+// =============================================================================
+// Loads language strings from JSON assets, provides the t() lookup function,
+// fallback English/Chinese dictionary, and available language enumeration.
+//
+// 从 JSON 资源加载语言字符串，提供 t() 查找函数、中英文回退字典和可用语言枚举。
+// =============================================================================
+
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';

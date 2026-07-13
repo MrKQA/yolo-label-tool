@@ -1,3 +1,12 @@
+// =============================================================================
+// detect_support.dart - Detection Support Utilities / 检测辅助工具
+// =============================================================================
+// Constants (video extensions, device options, media type group), path helpers
+// for detection output names, and utility functions shared across the detect page.
+//
+// 常量（视频扩展名、设备选项、媒体类型组）、检测输出路径辅助和检测页共用工具函数。
+// =============================================================================
+
 import 'dart:io';
 
 import '../../services/path_utils.dart';

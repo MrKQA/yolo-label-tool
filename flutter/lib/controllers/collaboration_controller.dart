@@ -1,4 +1,14 @@
+// =============================================================================
+// collaboration_controller.dart - Collaboration State Controller / 协作状态控制器
+// =============================================================================
+// Manages host/client collaboration lifecycle, peer discovery, permission
+// delegation, transport polling, and annotation snapshot broadcasting.
+//
+// 管理主机/客户端协作生命周期：节点发现、权限委托、传输轮询和标注快照广播。
+// =============================================================================
+
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
@@ -14,17 +24,90 @@ typedef CollaborationCommandRunner =
 typedef CollaborationEventPoller =
     Future<List<Map<String, dynamic>>> Function({required int maxEvents});
 typedef CollaborationEventHandler = void Function(Map<String, dynamic> event);
+typedef CollaborationTransportErrorHandler =
+    void Function(Map<String, Object?> request, Object error);
+typedef CollaborationProjectSnapshotBuilder =
+    Map<String, Object?> Function(int assignmentStart, int assignmentEnd);
+
+class CollaborationJoinRequest {
+  const CollaborationJoinRequest({
+    required this.userId,
+    required this.userName,
+    required this.address,
+    required this.colorValue,
+  });
+
+  final String userId;
+  final String userName;
+  final String address;
+  final int colorValue;
+}
+
+enum CollaborationTcpMessageKind {
+  ignored,
+  joinAccepted,
+  joinRejected,
+  permissionsUpdated,
+  assignmentUpdated,
+  peerJoined,
+  annotationSnapshot,
+  classSnapshot,
+  projectSnapshot,
+}
+
+class CollaborationTcpMessageResult {
+  const CollaborationTcpMessageResult({
+    required this.kind,
+    this.message = const {},
+    this.fromUserId = '',
+  });
+
+  static const ignored = CollaborationTcpMessageResult(
+    kind: CollaborationTcpMessageKind.ignored,
+  );
+
+  final CollaborationTcpMessageKind kind;
+  final Map<String, dynamic> message;
+  final String fromUserId;
+}
+
+enum CollaborationTransportEventKind {
+  ignored,
+  joinRequest,
+  tcpMessage,
+  hostDisconnected,
+  hostTransportFailed,
+}
+
+class CollaborationTransportEventResult {
+  const CollaborationTransportEventResult({
+    required this.kind,
+    this.event = const {},
+    this.tcpMessage = CollaborationTcpMessageResult.ignored,
+    this.joinRequest,
+  });
+
+  static const ignored = CollaborationTransportEventResult(
+    kind: CollaborationTransportEventKind.ignored,
+  );
+
+  final CollaborationTransportEventKind kind;
+  final Map<String, dynamic> event;
+  final CollaborationTcpMessageResult tcpMessage;
+  final CollaborationJoinRequest? joinRequest;
+}
 
 /// Owns collaboration runtime state independently from the workspace widget.
 ///
-/// The controller owns transport polling and connection lifecycle. Applying
-/// remote project and annotation payloads remains a workspace responsibility
-/// because those operations mutate the currently opened project.
+/// The controller owns transport polling and connection lifecycle. Project
+/// payload application is delegated to the collaboration sync/workspace
+/// controllers.
 class CollaborationController extends ChangeNotifier {
   CollaborationController({
     String defaultUserName = 'User',
     CollaborationCommandRunner? commandRunner,
     CollaborationEventPoller? eventPoller,
+    this.onTransportError,
     this.reconnectDelay = const Duration(seconds: 3),
     this.maxReconnectAttempts = 5,
   }) : _userName = _normalizedUserName(defaultUserName),
@@ -35,6 +118,7 @@ class CollaborationController extends ChangeNotifier {
   final CollaborationEventPoller _eventPoller;
   final Duration reconnectDelay;
   final int maxReconnectAttempts;
+  CollaborationTransportErrorHandler? onTransportError;
   Timer? _pollTimer;
   Timer? _reconnectTimer;
   CollaborationEventHandler? _eventHandler;
@@ -143,8 +227,294 @@ class CollaborationController extends ChangeNotifier {
     }
   }
 
+  CollaborationTransportEventResult handleTransportEvent(
+    Map<String, dynamic> event, {
+    required int imageCount,
+  }) {
+    switch (collaborationString(event, 'type')) {
+      case 'host_found':
+        upsertDiscoveredHost(event);
+        return CollaborationTransportEventResult.ignored;
+      case 'join_request':
+        final requestedUserId = collaborationString(event, 'userId');
+        if (!beginJoinRequest(requestedUserId)) {
+          return CollaborationTransportEventResult.ignored;
+        }
+        final rawUserName = collaborationString(event, 'userName').trim();
+        return CollaborationTransportEventResult(
+          kind: CollaborationTransportEventKind.joinRequest,
+          event: event,
+          joinRequest: CollaborationJoinRequest(
+            userId: requestedUserId,
+            userName: rawUserName.isEmpty ? 'User' : rawUserName,
+            address: collaborationString(event, 'address'),
+            colorValue: collaborationInt(
+              event,
+              'colorValue',
+              fallback: collaborationColorForId(requestedUserId).toARGB32(),
+            ),
+          ),
+        );
+      case 'tcp_message':
+        final tcpMessage = handleTcpMessage(event, imageCount: imageCount);
+        if (tcpMessage.kind == CollaborationTcpMessageKind.ignored) {
+          return CollaborationTransportEventResult.ignored;
+        }
+        return CollaborationTransportEventResult(
+          kind: CollaborationTransportEventKind.tcpMessage,
+          event: event,
+          tcpMessage: tcpMessage,
+        );
+      case 'client_disconnected':
+        markPeerOffline(collaborationString(event, 'userId'));
+        return CollaborationTransportEventResult.ignored;
+      case 'host_disconnected':
+        return mode == CollaborationMode.client
+            ? CollaborationTransportEventResult(
+                kind: CollaborationTransportEventKind.hostDisconnected,
+                event: event,
+              )
+            : CollaborationTransportEventResult.ignored;
+      case 'network_error':
+        final scope = collaborationString(event, 'scope');
+        logApp(
+          'COLLAB',
+          'Network error: ${event['scope'] ?? '-'} ${event['error'] ?? ''}',
+          level: AppLogLevel.warning,
+        );
+        if (mode != CollaborationMode.host || scope != 'host_tcp') {
+          return CollaborationTransportEventResult.ignored;
+        }
+        unawaited(endSession());
+        return CollaborationTransportEventResult(
+          kind: CollaborationTransportEventKind.hostTransportFailed,
+          event: event,
+        );
+      default:
+        return CollaborationTransportEventResult.ignored;
+    }
+  }
+
+  CollaborationTcpMessageResult handleTcpMessage(
+    Map<String, dynamic> event, {
+    required int imageCount,
+  }) {
+    final message = collaborationMap(event['message']);
+    final fromUserId = collaborationString(event, 'fromUserId');
+    switch (collaborationString(message, 'type')) {
+      case 'join_accepted':
+        final permissions = collaborationMap(message['permissions']);
+        completeJoin(
+          assignmentStart: collaborationInt(
+            message,
+            'assignmentStart',
+            fallback: 1,
+          ),
+          assignmentEnd: collaborationInt(
+            message,
+            'assignmentEnd',
+            fallback: imageCount < 1 ? 1 : imageCount,
+          ),
+          permissions: CollaborationPermissions(
+            canEditOthers: collaborationBool(permissions, 'canEditOthers'),
+            canDeleteOthers: collaborationBool(permissions, 'canDeleteOthers'),
+            canChangeClass: collaborationBool(permissions, 'canChangeClass'),
+          ),
+        );
+        final host = connectedHost;
+        if (host != null) {
+          upsertPeer(
+            CollaborationPeer(
+              userId: host.hostId,
+              userName: host.hostName,
+              address: '${host.address}:${host.port}',
+              colorValue: collaborationColorForId(host.hostId).toARGB32(),
+              online: true,
+            ),
+          );
+        }
+        return CollaborationTcpMessageResult(
+          kind: CollaborationTcpMessageKind.joinAccepted,
+          message: message,
+          fromUserId: fromUserId,
+        );
+      case 'join_rejected':
+        rejectJoin();
+        return CollaborationTcpMessageResult(
+          kind: CollaborationTcpMessageKind.joinRejected,
+          message: message,
+          fromUserId: fromUserId,
+        );
+      case 'permission_update':
+        final permissions = collaborationMap(message['permissions']);
+        selfPermissions = CollaborationPermissions(
+          canEditOthers: collaborationBool(permissions, 'canEditOthers'),
+          canDeleteOthers: collaborationBool(permissions, 'canDeleteOthers'),
+          canChangeClass: collaborationBool(permissions, 'canChangeClass'),
+        );
+        assignmentStart = collaborationInt(
+          message,
+          'assignmentStart',
+          fallback: assignmentStart,
+        );
+        assignmentEnd = collaborationInt(
+          message,
+          'assignmentEnd',
+          fallback: assignmentEnd,
+        );
+        notifyListeners();
+        return CollaborationTcpMessageResult(
+          kind: CollaborationTcpMessageKind.permissionsUpdated,
+          message: message,
+          fromUserId: fromUserId,
+        );
+      case 'assignment_update':
+        assignmentStart = collaborationInt(
+          message,
+          'assignmentStart',
+          fallback: assignmentStart,
+        );
+        assignmentEnd = collaborationInt(
+          message,
+          'assignmentEnd',
+          fallback: assignmentEnd,
+        );
+        notifyListeners();
+        return CollaborationTcpMessageResult(
+          kind: CollaborationTcpMessageKind.assignmentUpdated,
+          message: message,
+          fromUserId: fromUserId,
+        );
+      case 'peer_joined':
+        final peerUserId = collaborationString(message, 'userId');
+        if (peerUserId.isEmpty || peerUserId == authorId) {
+          return CollaborationTcpMessageResult.ignored;
+        }
+        upsertPeer(
+          CollaborationPeer(
+            userId: peerUserId,
+            userName: collaborationString(message, 'userName'),
+            colorValue: collaborationInt(
+              message,
+              'colorValue',
+              fallback: collaborationColorForId(peerUserId).toARGB32(),
+            ),
+            address: collaborationString(message, 'address'),
+            online: true,
+          ),
+        );
+        return CollaborationTcpMessageResult(
+          kind: CollaborationTcpMessageKind.peerJoined,
+          message: message,
+          fromUserId: fromUserId,
+        );
+      case 'annotation_snapshot':
+        return CollaborationTcpMessageResult(
+          kind: CollaborationTcpMessageKind.annotationSnapshot,
+          message: message,
+          fromUserId: fromUserId,
+        );
+      case 'class_snapshot':
+        return CollaborationTcpMessageResult(
+          kind: CollaborationTcpMessageKind.classSnapshot,
+          message: message,
+          fromUserId: fromUserId,
+        );
+      case 'project_snapshot':
+        return CollaborationTcpMessageResult(
+          kind: CollaborationTcpMessageKind.projectSnapshot,
+          message: message,
+          fromUserId: fromUserId,
+        );
+      default:
+        return CollaborationTcpMessageResult.ignored;
+    }
+  }
+
   Future<Map<String, dynamic>> sendCommand(Map<String, Object?> request) {
     return _commandRunner(request);
+  }
+
+  Future<bool> sendTransportCommand(Map<String, Object?> request) async {
+    try {
+      await sendCommand(request);
+      return true;
+    } on Object catch (error) {
+      logApp(
+        'COLLAB',
+        'Command failed: ${request['action'] ?? '-'} $error',
+        level: AppLogLevel.warning,
+      );
+      onTransportError?.call(request, error);
+      return false;
+    }
+  }
+
+  Future<bool> sendPeerMessage(
+    String peerUserId,
+    Map<String, Object?> message,
+  ) {
+    return sendTransportCommand({
+      'action': 'send_peer',
+      'userId': peerUserId,
+      'message': jsonEncode(message),
+    });
+  }
+
+  Future<bool> sendHostMessage(Map<String, Object?> message) {
+    return sendTransportCommand({
+      'action': 'send_host',
+      'message': jsonEncode(message),
+    });
+  }
+
+  Future<bool> broadcastMessage(Map<String, Object?> message) {
+    if (mode != CollaborationMode.host) {
+      return Future<bool>.value(false);
+    }
+    return sendTransportCommand({
+      'action': 'broadcast',
+      'message': jsonEncode(message),
+    });
+  }
+
+  int sendMessageToAuthorizedPeers(
+    Map<String, Object?> message,
+    int zeroBasedImageIndex, {
+    String? excludeUserId,
+  }) {
+    if (mode != CollaborationMode.host) {
+      return 0;
+    }
+    var count = 0;
+    for (final peer in peers) {
+      if (!peer.online || peer.userId == excludeUserId) {
+        continue;
+      }
+      if (!peerCanAccessImage(peer, zeroBasedImageIndex)) {
+        continue;
+      }
+      unawaited(sendPeerMessage(peer.userId, message));
+      count += 1;
+    }
+    return count;
+  }
+
+  int sendMessageToOnlinePeers(
+    Map<String, Object?> Function(CollaborationPeer peer) messageForPeer,
+  ) {
+    if (mode != CollaborationMode.host) {
+      return 0;
+    }
+    var count = 0;
+    for (final peer in peers) {
+      if (!peer.online) {
+        continue;
+      }
+      unawaited(sendPeerMessage(peer.userId, messageForPeer(peer)));
+      count += 1;
+    }
+    return count;
   }
 
   Future<void> restartDiscovery() async {
@@ -202,6 +572,20 @@ class CollaborationController extends ChangeNotifier {
     });
   }
 
+  Future<void> startHostSession({
+    required String projectId,
+    required int imageCount,
+  }) async {
+    prepareHost(imageCount);
+    try {
+      await startHostTransport(projectId: projectId, imageCount: imageCount);
+    } on Object {
+      resetSession();
+      await restartDiscovery();
+      rethrow;
+    }
+  }
+
   Future<void> joinHost(CollaborationDiscoveredHost host) async {
     connectedHost = host;
     joining = true;
@@ -214,6 +598,7 @@ class CollaborationController extends ChangeNotifier {
       connectedHost = null;
       joining = false;
       notifyListeners();
+      await restartDiscovery();
       rethrow;
     }
   }
@@ -332,6 +717,11 @@ class CollaborationController extends ChangeNotifier {
     }
   }
 
+  Future<void> endSession({bool restartDiscovery = true}) {
+    resetSession();
+    return stopTransport(restartDiscovery: restartDiscovery);
+  }
+
   bool isImageIndexAuthorized(int zeroBasedIndex, int imageCount) {
     if (!clientMode) {
       return true;
@@ -392,6 +782,7 @@ class CollaborationController extends ChangeNotifier {
     discoveredHosts.sort(
       (a, b) => a.hostName.toLowerCase().compareTo(b.hostName.toLowerCase()),
     );
+    notifyListeners();
     return true;
   }
 
@@ -410,6 +801,61 @@ class CollaborationController extends ChangeNotifier {
     pendingJoinRequests.remove(requestedUserId.trim());
   }
 
+  Future<CollaborationPeer> acceptJoinRequest(
+    CollaborationJoinRequest request, {
+    required int imageCount,
+    required CollaborationProjectSnapshotBuilder projectSnapshotBuilder,
+  }) async {
+    finishJoinRequest(request.userId);
+    final max = imageCount < 1 ? 1 : imageCount;
+    final start = assignmentStart.clamp(1, max).toInt();
+    final end = assignmentEnd.clamp(start, max).toInt();
+    const permissions = CollaborationPermissions();
+    final peer = CollaborationPeer(
+      userId: request.userId,
+      userName: request.userName,
+      colorValue: request.colorValue,
+      address: request.address,
+      online: true,
+      assignmentStart: start,
+      assignmentEnd: end,
+      permissions: permissions,
+    );
+    upsertPeer(peer);
+    await sendTransportCommand({
+      'action': 'host_accept',
+      'userId': request.userId,
+      'hostId': hostId,
+      'assignmentStart': start,
+      'assignmentEnd': end,
+      'canEditOthers': permissions.canEditOthers,
+      'canDeleteOthers': permissions.canDeleteOthers,
+      'canChangeClass': permissions.canChangeClass,
+    });
+    unawaited(
+      sendPeerMessage(request.userId, projectSnapshotBuilder(start, end)),
+    );
+    unawaited(
+      broadcastMessage({
+        'type': 'peer_joined',
+        'userId': request.userId,
+        'userName': request.userName,
+        'colorValue': request.colorValue,
+        'address': request.address,
+      }),
+    );
+    return peer;
+  }
+
+  Future<void> rejectJoinRequest(CollaborationJoinRequest request) async {
+    finishJoinRequest(request.userId);
+    await sendTransportCommand({
+      'action': 'host_reject',
+      'userId': request.userId,
+      'reason': 'rejected',
+    });
+  }
+
   void upsertPeer(CollaborationPeer peer) {
     final index = peers.indexWhere((item) => item.userId == peer.userId);
     if (index >= 0) {
@@ -425,6 +871,7 @@ class CollaborationController extends ChangeNotifier {
     } else {
       peers.add(peer);
     }
+    notifyListeners();
   }
 
   bool markPeerOffline(String peerUserId) {
@@ -437,7 +884,60 @@ class CollaborationController extends ChangeNotifier {
       return false;
     }
     peers[index] = peers[index].copyWith(online: false);
+    notifyListeners();
     return true;
+  }
+
+  CollaborationPeer? updatePeerPermissions(
+    CollaborationPeerPermissionResult result, {
+    required int imageCount,
+  }) {
+    final max = imageCount < 1 ? 1 : imageCount;
+    final start = result.assignmentStart.clamp(1, max).toInt();
+    final end = result.assignmentEnd.clamp(start, max).toInt();
+    final index = peers.indexWhere((peer) => peer.userId == result.userId);
+    if (index < 0) {
+      return null;
+    }
+    final updated = peers[index].copyWith(
+      assignmentStart: start,
+      assignmentEnd: end,
+      permissions: result.permissions,
+    );
+    peers[index] = updated;
+    notifyListeners();
+    return updated;
+  }
+
+  CollaborationPeer? applyPeerPermissions(
+    CollaborationPeerPermissionResult result, {
+    required int imageCount,
+    required CollaborationProjectSnapshotBuilder projectSnapshotBuilder,
+  }) {
+    final updated = updatePeerPermissions(result, imageCount: imageCount);
+    if (updated == null) {
+      return null;
+    }
+    final permissions = updated.permissions;
+    unawaited(
+      sendPeerMessage(updated.userId, {
+        'type': 'permission_update',
+        'assignmentStart': updated.assignmentStart,
+        'assignmentEnd': updated.assignmentEnd,
+        'permissions': {
+          'canEditOthers': permissions.canEditOthers,
+          'canDeleteOthers': permissions.canDeleteOthers,
+          'canChangeClass': permissions.canChangeClass,
+        },
+      }),
+    );
+    unawaited(
+      sendPeerMessage(
+        updated.userId,
+        projectSnapshotBuilder(updated.assignmentStart, updated.assignmentEnd),
+      ),
+    );
+    return updated;
   }
 
   static Future<Map<String, dynamic>> _runCommand(
@@ -453,6 +953,7 @@ class CollaborationController extends ChangeNotifier {
     cancelReconnect();
     _eventHandler = null;
     _onReconnectExhausted = null;
+    onTransportError = null;
     super.dispose();
   }
 

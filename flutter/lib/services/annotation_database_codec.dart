@@ -1,3 +1,13 @@
+// =============================================================================
+// annotation_database_codec.dart - Annotation Database Codec / 标注数据库编解码
+// =============================================================================
+// Serializes/deserializes annotation project data (images, classes, annotations,
+// splits, display sizes, collaboration metadata) to/from JSON payloads used
+// by the Rust SQLite backend.
+//
+// 将标注项目数据序列化/反序列化为 JSON，供 Rust SQLite 后端存取。
+// =============================================================================
+
 import 'dart:ui' show Offset, Rect, Size;
 
 import '../models/annotation.dart';

@@ -1,3 +1,12 @@
+// =============================================================================
+// training_dataset_summary.dart - Training Dataset Analysis / 训练数据集分析
+// =============================================================================
+// Analyzes a YOLO dataset to produce class counts, class imbalance ratio,
+// recommended cls_pw weights, and train/val/test split statistics.
+//
+// 分析 YOLO 数据集：类别计数、类别不均衡比、推荐的 cls_pw 权重和 split 统计。
+// =============================================================================
+
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:math' as math;

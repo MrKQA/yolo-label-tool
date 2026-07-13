@@ -1,3 +1,12 @@
+// =============================================================================
+// app_runtime.dart - Application Runtime Globals / 应用运行时全局状态
+// =============================================================================
+// Global singletons: theme mode notifier, application logger instance, and
+// convenience log/logMultiline functions used across the entire app.
+//
+// 全局单例：主题模式通知器、应用日志实例和全局便捷日志函数。
+// =============================================================================
+
 import 'package:flutter/material.dart';
 
 import 'config_store.dart';

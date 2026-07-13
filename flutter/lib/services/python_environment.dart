@@ -1,3 +1,14 @@
+// =============================================================================
+// python_environment.dart - Python Environment Detection / Python 环境探测
+// =============================================================================
+// Resolves Python executable paths from user input (direct .exe or conda/venv
+// directory), probes PyTorch/CUDA/ONNXRuntime availability, and detects
+// NVIDIA GPU and OpenVINO device capabilities for training and inference.
+//
+// 解析 Python 可执行文件路径、探测 PyTorch/CUDA/ONNXRuntime 可用性、
+// 检测 NVIDIA GPU 和 OpenVINO 设备能力。
+// =============================================================================
+
 import 'dart:io';
 
 import 'path_utils.dart';

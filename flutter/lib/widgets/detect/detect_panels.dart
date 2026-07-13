@@ -1,3 +1,14 @@
+// =============================================================================
+// detect_panels.dart - Detection Parameter & Preview Panels / 检测参数与预览面板
+// =============================================================================
+// DetectParameterPanel: model selection, play/predict/save actions, confidence
+// slider, image size selector, and device selection chips.
+// DetectPreviewList: thumbnail strip for media files in the current folder.
+//
+// DetectParameterPanel：模型选择、播放/预测/保存、置信度、尺寸和设备选择。
+// DetectPreviewList：当前文件夹媒体文件的缩略图列表。
+// =============================================================================
+
 import 'dart:async';
 import 'dart:io';
 

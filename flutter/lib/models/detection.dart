@@ -1,3 +1,12 @@
+// =============================================================================
+// detection.dart - Detection & Video Models / 检测与视频模型
+// =============================================================================
+// Models for detection results, video metadata, video play/predict session state,
+// AI annotation results (boxes + masks), scale modes, and device info.
+//
+// 检测结果、视频元数据、视频播放/预测会话状态、AI 标注结果、缩放模式和设备信息。
+// =============================================================================
+
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
