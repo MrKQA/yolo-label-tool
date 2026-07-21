@@ -135,6 +135,16 @@ class AppLanguageStrings {
     'label.showNames': '显示类别名',
     'label.drawMode': '绘制',
     'label.selectMode': '选择',
+    'label.annotationModeIncompatible': '标注方式不兼容，已恢复项目模式：',
+    'label.clearTitle': '清空项目内容',
+    'label.clearAnnotations': '标注',
+    'label.clearImages': '图片',
+    'label.clearQuantity': '清空数量',
+    'label.clearNoMatches': '当前筛选没有可清空的内容',
+    'label.clearConfirmTitle': '二次确认',
+    'label.clearConfirmMessage': '此操作无法撤销，确认清空',
+    'label.clearAnnotationsDone': '已清空标注：',
+    'label.clearImagesDone': '已移除图片：',
     'tool.select': '选择',
     'tool.box': '框选',
     'tool.copy': '复制',
@@ -142,6 +152,7 @@ class AppLanguageStrings {
     'tool.undo': '撤销',
     'tool.redo': '重做',
     'tool.delete': '删除',
+    'tool.clear': '清空',
     'feedback.copiedAnnotation': '已复制标注框',
     'import.waiting': '请等待导入完成',
     'bottom.zoomOut': '缩小',
@@ -152,10 +163,17 @@ class AppLanguageStrings {
     'bottom.nightMode': '夜间模式',
     'bottom.shortcuts': '自定义按键',
     'shortcut.title': '自定义按键',
+    'shortcut.dialogConfirm': '弹窗确认 / 保存',
+    'shortcut.dialogCancel': '全局取消',
+    'shortcut.classNameAutocomplete': '类别名补全',
     'shortcut.previousImage': '上一张图片',
     'shortcut.nextImage': '下一张图片',
     'shortcut.zoomIn': '放大图片',
     'shortcut.zoomOut': '缩小图片',
+    'shortcut.toggleZoomLock': '锁定 / 解锁缩放',
+    'shortcut.resetLabelView': '重置标注视图',
+    'shortcut.importDataset': '导入数据集',
+    'shortcut.exportDataset': '导出数据集',
     'shortcut.hbbMode': 'HBB 标注框',
     'shortcut.obbMode': 'OBB 旋转框',
     'shortcut.segMode': 'SEG 实例分割',
@@ -175,6 +193,11 @@ class AppLanguageStrings {
     'shortcut.videoFastForward': '视频三倍速快进',
     'shortcut.aiAnnotateCurrent': '当前 AI 标注',
     'shortcut.aiAnnotateAll': '所有 AI 标注',
+    'shortcut.trainStart': '开始训练',
+    'shortcut.trainStop': '停止训练',
+    'shortcut.trainChooseModel': '选择 PT 模型',
+    'shortcut.trainChooseDataset': '选择数据集',
+    'shortcut.trainExport': '导出设置',
     'shortcut.scopeGlobal': '全局',
     'shortcut.scopeLabel': '标注页面',
     'shortcut.scopeBrowse': '浏览页面',
@@ -421,6 +444,7 @@ class AppLanguageStrings {
     'action.cancel': '取消',
     'action.delete': '删除',
     'action.clear': '清空',
+    'action.confirm': '确认',
     'ai.sam3SaveClassTitle': '保存 SAM3 标注',
     'ai.sam3SaveClassName': '类别名称',
     'ai.sam3SaveClassHint': '选择已有类别或输入新类别',
@@ -429,8 +453,9 @@ class AppLanguageStrings {
 
 AppLanguageStrings _currentLanguageStrings = AppLanguageStrings.fallback();
 
-final ValueNotifier<AppLanguageStrings> languageStringsNotifier =
-    ValueNotifier(_currentLanguageStrings);
+final ValueNotifier<AppLanguageStrings> languageStringsNotifier = ValueNotifier(
+  _currentLanguageStrings,
+);
 
 String t(String key) => _currentLanguageStrings.text(key);
 

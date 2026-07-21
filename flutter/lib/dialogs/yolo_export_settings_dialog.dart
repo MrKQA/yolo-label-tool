@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 import '../models/detection.dart';
 import '../models/export.dart';
 import '../services/i18n.dart';
+import 'dialog_shortcuts.dart';
 
 const _yamlTypeGroup = XTypeGroup(label: 'YAML', extensions: ['yaml', 'yml']);
 
@@ -31,8 +32,7 @@ class YoloExportSettingsDialog extends StatefulWidget {
       _YoloExportSettingsDialogState();
 }
 
-class _YoloExportSettingsDialogState
-    extends State<YoloExportSettingsDialog> {
+class _YoloExportSettingsDialogState extends State<YoloExportSettingsDialog> {
   late String _format;
   late bool _autoExport;
   late bool _dynamic;
@@ -176,7 +176,9 @@ class _YoloExportSettingsDialogState
     try {
       final result = await widget.onManualExport(_settingsFromFields());
       if (mounted) {
-        setState(() => _message = '${t('train.exportDone')}: ${result.outputPath}');
+        setState(
+          () => _message = '${t('train.exportDone')}: ${result.outputPath}',
+        );
       }
     } on Object catch (error) {
       if (mounted) {
@@ -192,241 +194,245 @@ class _YoloExportSettingsDialogState
   @override
   Widget build(BuildContext context) {
     final isOnnx = _format == 'onnx';
-    return AlertDialog(
-      title: Text(t('train.exportSettings')),
-      content: SizedBox(
-        width: 560,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _ExportParameterTooltip(
-                name: 'format',
-                child: DropdownButtonFormField<String>(
-                  initialValue: _format,
-                  decoration: InputDecoration(
-                    labelText: t('train.exportFormat'),
-                  ),
-                  items: const [
-                    DropdownMenuItem(
-                      value: 'openvino',
-                      child: Text('OpenVINO'),
+    return DialogPrimaryAction(
+      onInvoke: () => Navigator.pop(context, _settingsFromFields()),
+      enabled: !_manualExporting,
+      child: AlertDialog(
+        title: Text(t('train.exportSettings')),
+        content: SizedBox(
+          width: 560,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _ExportParameterTooltip(
+                  name: 'format',
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _format,
+                    decoration: InputDecoration(
+                      labelText: t('train.exportFormat'),
                     ),
-                    DropdownMenuItem(value: 'onnx', child: Text('ONNX')),
-                  ],
-                  onChanged: _manualExporting
-                      ? null
-                      : (value) {
-                          if (value != null) {
-                            setState(() => _format = value);
-                          }
-                        },
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'openvino',
+                        child: Text('OpenVINO'),
+                      ),
+                      DropdownMenuItem(value: 'onnx', child: Text('ONNX')),
+                    ],
+                    onChanged: _manualExporting
+                        ? null
+                        : (value) {
+                            if (value != null) {
+                              setState(() => _format = value);
+                            }
+                          },
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                children: [
-                  _ExportTextField(
-                    controller: _imgszController,
-                    label: 'imgsz',
-                    width: 120,
-                    enabled: !_manualExporting,
-                  ),
-                  _ExportTextField(
-                    controller: _batchController,
-                    label: 'batch',
-                    width: 120,
-                    enabled: !_manualExporting,
-                  ),
-                  SizedBox(
-                    width: 160,
-                    child: _ExportParameterTooltip(
-                      name: 'quantize',
-                      child: DropdownButtonFormField<String>(
-                        initialValue: _quantize,
-                        decoration: const InputDecoration(
-                          labelText: 'quantize',
-                          isDense: true,
-                        ),
-                        items: const [
-                          DropdownMenuItem(
-                            value: '',
-                            child: Text('FP32 / 默认'),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    _ExportTextField(
+                      controller: _imgszController,
+                      label: 'imgsz',
+                      width: 120,
+                      enabled: !_manualExporting,
+                    ),
+                    _ExportTextField(
+                      controller: _batchController,
+                      label: 'batch',
+                      width: 120,
+                      enabled: !_manualExporting,
+                    ),
+                    SizedBox(
+                      width: 160,
+                      child: _ExportParameterTooltip(
+                        name: 'quantize',
+                        child: DropdownButtonFormField<String>(
+                          initialValue: _quantize,
+                          decoration: const InputDecoration(
+                            labelText: 'quantize',
+                            isDense: true,
                           ),
-                          DropdownMenuItem(value: '16', child: Text('FP16')),
-                          DropdownMenuItem(value: '8', child: Text('INT8')),
-                        ],
-                        onChanged: _manualExporting
-                            ? null
-                            : (value) {
-                                setState(() {
-                                  _quantize = value ?? '';
-                                  if (!_isInt8QuantizeValue(_quantize)) {
-                                    _dataController.clear();
-                                  }
-                                });
-                              },
+                          items: const [
+                            DropdownMenuItem(
+                              value: '',
+                              child: Text('FP32 / 默认'),
+                            ),
+                            DropdownMenuItem(value: '16', child: Text('FP16')),
+                            DropdownMenuItem(value: '8', child: Text('INT8')),
+                          ],
+                          onChanged: _manualExporting
+                              ? null
+                              : (value) {
+                                  setState(() {
+                                    _quantize = value ?? '';
+                                    if (!_isInt8QuantizeValue(_quantize)) {
+                                      _dataController.clear();
+                                    }
+                                  });
+                                },
+                        ),
                       ),
                     ),
-                  ),
-                  _ExportTextField(
-                    controller: _fractionController,
-                    label: 'fraction',
-                    width: 120,
-                    enabled: !_manualExporting,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              _ExportParameterTooltip(
-                name: 'dynamic',
-                child: SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  title: const Text('dynamic'),
-                  value: _dynamic,
-                  onChanged: _manualExporting
-                      ? null
-                      : (value) => setState(() => _dynamic = value),
+                    _ExportTextField(
+                      controller: _fractionController,
+                      label: 'fraction',
+                      width: 120,
+                      enabled: !_manualExporting,
+                    ),
+                  ],
                 ),
-              ),
-              _ExportParameterTooltip(
-                name: 'nms',
-                child: SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  title: const Text('nms'),
-                  value: _nms,
-                  onChanged: _manualExporting
-                      ? null
-                      : (value) => setState(() => _nms = value),
-                ),
-              ),
-              if (isOnnx) ...[
+                const SizedBox(height: 8),
                 _ExportParameterTooltip(
-                  name: 'simplify',
+                  name: 'dynamic',
                   child: SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     dense: true,
-                    title: const Text('simplify'),
-                    value: _simplify,
+                    title: const Text('dynamic'),
+                    value: _dynamic,
                     onChanged: _manualExporting
                         ? null
-                        : (value) => setState(() => _simplify = value),
+                        : (value) => setState(() => _dynamic = value),
                   ),
                 ),
-                _ExportTextField(
-                  controller: _opsetController,
-                  label: 'opset',
-                  width: 160,
-                  enabled: !_manualExporting,
-                  hint: 'auto',
-                ),
-              ],
-              const SizedBox(height: 8),
-              _ExportParameterTooltip(
-                name: 'data',
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _dataController,
-                        enabled: !_manualExporting && _isInt8Quantize,
-                        onChanged: (_) => setState(() {}),
-                        decoration: InputDecoration(
-                          labelText: 'data',
-                          hintText: _isInt8Quantize
-                              ? 'data.yaml'
-                              : t('train.exportDataOnlyInt8'),
-                          isDense: true,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    OutlinedButton.icon(
-                      onPressed: _manualExporting || !_isInt8Quantize
-                          ? null
-                          : _chooseDataYaml,
-                      icon: const Icon(Icons.folder_open, size: 16),
-                      label: Text(t('action.select')),
-                    ),
-                    if (_showDataWarning) ...[
-                      const SizedBox(width: 8),
-                      Tooltip(
-                        message: t('train.exportDataMissing'),
-                        child: Icon(
-                          Icons.error,
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              if (isOnnx) ...[
-                const SizedBox(height: 12),
                 _ExportParameterTooltip(
-                  name: 'device',
-                  child: TextField(
-                    controller: _deviceController,
-                    enabled: !_manualExporting,
-                    decoration: const InputDecoration(
-                      labelText: 'device',
-                      hintText: 'cpu / 0 / mps',
-                      isDense: true,
-                    ),
+                  name: 'nms',
+                  child: SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    title: const Text('nms'),
+                    value: _nms,
+                    onChanged: _manualExporting
+                        ? null
+                        : (value) => setState(() => _nms = value),
                   ),
                 ),
-              ],
-              _ExportParameterTooltip(
-                name: 'autoExport',
-                child: SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(t('train.autoExportAfterTraining')),
-                  value: _autoExport,
-                  onChanged: _manualExporting
-                      ? null
-                      : (value) => setState(() => _autoExport = value),
-                ),
-              ),
-              if (_message != null) ...[
+                if (isOnnx) ...[
+                  _ExportParameterTooltip(
+                    name: 'simplify',
+                    child: SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: const Text('simplify'),
+                      value: _simplify,
+                      onChanged: _manualExporting
+                          ? null
+                          : (value) => setState(() => _simplify = value),
+                    ),
+                  ),
+                  _ExportTextField(
+                    controller: _opsetController,
+                    label: 'opset',
+                    width: 160,
+                    enabled: !_manualExporting,
+                    hint: 'auto',
+                  ),
+                ],
                 const SizedBox(height: 8),
-                Text(_message!, style: Theme.of(context).textTheme.bodySmall),
+                _ExportParameterTooltip(
+                  name: 'data',
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _dataController,
+                          enabled: !_manualExporting && _isInt8Quantize,
+                          onChanged: (_) => setState(() {}),
+                          decoration: InputDecoration(
+                            labelText: 'data',
+                            hintText: _isInt8Quantize
+                                ? 'data.yaml'
+                                : t('train.exportDataOnlyInt8'),
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      OutlinedButton.icon(
+                        onPressed: _manualExporting || !_isInt8Quantize
+                            ? null
+                            : _chooseDataYaml,
+                        icon: const Icon(Icons.folder_open, size: 16),
+                        label: Text(t('action.select')),
+                      ),
+                      if (_showDataWarning) ...[
+                        const SizedBox(width: 8),
+                        Tooltip(
+                          message: t('train.exportDataMissing'),
+                          child: Icon(
+                            Icons.error,
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                if (isOnnx) ...[
+                  const SizedBox(height: 12),
+                  _ExportParameterTooltip(
+                    name: 'device',
+                    child: TextField(
+                      controller: _deviceController,
+                      enabled: !_manualExporting,
+                      decoration: const InputDecoration(
+                        labelText: 'device',
+                        hintText: 'cpu / 0 / mps',
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                ],
+                _ExportParameterTooltip(
+                  name: 'autoExport',
+                  child: SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(t('train.autoExportAfterTraining')),
+                    value: _autoExport,
+                    onChanged: _manualExporting
+                        ? null
+                        : (value) => setState(() => _autoExport = value),
+                  ),
+                ),
+                if (_message != null) ...[
+                  const SizedBox(height: 8),
+                  Text(_message!, style: Theme.of(context).textTheme.bodySmall),
+                ],
               ],
-            ],
+            ),
           ),
         ),
+        actions: [
+          TextButton(
+            onPressed: _manualExporting ? null : _reset,
+            child: Text(t('action.reset')),
+          ),
+          OutlinedButton.icon(
+            onPressed: _manualExporting ? null : _manualExport,
+            icon: _manualExporting
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.output_outlined, size: 16),
+            label: Text(t('train.exportNow')),
+          ),
+          TextButton(
+            onPressed: _manualExporting ? null : () => Navigator.pop(context),
+            child: Text(t('action.cancel')),
+          ),
+          FilledButton(
+            onPressed: _manualExporting
+                ? null
+                : () => Navigator.pop(context, _settingsFromFields()),
+            child: Text(t('action.save')),
+          ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: _manualExporting ? null : _reset,
-          child: Text(t('action.reset')),
-        ),
-        OutlinedButton.icon(
-          onPressed: _manualExporting ? null : _manualExport,
-          icon: _manualExporting
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.output_outlined, size: 16),
-          label: Text(t('train.exportNow')),
-        ),
-        TextButton(
-          onPressed: _manualExporting ? null : () => Navigator.pop(context),
-          child: Text(t('action.cancel')),
-        ),
-        FilledButton(
-          onPressed: _manualExporting
-              ? null
-              : () => Navigator.pop(context, _settingsFromFields()),
-          child: Text(t('action.save')),
-        ),
-      ],
     );
   }
 }

@@ -10,7 +10,20 @@
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+final Set<FocusNode> _registeredEditableFocusNodes = <FocusNode>{};
+
+void registerEditableFocusNode(FocusNode node) {
+  _registeredEditableFocusNodes.add(node);
+}
+
+void unregisterEditableFocusNode(FocusNode node) {
+  _registeredEditableFocusNodes.remove(node);
+}
+
 bool isEditableTextFocused() {
+  if (_registeredEditableFocusNodes.any((node) => node.hasFocus)) {
+    return true;
+  }
   final primaryFocus = FocusManager.instance.primaryFocus;
   if (primaryFocus == null) return false;
   for (final node in <FocusNode>[primaryFocus, ...primaryFocus.ancestors]) {

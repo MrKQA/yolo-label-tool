@@ -15,6 +15,7 @@ import 'dart:math' as math;
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
+import '../dialogs/dialog_shortcuts.dart';
 import '../services/i18n.dart';
 import '../services/path_utils.dart';
 import '../theme/theme_helpers.dart';
@@ -200,35 +201,39 @@ class _CropPageState extends State<CropPage> {
     final controller = TextEditingController(text: _folderNameController.text);
     final result = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(t('crop.outputDialogTitle')),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('${t('crop.outputPath')}: $outputRoot'),
-            const SizedBox(height: 16),
-            TextField(
-              controller: controller,
-              decoration: InputDecoration(
-                labelText: t('export.folderName'),
-                isDense: true,
+      builder: (context) => DialogPrimaryAction(
+        onInvoke: () =>
+            Navigator.of(context).pop(_sanitizePathPart(controller.text)),
+        child: AlertDialog(
+          title: Text(t('crop.outputDialogTitle')),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('${t('crop.outputPath')}: $outputRoot'),
+              const SizedBox(height: 16),
+              TextField(
+                controller: controller,
+                decoration: InputDecoration(
+                  labelText: t('export.folderName'),
+                  isDense: true,
+                ),
+                autofocus: true,
               ),
-              autofocus: true,
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text(t('action.cancel')),
+            ),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.of(context).pop(_sanitizePathPart(controller.text)),
+              child: Text(t('crop.startExtract')),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text(t('action.cancel')),
-          ),
-          FilledButton(
-            onPressed: () =>
-                Navigator.of(context).pop(_sanitizePathPart(controller.text)),
-            child: Text(t('crop.startExtract')),
-          ),
-        ],
       ),
     );
     controller.dispose();

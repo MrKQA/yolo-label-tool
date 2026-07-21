@@ -12,9 +12,11 @@ import 'package:flutter/services.dart';
 
 import '../models/shortcut.dart';
 import '../services/i18n.dart';
+import 'dialog_shortcuts.dart';
 
 class ShortcutSettingsDialog extends StatefulWidget {
   const ShortcutSettingsDialog({
+    super.key,
     required this.config,
     required this.onShortcutChanged,
     required this.onReset,
@@ -26,8 +28,7 @@ class ShortcutSettingsDialog extends StatefulWidget {
   final VoidCallback onReset;
 
   @override
-  State<ShortcutSettingsDialog> createState() =>
-      _ShortcutSettingsDialogState();
+  State<ShortcutSettingsDialog> createState() => _ShortcutSettingsDialogState();
 }
 
 class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
@@ -84,65 +85,67 @@ class _ShortcutSettingsDialogState extends State<ShortcutSettingsDialog> {
     final config = _currentConfig;
     const scopes = ShortcutScope.values;
 
-    return AlertDialog(
-      title: Text(t('shortcut.title')),
-      content: Focus(
-        focusNode: _captureFocusNode,
-        autofocus: true,
-        onKeyEvent: _captureKey,
-        child: SizedBox(
-          width: 480,
-          height: 520,
-          child: DefaultTabController(
-            length: scopes.length,
-            child: Column(
-              children: [
-                TabBar(
-                  isScrollable: true,
-                  tabs: [
-                    for (final scope in scopes) Tab(text: t(scope.labelKey)),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Expanded(
-                  child: TabBarView(
-                    children: [
-                      for (final scope in scopes)
-                        _ShortcutScopePane(
-                          scope: scope,
-                          config: config,
-                          waitingAction: _waitingAction,
-                          onPressed: _startCapture,
-                        ),
+    return DialogCancelAction(
+      child: AlertDialog(
+        title: Text(t('shortcut.title')),
+        content: Focus(
+          focusNode: _captureFocusNode,
+          autofocus: true,
+          onKeyEvent: _captureKey,
+          child: SizedBox(
+            width: 480,
+            height: 520,
+            child: DefaultTabController(
+              length: scopes.length,
+              child: Column(
+                children: [
+                  TabBar(
+                    isScrollable: true,
+                    tabs: [
+                      for (final scope in scopes) Tab(text: t(scope.labelKey)),
                     ],
                   ),
-                ),
-                const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(t('shortcut.note')),
-                ),
-              ],
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: TabBarView(
+                      children: [
+                        for (final scope in scopes)
+                          _ShortcutScopePane(
+                            scope: scope,
+                            config: config,
+                            waitingAction: _waitingAction,
+                            onPressed: _startCapture,
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(t('shortcut.note')),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              widget.onReset();
+              setState(() {
+                _currentConfig = ShortcutConfig.defaults();
+                _waitingAction = null;
+              });
+            },
+            child: Text(t('action.reset')),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(t('action.close')),
+          ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () {
-            widget.onReset();
-            setState(() {
-              _currentConfig = ShortcutConfig.defaults();
-              _waitingAction = null;
-            });
-          },
-          child: Text(t('action.reset')),
-        ),
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: Text(t('action.close')),
-        ),
-      ],
     );
   }
 }

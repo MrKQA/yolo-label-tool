@@ -75,6 +75,10 @@ enum WorkspaceShortcutCommand {
   nextImage,
   zoomIn,
   zoomOut,
+  toggleZoomLock,
+  resetLabelView,
+  importDataset,
+  exportDataset,
   hbbMode,
   obbMode,
   segMode,
@@ -83,6 +87,11 @@ enum WorkspaceShortcutCommand {
   rotateObb,
   aiAnnotateCurrent,
   aiAnnotateAll,
+  trainStart,
+  trainStop,
+  trainChooseModel,
+  trainChooseDataset,
+  trainExport,
 }
 
 class WorkspaceShortcutDecision {
@@ -119,19 +128,59 @@ class WorkspaceShortcutResolver {
           ? const WorkspaceShortcutDecision(WorkspaceShortcutCommand.consume)
           : WorkspaceShortcutDecision.ignored;
     }
-    if (editableTextFocused) {
+    if (editableTextFocused || shortcutDialogOpen) {
       return WorkspaceShortcutDecision.ignored;
     }
-    if (activeSection == 'browse' && !shortcutDialogOpen) {
-      return const WorkspaceShortcutDecision(
-        WorkspaceShortcutCommand.delegateBrowse,
-      );
-    }
-    if (!keyDown || activeSection != 'label' || shortcutDialogOpen) {
+    if (!keyDown) {
       return WorkspaceShortcutDecision.ignored;
     }
 
     final key = event.logicalKey;
+    if (event is KeyDownEvent &&
+        config.matches(ShortcutAction.dialogCancel, key)) {
+      return const WorkspaceShortcutDecision(
+        WorkspaceShortcutCommand.cancelSelection,
+      );
+    }
+    if (activeSection == 'browse') {
+      return const WorkspaceShortcutDecision(
+        WorkspaceShortcutCommand.delegateBrowse,
+      );
+    }
+    if (activeSection == 'train') {
+      if (event is! KeyDownEvent) {
+        return WorkspaceShortcutDecision.ignored;
+      }
+      if (config.matches(ShortcutAction.trainStart, key)) {
+        return const WorkspaceShortcutDecision(
+          WorkspaceShortcutCommand.trainStart,
+        );
+      }
+      if (config.matches(ShortcutAction.trainStop, key)) {
+        return const WorkspaceShortcutDecision(
+          WorkspaceShortcutCommand.trainStop,
+        );
+      }
+      if (config.matches(ShortcutAction.trainChooseModel, key)) {
+        return const WorkspaceShortcutDecision(
+          WorkspaceShortcutCommand.trainChooseModel,
+        );
+      }
+      if (config.matches(ShortcutAction.trainChooseDataset, key)) {
+        return const WorkspaceShortcutDecision(
+          WorkspaceShortcutCommand.trainChooseDataset,
+        );
+      }
+      if (config.matches(ShortcutAction.trainExport, key)) {
+        return const WorkspaceShortcutDecision(
+          WorkspaceShortcutCommand.trainExport,
+        );
+      }
+      return WorkspaceShortcutDecision.ignored;
+    }
+    if (activeSection != 'label') {
+      return WorkspaceShortcutDecision.ignored;
+    }
     if (controlPressed) {
       if (key == LogicalKeyboardKey.keyZ) {
         return const WorkspaceShortcutDecision(WorkspaceShortcutCommand.undo);
@@ -145,11 +194,6 @@ class WorkspaceShortcutResolver {
       if (key == LogicalKeyboardKey.keyV) {
         return const WorkspaceShortcutDecision(WorkspaceShortcutCommand.paste);
       }
-    }
-    if (key == LogicalKeyboardKey.escape) {
-      return const WorkspaceShortcutDecision(
-        WorkspaceShortcutCommand.cancelSelection,
-      );
     }
     final imageStep = event is KeyRepeatEvent ? 3 : 1;
     if (config.matches(ShortcutAction.previousImage, key)) {
@@ -169,6 +213,30 @@ class WorkspaceShortcutResolver {
     }
     if (config.matches(ShortcutAction.zoomOut, key)) {
       return const WorkspaceShortcutDecision(WorkspaceShortcutCommand.zoomOut);
+    }
+    if (event is KeyDownEvent &&
+        config.matches(ShortcutAction.toggleZoomLock, key)) {
+      return const WorkspaceShortcutDecision(
+        WorkspaceShortcutCommand.toggleZoomLock,
+      );
+    }
+    if (event is KeyDownEvent &&
+        config.matches(ShortcutAction.resetLabelView, key)) {
+      return const WorkspaceShortcutDecision(
+        WorkspaceShortcutCommand.resetLabelView,
+      );
+    }
+    if (event is KeyDownEvent &&
+        config.matches(ShortcutAction.importDataset, key)) {
+      return const WorkspaceShortcutDecision(
+        WorkspaceShortcutCommand.importDataset,
+      );
+    }
+    if (event is KeyDownEvent &&
+        config.matches(ShortcutAction.exportDataset, key)) {
+      return const WorkspaceShortcutDecision(
+        WorkspaceShortcutCommand.exportDataset,
+      );
     }
     if (config.matches(ShortcutAction.hbbMode, key)) {
       return const WorkspaceShortcutDecision(WorkspaceShortcutCommand.hbbMode);
@@ -240,12 +308,21 @@ class WorkspaceShortcutActions {
     required this.onNoPreviousImage,
     required this.onNoNextImage,
     required this.adjustZoom,
+    required this.toggleZoomLock,
+    required this.resetLabelView,
+    required this.importDataset,
+    required this.exportDataset,
     required this.activateMode,
     required this.deleteSelected,
     required this.toggleClassLabels,
     required this.rotateObb,
     required this.aiAnnotateCurrent,
     required this.aiAnnotateAll,
+    required this.trainStart,
+    required this.trainStop,
+    required this.trainChooseModel,
+    required this.trainChooseDataset,
+    required this.trainExport,
   });
 
   final KeyEventResult Function(KeyEvent event) delegateBrowse;
@@ -259,12 +336,21 @@ class WorkspaceShortcutActions {
   final VoidCallback onNoPreviousImage;
   final VoidCallback onNoNextImage;
   final ValueChanged<double> adjustZoom;
+  final VoidCallback toggleZoomLock;
+  final VoidCallback resetLabelView;
+  final VoidCallback importDataset;
+  final VoidCallback exportDataset;
   final ValueChanged<AnnotationMode> activateMode;
   final VoidCallback deleteSelected;
   final VoidCallback toggleClassLabels;
   final ValueChanged<double> rotateObb;
   final VoidCallback aiAnnotateCurrent;
   final VoidCallback aiAnnotateAll;
+  final VoidCallback trainStart;
+  final VoidCallback trainStop;
+  final VoidCallback trainChooseModel;
+  final VoidCallback trainChooseDataset;
+  final VoidCallback trainExport;
 }
 
 /// Executes a resolved shortcut without coupling key parsing to workspace UI.
@@ -315,6 +401,18 @@ class WorkspaceShortcutDispatcher {
       case WorkspaceShortcutCommand.zoomOut:
         actions.adjustZoom(-10);
         return KeyEventResult.handled;
+      case WorkspaceShortcutCommand.toggleZoomLock:
+        actions.toggleZoomLock();
+        return KeyEventResult.handled;
+      case WorkspaceShortcutCommand.resetLabelView:
+        actions.resetLabelView();
+        return KeyEventResult.handled;
+      case WorkspaceShortcutCommand.importDataset:
+        actions.importDataset();
+        return KeyEventResult.handled;
+      case WorkspaceShortcutCommand.exportDataset:
+        actions.exportDataset();
+        return KeyEventResult.handled;
       case WorkspaceShortcutCommand.hbbMode:
         actions.activateMode(AnnotationMode.hbb);
         return KeyEventResult.handled;
@@ -338,6 +436,21 @@ class WorkspaceShortcutDispatcher {
         return KeyEventResult.handled;
       case WorkspaceShortcutCommand.aiAnnotateAll:
         actions.aiAnnotateAll();
+        return KeyEventResult.handled;
+      case WorkspaceShortcutCommand.trainStart:
+        actions.trainStart();
+        return KeyEventResult.handled;
+      case WorkspaceShortcutCommand.trainStop:
+        actions.trainStop();
+        return KeyEventResult.handled;
+      case WorkspaceShortcutCommand.trainChooseModel:
+        actions.trainChooseModel();
+        return KeyEventResult.handled;
+      case WorkspaceShortcutCommand.trainChooseDataset:
+        actions.trainChooseDataset();
+        return KeyEventResult.handled;
+      case WorkspaceShortcutCommand.trainExport:
+        actions.trainExport();
         return KeyEventResult.handled;
     }
   }

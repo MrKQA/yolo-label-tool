@@ -10,6 +10,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/i18n.dart';
+import 'dialog_shortcuts.dart';
 
 Future<void> showAboutDialogForContext(BuildContext context) {
   return showDialog<void>(
@@ -29,33 +30,35 @@ Future<void> showAboutDialogForContext(BuildContext context) {
         );
       }
 
-      return AlertDialog(
-        title: Text(t('about.title')),
-        content: SizedBox(
-          width: 620,
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  t('about.version'),
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                const SizedBox(height: 16),
-                section(t('about.licenseTitle'), 'about.licenseBody'),
-                section(t('about.opensourceTitle'), 'about.opensourceBody'),
-                section(t('about.warningTitle'), 'about.warningBody'),
-              ],
+      return DialogCancelAction(
+        child: AlertDialog(
+          title: Text(t('about.title')),
+          content: SizedBox(
+            width: 620,
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    t('about.version'),
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 16),
+                  section(t('about.licenseTitle'), 'about.licenseBody'),
+                  section(t('about.opensourceTitle'), 'about.opensourceBody'),
+                  section(t('about.warningTitle'), 'about.warningBody'),
+                ],
+              ),
             ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text(t('action.close')),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text(t('action.close')),
-          ),
-        ],
       );
     },
   );

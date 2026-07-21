@@ -59,15 +59,15 @@ class BottomControls extends StatelessWidget {
           ),
           _ZoomValue(value: '${zoom.round()}%'),
           _SquareIconButton(
+            icon: Icons.add,
+            tooltip: t('bottom.zoomIn'),
+            onPressed: zoomLocked ? null : () => onZoomChanged(zoom + 10),
+          ),
+          _SquareIconButton(
             icon: zoomLocked ? Icons.link_off : Icons.link,
             tooltip: t('bottom.lockZoom'),
             selected: zoomLocked,
             onPressed: onToggleZoomLock,
-          ),
-          _SquareIconButton(
-            icon: Icons.add,
-            tooltip: t('bottom.zoomIn'),
-            onPressed: zoomLocked ? null : () => onZoomChanged(zoom + 10),
           ),
           _ControlButton(
             label: t('bottom.reset'),

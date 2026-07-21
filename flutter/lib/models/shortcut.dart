@@ -14,10 +14,17 @@ import '../services/input_utils.dart';
 /// Configurable shortcut action / 可配置快捷键动作
 /// User-configurable shortcut actions.
 enum ShortcutAction {
+  dialogConfirm,
+  dialogCancel,
+  classNameAutocomplete,
   previousImage,
   nextImage,
   zoomIn,
   zoomOut,
+  toggleZoomLock,
+  resetLabelView,
+  importDataset,
+  exportDataset,
   hbbMode,
   obbMode,
   segMode,
@@ -37,16 +44,28 @@ enum ShortcutAction {
   videoFastForward,
   aiAnnotateCurrent,
   aiAnnotateAll,
+  trainStart,
+  trainStop,
+  trainChooseModel,
+  trainChooseDataset,
+  trainExport,
 }
 
 enum ShortcutScope { global, label, browse, train }
 
 extension ShortcutActionLabel on ShortcutAction {
   String get labelKey => switch (this) {
+    ShortcutAction.dialogConfirm => 'shortcut.dialogConfirm',
+    ShortcutAction.dialogCancel => 'shortcut.dialogCancel',
+    ShortcutAction.classNameAutocomplete => 'shortcut.classNameAutocomplete',
     ShortcutAction.previousImage => 'shortcut.previousImage',
     ShortcutAction.nextImage => 'shortcut.nextImage',
     ShortcutAction.zoomIn => 'shortcut.zoomIn',
     ShortcutAction.zoomOut => 'shortcut.zoomOut',
+    ShortcutAction.toggleZoomLock => 'shortcut.toggleZoomLock',
+    ShortcutAction.resetLabelView => 'shortcut.resetLabelView',
+    ShortcutAction.importDataset => 'shortcut.importDataset',
+    ShortcutAction.exportDataset => 'shortcut.exportDataset',
     ShortcutAction.hbbMode => 'shortcut.hbbMode',
     ShortcutAction.obbMode => 'shortcut.obbMode',
     ShortcutAction.segMode => 'shortcut.segMode',
@@ -66,6 +85,11 @@ extension ShortcutActionLabel on ShortcutAction {
     ShortcutAction.videoFastForward => 'shortcut.videoFastForward',
     ShortcutAction.aiAnnotateCurrent => 'shortcut.aiAnnotateCurrent',
     ShortcutAction.aiAnnotateAll => 'shortcut.aiAnnotateAll',
+    ShortcutAction.trainStart => 'shortcut.trainStart',
+    ShortcutAction.trainStop => 'shortcut.trainStop',
+    ShortcutAction.trainChooseModel => 'shortcut.trainChooseModel',
+    ShortcutAction.trainChooseDataset => 'shortcut.trainChooseDataset',
+    ShortcutAction.trainExport => 'shortcut.trainExport',
   };
 
   bool get isAiAction => switch (this) {
@@ -74,6 +98,8 @@ extension ShortcutActionLabel on ShortcutAction {
   };
 
   ShortcutScope get scope => switch (this) {
+    ShortcutAction.dialogConfirm ||
+    ShortcutAction.dialogCancel => ShortcutScope.global,
     ShortcutAction.browsePreviousMedia ||
     ShortcutAction.browseNextMedia ||
     ShortcutAction.browseFullscreen ||
@@ -82,6 +108,11 @@ extension ShortcutActionLabel on ShortcutAction {
     ShortcutAction.videoPlayPause ||
     ShortcutAction.videoRewind ||
     ShortcutAction.videoFastForward => ShortcutScope.browse,
+    ShortcutAction.trainStart ||
+    ShortcutAction.trainStop ||
+    ShortcutAction.trainChooseModel ||
+    ShortcutAction.trainChooseDataset ||
+    ShortcutAction.trainExport => ShortcutScope.train,
     _ => ShortcutScope.label,
   };
 }
@@ -147,27 +178,30 @@ class ShortcutConfig {
 
   factory ShortcutConfig.defaults() {
     return ShortcutConfig({
+      ShortcutAction.dialogConfirm: ShortcutBinding.fromKey(
+        LogicalKeyboardKey.enter,
+      ),
+      ShortcutAction.dialogCancel: ShortcutBinding.fromKey(
+        LogicalKeyboardKey.escape,
+      ),
+      ShortcutAction.classNameAutocomplete: ShortcutBinding.fromKey(
+        LogicalKeyboardKey.tab,
+      ),
       ShortcutAction.previousImage: ShortcutBinding.fromKey(
         LogicalKeyboardKey.keyA,
       ),
       ShortcutAction.nextImage: ShortcutBinding.fromKey(
         LogicalKeyboardKey.keyD,
       ),
-      ShortcutAction.zoomIn: ShortcutBinding.fromKey(
-        LogicalKeyboardKey.equal,
-      ),
-      ShortcutAction.zoomOut: ShortcutBinding.fromKey(
-        LogicalKeyboardKey.minus,
-      ),
-      ShortcutAction.hbbMode: ShortcutBinding.fromKey(
-        LogicalKeyboardKey.keyR,
-      ),
-      ShortcutAction.obbMode: ShortcutBinding.fromKey(
-        LogicalKeyboardKey.keyB,
-      ),
-      ShortcutAction.segMode: ShortcutBinding.fromKey(
-        LogicalKeyboardKey.keyS,
-      ),
+      ShortcutAction.zoomIn: ShortcutBinding.fromKey(LogicalKeyboardKey.equal),
+      ShortcutAction.zoomOut: ShortcutBinding.fromKey(LogicalKeyboardKey.minus),
+      ShortcutAction.toggleZoomLock: const ShortcutBinding.unassigned(),
+      ShortcutAction.resetLabelView: const ShortcutBinding.unassigned(),
+      ShortcutAction.importDataset: const ShortcutBinding.unassigned(),
+      ShortcutAction.exportDataset: const ShortcutBinding.unassigned(),
+      ShortcutAction.hbbMode: ShortcutBinding.fromKey(LogicalKeyboardKey.keyR),
+      ShortcutAction.obbMode: ShortcutBinding.fromKey(LogicalKeyboardKey.keyB),
+      ShortcutAction.segMode: ShortcutBinding.fromKey(LogicalKeyboardKey.keyS),
       ShortcutAction.deleteSelected: ShortcutBinding.fromKey(
         LogicalKeyboardKey.delete,
       ),
@@ -212,6 +246,11 @@ class ShortcutConfig {
       ),
       ShortcutAction.aiAnnotateCurrent: const ShortcutBinding.unassigned(),
       ShortcutAction.aiAnnotateAll: const ShortcutBinding.unassigned(),
+      ShortcutAction.trainStart: const ShortcutBinding.unassigned(),
+      ShortcutAction.trainStop: const ShortcutBinding.unassigned(),
+      ShortcutAction.trainChooseModel: const ShortcutBinding.unassigned(),
+      ShortcutAction.trainChooseDataset: const ShortcutBinding.unassigned(),
+      ShortcutAction.trainExport: const ShortcutBinding.unassigned(),
     });
   }
 
@@ -229,10 +268,7 @@ class ShortcutConfig {
     required ShortcutAction action,
     required LogicalKeyboardKey key,
   }) {
-    return ShortcutConfig({
-      ..._bindings,
-      action: ShortcutBinding.fromKey(key),
-    });
+    return ShortcutConfig({..._bindings, action: ShortcutBinding.fromKey(key)});
   }
 
   Map<String, Object> toJson() => {

@@ -7,6 +7,8 @@
 // 右侧工具栏：绘制/选择工具、类别列表、标注列表面板和 AI 辅助面板开关。
 // =============================================================================
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../models/annotation.dart';
@@ -21,6 +23,7 @@ import 'class_manager.dart';
 /// Right-side AI/annotation toolbar with tools and class management.
 class AiToolbar extends StatelessWidget {
   const AiToolbar({
+    super.key,
     required this.activeTool,
     required this.activeClassId,
     required this.labelClasses,
@@ -71,6 +74,7 @@ class AiToolbar extends StatelessWidget {
     ToolSpec('undo', Icons.undo, 'tool.undo'),
     ToolSpec('redo', Icons.redo, 'tool.redo'),
     ToolSpec('delete', Icons.delete_outline, 'tool.delete'),
+    ToolSpec('clear', Icons.delete_sweep_outlined, 'tool.clear'),
     ToolSpec('export', Icons.file_download_outlined, 'tool.export'),
   ];
 
@@ -135,41 +139,50 @@ class AiToolbar extends StatelessWidget {
                 onAnnotationClassChanged: onAnnotationClassChanged,
               ),
             )
-          else ...[
-            for (final tool in _tools)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(10, 0, 10, 6),
-                child: _ToolButton(
-                  tool: tool,
-                  selected: tool.id == 'ai_config'
-                      ? aiPanelVisible
-                      : tool.id == activeTool,
-                  onPressed: () {
-                    if (tool.id == 'ai_config') {
-                      onAiConfigPressed();
-                    } else {
-                      onToolSelected(tool.id);
-                    }
-                  },
-                ),
-              ),
-            const Divider(height: 16),
+          else
             Expanded(
-              child: ClassManager(
-                activeClassId: activeClassId,
-                labelClasses: labelClasses,
-                showClassLabels: showClassLabels,
-                classesEditable: classesEditable,
-                onClassSelected: onClassSelected,
-                onClassAdded: onClassAdded,
-                onClassEdited: onClassEdited,
-                onClassColorChanged: onClassColorChanged,
-                onClassDeleted: onClassDeleted,
-                onClassReordered: onClassReordered,
-                onToggleClassLabels: onToggleClassLabels,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final itemExtent = useCompactWorkspaceLayout(context)
+                      ? 44.0
+                      : 48.0;
+                  final toolHeight = math.min(
+                    _tools.length * itemExtent,
+                    constraints.maxHeight * 0.52,
+                  );
+                  return Column(
+                    children: [
+                      SizedBox(
+                        height: toolHeight,
+                        child: _ScrollableToolButtons(
+                          tools: _tools,
+                          activeTool: activeTool,
+                          aiPanelVisible: aiPanelVisible,
+                          onToolSelected: onToolSelected,
+                          onAiConfigPressed: onAiConfigPressed,
+                        ),
+                      ),
+                      const Divider(height: 16),
+                      Expanded(
+                        child: ClassManager(
+                          activeClassId: activeClassId,
+                          labelClasses: labelClasses,
+                          showClassLabels: showClassLabels,
+                          classesEditable: classesEditable,
+                          onClassSelected: onClassSelected,
+                          onClassAdded: onClassAdded,
+                          onClassEdited: onClassEdited,
+                          onClassColorChanged: onClassColorChanged,
+                          onClassDeleted: onClassDeleted,
+                          onClassReordered: onClassReordered,
+                          onToggleClassLabels: onToggleClassLabels,
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
-          ],
         ],
       ),
     );
@@ -178,6 +191,70 @@ class AiToolbar extends StatelessWidget {
 
 /// 工具栏按钮，负责图标、文字和选中态显示。
 /// Toolbar button that renders icon, text, and selected state.
+class _ScrollableToolButtons extends StatefulWidget {
+  const _ScrollableToolButtons({
+    required this.tools,
+    required this.activeTool,
+    required this.aiPanelVisible,
+    required this.onToolSelected,
+    required this.onAiConfigPressed,
+  });
+
+  final List<ToolSpec> tools;
+  final String activeTool;
+  final bool aiPanelVisible;
+  final ValueChanged<String> onToolSelected;
+  final VoidCallback onAiConfigPressed;
+
+  @override
+  State<_ScrollableToolButtons> createState() => _ScrollableToolButtonsState();
+}
+
+class _ScrollableToolButtonsState extends State<_ScrollableToolButtons> {
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scrollbar(
+      controller: _scrollController,
+      thumbVisibility: true,
+      interactive: true,
+      child: ListView.builder(
+        controller: _scrollController,
+        primary: false,
+        physics: const ClampingScrollPhysics(),
+        padding: EdgeInsets.zero,
+        itemCount: widget.tools.length,
+        itemBuilder: (context, index) {
+          final tool = widget.tools[index];
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(10, 0, 10, 6),
+            child: _ToolButton(
+              tool: tool,
+              selected: tool.id == 'ai_config'
+                  ? widget.aiPanelVisible
+                  : tool.id == widget.activeTool,
+              onPressed: () {
+                if (tool.id == 'ai_config') {
+                  widget.onAiConfigPressed();
+                } else {
+                  widget.onToolSelected(tool.id);
+                }
+              },
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
 class _ToolButton extends StatelessWidget {
   const _ToolButton({
     required this.tool,

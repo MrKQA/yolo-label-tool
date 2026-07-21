@@ -7,6 +7,7 @@ import '../services/app_runtime.dart';
 import '../services/config_store.dart';
 import '../services/i18n.dart';
 import '../services/path_utils.dart';
+import '../services/shortcut_runtime.dart';
 import 'collaboration_controller.dart';
 
 typedef ShortcutConfigLoader = ShortcutConfig Function();
@@ -71,6 +72,7 @@ class WorkspaceSettingsController extends ChangeNotifier {
 
   void loadPersisted() {
     shortcuts = _shortcutLoader();
+    ShortcutRuntime.update(shortcuts);
     settings = _settingsLoader();
     darkMode = settings.darkMode;
     collaboration.restoreIdentity(
@@ -123,12 +125,14 @@ class WorkspaceSettingsController extends ChangeNotifier {
 
   void updateShortcut(ShortcutAction action, LogicalKeyboardKey key) {
     shortcuts = shortcuts.copyWith(action: action, key: key);
+    ShortcutRuntime.update(shortcuts);
     _shortcutSaver(shortcuts);
     _notifyChanged();
   }
 
   void resetShortcuts() {
     shortcuts = ShortcutConfig.defaults();
+    ShortcutRuntime.update(shortcuts);
     _shortcutSaver(shortcuts);
     _notifyChanged();
   }

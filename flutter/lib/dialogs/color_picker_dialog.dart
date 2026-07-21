@@ -11,6 +11,7 @@ import 'package:flex_color_picker/flex_color_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../services/i18n.dart';
+import 'dialog_shortcuts.dart';
 
 Future<Color?> showWheelColorDialog({
   required BuildContext context,
@@ -26,70 +27,74 @@ Future<Color?> showWheelColorDialog({
       return StatefulBuilder(
         builder: (context, setDialogState) {
           final colorScheme = Theme.of(context).colorScheme;
-          return AlertDialog(
-            title: Text(title),
-            content: ConstrainedBox(
-              constraints: constraints,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SizedBox.square(
-                    dimension: 260,
-                    child: ColorWheelPicker(
-                      color: selectedColor,
-                      onChanged: (color) {
-                        setDialogState(() => selectedColor = color);
-                      },
-                      onWheel: (_) {},
-                      wheelWidth: 18,
-                      hasBorder: true,
-                      borderColor: colorScheme.outlineVariant,
+          return DialogPrimaryAction(
+            onInvoke: () => Navigator.of(dialogContext).pop(selectedColor),
+            child: AlertDialog(
+              title: Text(title),
+              content: ConstrainedBox(
+                constraints: constraints,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox.square(
+                      dimension: 260,
+                      child: ColorWheelPicker(
+                        color: selectedColor,
+                        onChanged: (color) {
+                          setDialogState(() => selectedColor = color);
+                        },
+                        onWheel: (_) {},
+                        wheelWidth: 18,
+                        hasBorder: true,
+                        borderColor: colorScheme.outlineVariant,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 20),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 10,
-                    ),
-                    decoration: BoxDecoration(
-                      color: colorScheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: colorScheme.outlineVariant),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 24,
-                          height: 24,
-                          decoration: BoxDecoration(
-                            color: selectedColor,
-                            borderRadius: BorderRadius.circular(4),
-                            border: Border.all(color: colorScheme.outline),
+                    const SizedBox(height: 20),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: colorScheme.outlineVariant),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 24,
+                            height: 24,
+                            decoration: BoxDecoration(
+                              color: selectedColor,
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: colorScheme.outline),
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 10),
-                        Text(
-                          _colorHex(selectedColor),
-                          style: const TextStyle(fontFamily: 'monospace'),
-                        ),
-                      ],
+                          const SizedBox(width: 10),
+                          Text(
+                            _colorHex(selectedColor),
+                            style: const TextStyle(fontFamily: 'monospace'),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: Text(t('label.cancelAnnotation')),
+                ),
+                TextButton(
+                  onPressed: () =>
+                      Navigator.of(dialogContext).pop(selectedColor),
+                  child: Text(t('label.saveAnnotation')),
+                ),
+              ],
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(),
-                child: Text(t('label.cancelAnnotation')),
-              ),
-              TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(selectedColor),
-                child: Text(t('label.saveAnnotation')),
-              ),
-            ],
           );
         },
       );

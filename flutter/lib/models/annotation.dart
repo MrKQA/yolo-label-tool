@@ -94,9 +94,7 @@ class AnnotationRegion {
       mode: mode,
       rect: normalized,
       classId: classId,
-      points: mode == AnnotationMode.seg
-          ? rectToPoints(normalized)
-          : const [],
+      points: mode == AnnotationMode.seg ? rectToPoints(normalized) : const [],
       authorId: authorId,
       authorName: authorName,
       authorColorValue: authorColorValue,
@@ -197,14 +195,24 @@ class AnnotationRegion {
     );
   }
 
-  bool hitTest(Offset point) {
-    if (mode == AnnotationMode.seg && points.length >= 3) {
-      final path = Path()..addPolygon(points, true);
-      if (path.contains(point)) {
-        return true;
-      }
+  bool hitTest(Offset point, {double edgeTolerance = 0}) {
+    final tolerance = math.max(0.0, edgeTolerance);
+    switch (mode) {
+      case AnnotationMode.hbb:
+        return rect.inflate(tolerance).contains(point);
+      case AnnotationMode.obb:
+        final radians = -rotationDegrees * math.pi / 180;
+        final unrotatedPoint = rotatePoint(point, rect.center, radians);
+        return rect.inflate(tolerance).contains(unrotatedPoint);
+      case AnnotationMode.seg:
+        final polygon = points.length >= 3 ? points : rectToPoints(rect);
+        final path = Path()..addPolygon(polygon, true);
+        if (path.contains(point)) {
+          return true;
+        }
+        return tolerance > 0 &&
+            _distanceToPolygonBoundary(point, polygon) <= tolerance;
     }
-    return rect.inflate(6).contains(point);
   }
 
   String toUltralyticsLabelLine({
@@ -262,6 +270,33 @@ class AnnotationRegion {
       ],
     ];
   }
+}
+
+double _distanceToPolygonBoundary(Offset point, List<Offset> polygon) {
+  if (polygon.length < 2) {
+    return double.infinity;
+  }
+  var shortest = double.infinity;
+  for (var index = 0; index < polygon.length; index++) {
+    final start = polygon[index];
+    final end = polygon[(index + 1) % polygon.length];
+    shortest = math.min(shortest, _distanceToSegment(point, start, end));
+  }
+  return shortest;
+}
+
+double _distanceToSegment(Offset point, Offset start, Offset end) {
+  final segment = end - start;
+  final lengthSquared = segment.dx * segment.dx + segment.dy * segment.dy;
+  if (lengthSquared <= 0) {
+    return (point - start).distance;
+  }
+  final relative = point - start;
+  final projection =
+      ((relative.dx * segment.dx + relative.dy * segment.dy) / lengthSquared)
+          .clamp(0.0, 1.0)
+          .toDouble();
+  return (point - (start + segment * projection)).distance;
 }
 
 Rect normalizeRect(Rect rect) {

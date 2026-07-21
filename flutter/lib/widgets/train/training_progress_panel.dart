@@ -59,6 +59,10 @@ class TrainingProgressPanel extends StatelessWidget {
         .expand((s) => s.spots)
         .map((s) => s.x)
         .fold<double>(double.negativeInfinity, math.max);
+    final xSpan = maxX - minX;
+    final xPadding = xSpan <= 0 ? 1.0 : math.max(0.5, xSpan * 0.03).toDouble();
+    final chartMinX = math.max(0.0, minX - xPadding).toDouble();
+    final chartMaxX = maxX + xPadding;
     final epochInterval = _trainingChartEpochInterval(points);
 
     // Group series into separate chart panels
@@ -86,8 +90,8 @@ class TrainingProgressPanel extends StatelessWidget {
           context,
           t('train.chartLoss'),
           lossGroup,
-          minX,
-          maxX,
+          chartMinX,
+          chartMaxX,
           epochInterval,
         ),
       );
@@ -98,8 +102,8 @@ class TrainingProgressPanel extends StatelessWidget {
           context,
           t('train.chartMap'),
           mapGroup,
-          minX,
-          maxX,
+          chartMinX,
+          chartMaxX,
           epochInterval,
         ),
       );
@@ -110,8 +114,8 @@ class TrainingProgressPanel extends StatelessWidget {
           context,
           t('train.chartPr'),
           prGroup,
-          minX,
-          maxX,
+          chartMinX,
+          chartMaxX,
           epochInterval,
         ),
       );
@@ -122,8 +126,8 @@ class TrainingProgressPanel extends StatelessWidget {
           context,
           t('train.chartLr'),
           lrGroup,
-          minX,
-          maxX,
+          chartMinX,
+          chartMaxX,
           epochInterval,
         ),
       );
@@ -430,18 +434,38 @@ Widget _metricChart(
                     spots: item.spots,
                     color: item.color,
                     barWidth: 2,
-                    dotData: const FlDotData(show: false),
-                    isCurved: true,
+                    dotData: FlDotData(
+                      show: true,
+                      checkToShowDot: (spot, barData) =>
+                          spot.x == barData.spots.first.x ||
+                          spot.x == barData.spots.last.x,
+                    ),
+                    isCurved: item.spots.length > 2,
                   ),
               ],
               lineTouchData: LineTouchData(
+                touchSpotThreshold: double.infinity,
                 touchTooltipData: LineTouchTooltipData(
+                  fitInsideHorizontally: true,
+                  fitInsideVertically: true,
+                  maxContentWidth: 220,
+                  tooltipMargin: 6,
+                  tooltipPadding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
                   getTooltipItems: (spots) => [
-                    for (final spot in spots)
+                    for (var index = 0; index < spots.length; index++)
                       LineTooltipItem(
-                        '${group[spot.barIndex].label}  '
-                        '${spot.y.toStringAsFixed(4)}',
-                        TextStyle(color: group[spot.barIndex].color),
+                        '${index == 0 ? '${t('train.currentEpoch')}: ${spots[index].x.toInt()}\n' : ''}'
+                        '${group[spots[index].barIndex].label}  '
+                        '${spots[index].y.toStringAsFixed(4)}',
+                        TextStyle(
+                          color: group[spots[index].barIndex].color,
+                          fontSize: 12,
+                          height: 1.25,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                   ],
                 ),

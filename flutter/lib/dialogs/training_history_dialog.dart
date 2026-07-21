@@ -13,6 +13,7 @@ import '../models/training.dart';
 import '../services/i18n.dart';
 import '../services/path_utils.dart';
 import '../widgets/train/train_runtime_support.dart';
+import 'dialog_shortcuts.dart';
 
 void showTrainingHistoryRecordsDialog({
   required BuildContext context,
@@ -25,49 +26,51 @@ void showTrainingHistoryRecordsDialog({
   }
   showDialog<void>(
     context: context,
-    builder: (context) => AlertDialog(
-      title: Text(t('menu.trainingHistory')),
-      content: SizedBox(
-        width: 560,
-        child: ListView.builder(
-          shrinkWrap: true,
-          itemCount: history.length,
-          itemBuilder: (context, index) {
-            final entry = history[index];
-            return Card(
-              margin: const EdgeInsets.only(bottom: 8),
-              child: ListTile(
-                dense: true,
-                leading: Icon(
-                  entry.action == TrainingHistoryAction.stop
-                      ? Icons.stop_circle_outlined
-                      : Icons.play_circle_outline,
+    builder: (context) => DialogCancelAction(
+      child: AlertDialog(
+        title: Text(t('menu.trainingHistory')),
+        content: SizedBox(
+          width: 560,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: history.length,
+            itemBuilder: (context, index) {
+              final entry = history[index];
+              return Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(
+                    entry.action == TrainingHistoryAction.stop
+                        ? Icons.stop_circle_outlined
+                        : Icons.play_circle_outline,
+                  ),
+                  title: Text(
+                    '${trainingActionLabel(entry.action)}  '
+                    '${entry.epoch}/${entry.targetEpochs}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Text(
+                    '${t('train.historyTimePoint')}: '
+                    '${formatTrainingHistoryTime(entry.timestamp)}\n'
+                    '${t('path.model')}: ${fileName(entry.modelPath)}\n'
+                    '${t('train.datasetPath')}: ${entry.datasetPath}',
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-                title: Text(
-                  '${trainingActionLabel(entry.action)}  '
-                  '${entry.epoch}/${entry.targetEpochs}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Text(
-                  '${t('train.historyTimePoint')}: '
-                  '${formatTrainingHistoryTime(entry.timestamp)}\n'
-                  '${t('path.model')}: ${fileName(entry.modelPath)}\n'
-                  '${t('train.datasetPath')}: ${entry.datasetPath}',
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            );
-          },
+              );
+            },
+          ),
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(t('action.close')),
+          ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: Text(t('action.close')),
-        ),
-      ],
     ),
   );
 }

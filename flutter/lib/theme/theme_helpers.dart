@@ -12,8 +12,12 @@ import 'package:flutter/material.dart';
 
 import 'colors.dart';
 
-const appFontFamily = 'Microsoft YaHei UI';
-const appFontFamilyFallback = <String>['Microsoft YaHei', 'Segoe UI'];
+const appFontFamily = 'MiSans';
+const appFontFamilyFallback = <String>[
+  'Microsoft YaHei',
+  'Microsoft YaHei UI',
+  'Segoe UI',
+];
 
 bool isDarkMode(BuildContext context) =>
     Theme.of(context).brightness == Brightness.dark;

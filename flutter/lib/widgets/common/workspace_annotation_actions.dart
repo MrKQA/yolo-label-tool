@@ -22,7 +22,9 @@ class WorkspaceAnnotationActions {
     required this.context,
     required this.projectChangeBlocked,
     required this.showMessage,
+    required this.showModeIncompatibleMessage,
     required this.showExport,
+    required this.showClearItems,
   });
 
   final ProjectController project;
@@ -32,7 +34,9 @@ class WorkspaceAnnotationActions {
   final BuildContext Function() context;
   final bool Function() projectChangeBlocked;
   final ValueChanged<String> showMessage;
+  final ValueChanged<String> showModeIncompatibleMessage;
   final VoidCallback showExport;
+  final VoidCallback showClearItems;
 
   void pushSnapshot() => project.pushAnnotationSnapshot();
 
@@ -51,8 +55,27 @@ class WorkspaceAnnotationActions {
   }
 
   void activateMode(AnnotationMode mode) {
+    if (!_guardAnnotationMode(mode)) return;
     navigation.activateAnnotationMode(mode);
     project.selectAnnotation(null);
+  }
+
+  bool _guardAnnotationMode(AnnotationMode requestedMode) {
+    final establishedMode = project.projectAnnotationMode;
+    if (establishedMode == null || establishedMode == requestedMode) {
+      return true;
+    }
+    navigation.activateAnnotationMode(establishedMode);
+    project.selectAnnotation(null);
+    showModeIncompatibleMessage(
+      '${t('label.annotationModeIncompatible')} ${establishedMode.label}',
+    );
+    logApp(
+      'ANNOTATION',
+      'Rejected incompatible annotation mode: requested=${requestedMode.name}, project=${establishedMode.name}',
+      level: AppLogLevel.warning,
+    );
+    return false;
   }
 
   void selectTool(String tool) {
@@ -74,6 +97,9 @@ class WorkspaceAnnotationActions {
         return;
       case 'export':
         showExport();
+        return;
+      case 'clear':
+        showClearItems();
         return;
       default:
         navigation.activeTool = tool;
@@ -152,6 +178,7 @@ class WorkspaceAnnotationActions {
   void selectLabelClass(int id) => project.selectLabelClass(id);
 
   void createAnnotation(Rect rect, int classId) {
+    if (!_guardAnnotationMode(navigation.annotationMode)) return;
     final annotation = editing.createRect(
       rect: rect,
       classId: classId,
@@ -167,6 +194,7 @@ class WorkspaceAnnotationActions {
   }
 
   void createSegAnnotation(List<Offset> points, int classId) {
+    if (!_guardAnnotationMode(AnnotationMode.seg)) return;
     final annotation = editing.createSeg(points: points, classId: classId);
     if (annotation == null) return;
     navigation.activeTool = 'draw';

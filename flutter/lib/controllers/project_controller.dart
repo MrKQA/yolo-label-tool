@@ -88,6 +88,26 @@ class ProjectController extends ChangeNotifier {
     return annotationsByImage[key] ?? const [];
   }
 
+  AnnotationMode? get projectAnnotationMode {
+    for (final image in images) {
+      final annotations = annotationsByImage[pathKey(image.path)];
+      if (annotations != null && annotations.isNotEmpty) {
+        return annotations.first.mode;
+      }
+    }
+    for (final annotations in annotationsByImage.values) {
+      if (annotations.isNotEmpty) {
+        return annotations.first.mode;
+      }
+    }
+    return null;
+  }
+
+  bool isAnnotationModeCompatible(AnnotationMode mode) {
+    final establishedMode = projectAnnotationMode;
+    return establishedMode == null || establishedMode == mode;
+  }
+
   String get selectedImageSplit {
     final key = selectedImageKey;
     return key == null ? 'train' : imageSplits[key] ?? 'train';
@@ -326,6 +346,66 @@ class ProjectController extends ChangeNotifier {
     return removed;
   }
 
+  int deleteAnnotationsByIds(Set<String> annotationIds) {
+    if (annotationIds.isEmpty) return 0;
+    var removedCount = 0;
+    final emptyKeys = <String>[];
+    for (final entry in annotationsByImage.entries) {
+      final previousLength = entry.value.length;
+      entry.value.removeWhere(
+        (annotation) => annotationIds.contains(annotation.id),
+      );
+      removedCount += previousLength - entry.value.length;
+      if (entry.value.isEmpty) emptyKeys.add(entry.key);
+    }
+    if (removedCount == 0) return 0;
+    for (final key in emptyKeys) {
+      annotationsByImage.remove(key);
+    }
+    if (selectedAnnotationId != null &&
+        annotationIds.contains(selectedAnnotationId)) {
+      selectedAnnotationId = null;
+    }
+    if (copiedAnnotation != null &&
+        annotationIds.contains(copiedAnnotation!.id)) {
+      copiedAnnotation = null;
+    }
+    clearHistory();
+    notifyListeners();
+    return removedCount;
+  }
+
+  List<ImageItem> deleteImagesByPaths(Set<String> imagePaths) {
+    if (imagePaths.isEmpty || images.isEmpty) return const [];
+    final pathKeys = imagePaths.map(pathKey).toSet();
+    final removed = images
+        .where((image) => pathKeys.contains(pathKey(image.path)))
+        .toList(growable: false);
+    if (removed.isEmpty) return const [];
+
+    final previousIndex = selectedImageIndex;
+    final selectedPath = selectedImage?.path;
+    images.removeWhere((image) => pathKeys.contains(pathKey(image.path)));
+    for (final key in pathKeys) {
+      imageSplits.remove(key);
+      annotationsByImage.remove(key);
+      imageDisplaySizes.remove(key);
+    }
+    final preservedSelection = selectedPath == null
+        ? -1
+        : imageIndexOfPath(selectedPath);
+    selectedImageIndex = images.isEmpty
+        ? 0
+        : preservedSelection >= 0
+        ? preservedSelection
+        : previousIndex.clamp(0, images.length - 1);
+    selectedAnnotationId = null;
+    imageDisplaySize = null;
+    clearHistory();
+    notifyListeners();
+    return removed;
+  }
+
   bool selectImage(int index) {
     if (index < 0 || index >= images.length) {
       return false;
@@ -477,7 +557,7 @@ class ProjectController extends ChangeNotifier {
 
   bool addAnnotation(AnnotationRegion annotation, {String? imagePath}) {
     final key = imagePath == null ? selectedImageKey : pathKey(imagePath);
-    if (key == null) {
+    if (key == null || !isAnnotationModeCompatible(annotation.mode)) {
       return false;
     }
     annotationsByImage.putIfAbsent(key, () => []).add(annotation);
@@ -487,7 +567,7 @@ class ProjectController extends ChangeNotifier {
 
   int addAnnotations(String imagePath, Iterable<AnnotationRegion> annotations) {
     final additions = annotations.toList(growable: false);
-    if (additions.isEmpty) {
+    if (additions.isEmpty || !_annotationModesAreCompatible(additions)) {
       return 0;
     }
     annotationsByImage
@@ -503,6 +583,9 @@ class ProjectController extends ChangeNotifier {
     required Iterable<AnnotationRegion> additions,
   }) {
     final next = additions.toList(growable: false);
+    if (next.isNotEmpty && !_annotationModesAreCompatible(next)) {
+      return 0;
+    }
     final annotations = annotationsByImage.putIfAbsent(
       pathKey(imagePath),
       () => [],
@@ -572,7 +655,9 @@ class ProjectController extends ChangeNotifier {
     required int authorColorValue,
   }) {
     final copied = copiedAnnotation;
-    if (selectedImageKey == null || copied == null) {
+    if (selectedImageKey == null ||
+        copied == null ||
+        !isAnnotationModeCompatible(copied.mode)) {
       return null;
     }
     final pasted = copied
@@ -586,6 +671,11 @@ class ProjectController extends ChangeNotifier {
     selectedAnnotationId = pasted.id;
     notifyListeners();
     return pasted;
+  }
+
+  bool _annotationModesAreCompatible(List<AnnotationRegion> annotations) {
+    final modes = annotations.map((annotation) => annotation.mode).toSet();
+    return modes.length == 1 && isAnnotationModeCompatible(modes.single);
   }
 
   void applyAnnotationSnapshot({

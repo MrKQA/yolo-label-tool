@@ -9,7 +9,6 @@
 // =============================================================================
 
 import 'dart:async';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -24,11 +23,13 @@ import '../../services/i18n.dart';
 import '../../services/input_utils.dart';
 import '../../services/path_utils.dart';
 import '../../services/rust_backend.dart';
+import '../../services/shortcut_runtime.dart';
 import '../../theme/theme_helpers.dart';
 import 'detect_support.dart';
 
 class VideoFullscreenOverlay extends StatefulWidget {
   const VideoFullscreenOverlay({
+    super.key,
     required this.session,
     required this.shortcutConfig,
   });
@@ -37,8 +38,7 @@ class VideoFullscreenOverlay extends StatefulWidget {
   final ShortcutConfig shortcutConfig;
 
   @override
-  State<VideoFullscreenOverlay> createState() =>
-      VideoFullscreenOverlayState();
+  State<VideoFullscreenOverlay> createState() => VideoFullscreenOverlayState();
 }
 
 class VideoFullscreenOverlayState extends State<VideoFullscreenOverlay> {
@@ -92,7 +92,10 @@ class VideoFullscreenOverlayState extends State<VideoFullscreenOverlay> {
       return KeyEventResult.ignored;
     }
     if (event is KeyDownEvent &&
-        event.logicalKey == LogicalKeyboardKey.escape) {
+        ShortcutRuntime.matches(
+          ShortcutAction.dialogCancel,
+          event.logicalKey,
+        )) {
       widget.session.requestFullscreenToggle();
       return KeyEventResult.handled;
     }
@@ -168,7 +171,11 @@ class VideoFullscreenOverlayState extends State<VideoFullscreenOverlay> {
 }
 
 class VideoPlayerPanel extends StatelessWidget {
-  const VideoPlayerPanel({required this.session, this.fullscreen = false});
+  const VideoPlayerPanel({
+    super.key,
+    required this.session,
+    this.fullscreen = false,
+  });
 
   final DetectVideoSession session;
   final bool fullscreen;

@@ -30,11 +30,12 @@ String buildAnnotationDatabasePayload({
   required int collaborationStartIndex,
   required int collaborationEndIndex,
   required List<CollaborationPeer> collaborationPeers,
+  String? projectKeyOverride,
   bool includeClasses = true,
   bool includeAnnotations = true,
 }) {
   final lines = <String>[
-    'PROJECT\t${_databaseField(annotationDatabaseProjectKey(importedDataset: importedDataset, images: images))}',
+    'PROJECT\t${_databaseField(projectKeyOverride ?? annotationDatabaseProjectKey(importedDataset: importedDataset, images: images))}',
   ];
   if (includeClasses) {
     for (final labelClass in labelClasses) {

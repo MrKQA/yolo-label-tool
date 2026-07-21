@@ -15,10 +15,11 @@ import 'package:flutter/services.dart';
 
 import '../../models/annotation.dart';
 import '../../services/i18n.dart';
-import '../../services/path_utils.dart';
+import '../../services/input_utils.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/dimensions.dart';
 import '../../theme/theme_helpers.dart';
+import '../../widgets/label/image_filter_dropdown.dart';
 
 class ImagePreviewPane extends StatefulWidget {
   const ImagePreviewPane({
@@ -45,25 +46,14 @@ class ImagePreviewPane extends StatefulWidget {
 class _ImagePreviewPaneState extends State<ImagePreviewPane> {
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _indexController = TextEditingController();
-  final TextEditingController _filterController = TextEditingController();
   final FocusNode _indexFocusNode = FocusNode(debugLabel: 'preview-index');
-  late final FocusNode _filterFocusNode;
-  String _filterValue = _imagePreviewFilterAll;
-
-  static const _imagePreviewFilterAll = 'all';
-  static const _imagePreviewFilterUnlabeled = 'unlabeled';
-  static const _imagePreviewClassPrefix = 'class:';
+  String _filterValue = imageFilterAllValue;
 
   @override
   void initState() {
     super.initState();
-    _filterFocusNode = FocusNode(
-      debugLabel: 'preview-filter',
-      onKeyEvent: _handleFilterKeyEvent,
-    );
-    _filterFocusNode.addListener(_handleFilterFocusChanged);
+    registerEditableFocusNode(_indexFocusNode);
     _syncIndexText();
-    _syncFilterText();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
@@ -77,9 +67,6 @@ class _ImagePreviewPaneState extends State<ImagePreviewPane> {
     super.didUpdateWidget(oldWidget);
     _normalizeFilter();
     _syncIndexText();
-    if (!_filterFocusNode.hasFocus) {
-      _syncFilterText();
-    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
@@ -97,9 +84,7 @@ class _ImagePreviewPaneState extends State<ImagePreviewPane> {
   void dispose() {
     _scrollController.dispose();
     _indexController.dispose();
-    _filterFocusNode.removeListener(_handleFilterFocusChanged);
-    _filterFocusNode.dispose();
-    _filterController.dispose();
+    unregisterEditableFocusNode(_indexFocusNode);
     _indexFocusNode.dispose();
     super.dispose();
   }
@@ -108,158 +93,15 @@ class _ImagePreviewPaneState extends State<ImagePreviewPane> {
     final entries = <_ImagePreviewEntry>[];
     for (var index = 0; index < widget.images.length; index += 1) {
       final image = widget.images[index];
-      if (_matchesFilter(image)) {
+      if (imageMatchesFilter(
+        image: image,
+        filterValue: _filterValue,
+        annotationsByImage: widget.annotationsByImage,
+      )) {
         entries.add(_ImagePreviewEntry(index: index, image: image));
       }
     }
     return entries;
-  }
-
-  bool _matchesFilter(ImageItem image) {
-    final annotations =
-        widget.annotationsByImage[pathKey(image.path)] ?? const [];
-    if (_filterValue == _imagePreviewFilterAll) {
-      return true;
-    }
-    if (_filterValue == _imagePreviewFilterUnlabeled) {
-      return annotations.isEmpty;
-    }
-    if (_filterValue.startsWith(_imagePreviewClassPrefix)) {
-      final classId = int.tryParse(
-        _filterValue.substring(_imagePreviewClassPrefix.length),
-      );
-      return classId != null &&
-          annotations.any((annotation) => annotation.classId == classId);
-    }
-    return true;
-  }
-
-  List<DropdownMenuEntry<String>> _filterEntries() {
-    return [
-      DropdownMenuEntry<String>(
-        value: _imagePreviewFilterAll,
-        label: '${t('label.previewFilterAll')} (${widget.images.length})',
-      ),
-      DropdownMenuEntry<String>(
-        value: _imagePreviewFilterUnlabeled,
-        label:
-            '${t('label.previewFilterUnlabeled')} (${_countUnlabeledImages()})',
-      ),
-      for (final labelClass in widget.labelClasses)
-        DropdownMenuEntry<String>(
-          value: '$_imagePreviewClassPrefix${labelClass.id}',
-          label: '${labelClass.name} (${_countImagesForClass(labelClass.id)})',
-        ),
-    ];
-  }
-
-  String _filterLabelForValue(String value) {
-    if (value == _imagePreviewFilterAll) {
-      return '${t('label.previewFilterAll')} (${widget.images.length})';
-    }
-    if (value == _imagePreviewFilterUnlabeled) {
-      return '${t('label.previewFilterUnlabeled')} (${_countUnlabeledImages()})';
-    }
-    if (value.startsWith(_imagePreviewClassPrefix)) {
-      final classId = int.tryParse(
-        value.substring(_imagePreviewClassPrefix.length),
-      );
-      final labelClass = widget.labelClasses
-          .where((item) => item.id == classId)
-          .firstOrNull;
-      if (labelClass != null) {
-        return '${labelClass.name} (${_countImagesForClass(labelClass.id)})';
-      }
-    }
-    return '${t('label.previewFilterAll')} (${widget.images.length})';
-  }
-
-  String _filterSearchTextForEntry(DropdownMenuEntry<String> entry) {
-    if (entry.value == _imagePreviewFilterAll) {
-      return '${t('label.previewFilterAll')} all ${entry.label}';
-    }
-    if (entry.value == _imagePreviewFilterUnlabeled) {
-      return '${t('label.previewFilterUnlabeled')} unlabeled ${entry.label}';
-    }
-    if (entry.value.startsWith(_imagePreviewClassPrefix)) {
-      final classId = int.tryParse(
-        entry.value.substring(_imagePreviewClassPrefix.length),
-      );
-      final labelClass = widget.labelClasses
-          .where((item) => item.id == classId)
-          .firstOrNull;
-      return labelClass == null ? entry.label : labelClass.name;
-    }
-    return entry.label;
-  }
-
-  String _normalizeFilterSearchText(String value) {
-    return value.trim().toLowerCase();
-  }
-
-  List<DropdownMenuEntry<String>> _filterDropdownEntries(
-    List<DropdownMenuEntry<String>> entries,
-    String rawFilter,
-  ) {
-    final filter = _normalizeFilterSearchText(rawFilter);
-    if (filter.isEmpty) {
-      return entries;
-    }
-    return entries
-        .where(
-          (entry) => _normalizeFilterSearchText(
-            _filterSearchTextForEntry(entry),
-          ).contains(filter),
-        )
-        .toList();
-  }
-
-  int? _searchFilterDropdownEntry(
-    List<DropdownMenuEntry<String>> entries,
-    String rawQuery,
-  ) {
-    final query = _normalizeFilterSearchText(rawQuery);
-    if (query.isEmpty) {
-      return null;
-    }
-    final startsWithIndex = entries.indexWhere(
-      (entry) => _normalizeFilterSearchText(
-        _filterSearchTextForEntry(entry),
-      ).startsWith(query),
-    );
-    if (startsWithIndex >= 0) {
-      return startsWithIndex;
-    }
-    final containsIndex = entries.indexWhere(
-      (entry) => _normalizeFilterSearchText(
-        _filterSearchTextForEntry(entry),
-      ).contains(query),
-    );
-    return containsIndex >= 0 ? containsIndex : null;
-  }
-
-  int _countUnlabeledImages() {
-    var count = 0;
-    for (final image in widget.images) {
-      final annotations =
-          widget.annotationsByImage[pathKey(image.path)] ?? const [];
-      if (annotations.isEmpty) {
-        count += 1;
-      }
-    }
-    return count;
-  }
-
-  int _countImagesForClass(int classId) {
-    var count = 0;
-    for (final image in widget.images) {
-      final annotations =
-          widget.annotationsByImage[pathKey(image.path)] ?? const [];
-      if (annotations.any((annotation) => annotation.classId == classId)) {
-        count += 1;
-      }
-    }
-    return count;
   }
 
   int _filteredPosition(List<_ImagePreviewEntry> entries) {
@@ -270,16 +112,7 @@ class _ImagePreviewPaneState extends State<ImagePreviewPane> {
   }
 
   void _normalizeFilter() {
-    if (!_filterValue.startsWith(_imagePreviewClassPrefix)) {
-      return;
-    }
-    final classId = int.tryParse(
-      _filterValue.substring(_imagePreviewClassPrefix.length),
-    );
-    final exists = widget.labelClasses.any((item) => item.id == classId);
-    if (!exists) {
-      _filterValue = _imagePreviewFilterAll;
-    }
+    _filterValue = normalizeImageFilterValue(_filterValue, widget.labelClasses);
   }
 
   void _syncIndexText() {
@@ -288,53 +121,6 @@ class _ImagePreviewPaneState extends State<ImagePreviewPane> {
     }
     final entries = _filteredEntries();
     _indexController.text = _filteredPosition(entries).toString();
-  }
-
-  void _syncFilterText({bool selectAll = false}) {
-    final text = _filterLabelForValue(_filterValue);
-    _filterController.value = TextEditingValue(
-      text: text,
-      selection: selectAll
-          ? TextSelection(baseOffset: 0, extentOffset: text.length)
-          : TextSelection.collapsed(offset: text.length),
-    );
-  }
-
-  void _selectFilterTextNextFrame() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_filterFocusNode.hasFocus) {
-        return;
-      }
-      final text = _filterController.text;
-      _filterController.selection = TextSelection(
-        baseOffset: 0,
-        extentOffset: text.length,
-      );
-    });
-  }
-
-  void _handleFilterFocusChanged() {
-    if (_filterFocusNode.hasFocus) {
-      _selectFilterTextNextFrame();
-    } else {
-      _syncFilterText();
-    }
-  }
-
-  KeyEventResult _handleFilterKeyEvent(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
-      return KeyEventResult.ignored;
-    }
-    final key = event.logicalKey;
-    if (key != LogicalKeyboardKey.enter &&
-        key != LogicalKeyboardKey.numpadEnter) {
-      return KeyEventResult.ignored;
-    }
-    if (_filterController.text.trim().isNotEmpty) {
-      return KeyEventResult.ignored;
-    }
-    _setFilter(_imagePreviewFilterAll, force: true);
-    return KeyEventResult.handled;
   }
 
   void _commitIndex() {
@@ -354,16 +140,9 @@ class _ImagePreviewPaneState extends State<ImagePreviewPane> {
     widget.onImageSelected(nextIndex);
   }
 
-  void _setFilter(String? value, {bool force = false}) {
-    if (value == null) {
-      return;
-    }
-    if (value == _filterValue && !force) {
-      _syncFilterText(selectAll: _filterFocusNode.hasFocus);
-      return;
-    }
+  void _setFilter(String value) {
+    if (value == _filterValue) return;
     setState(() => _filterValue = value);
-    _syncFilterText(selectAll: _filterFocusNode.hasFocus);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
@@ -381,7 +160,7 @@ class _ImagePreviewPaneState extends State<ImagePreviewPane> {
   }
 
   bool _selectFirstVisibleEntryIfNeeded() {
-    if (_filterValue == _imagePreviewFilterAll) {
+    if (_filterValue == imageFilterAllValue) {
       return false;
     }
     final entries = _filteredEntries();
@@ -503,38 +282,13 @@ class _ImagePreviewPaneState extends State<ImagePreviewPane> {
                   const SizedBox(height: 4),
                   SizedBox(
                     width: double.infinity,
-                    child: Listener(
-                      onPointerDown: (_) {
-                        if (!_filterFocusNode.hasFocus) {
-                          _filterFocusNode.requestFocus();
-                        }
-                        _selectFilterTextNextFrame();
-                      },
-                      child: DropdownMenu<String>(
-                        controller: _filterController,
-                        focusNode: _filterFocusNode,
-                        requestFocusOnTap: true,
-                        selectOnly: false,
-                        keyboardType: TextInputType.text,
-                        textInputAction: TextInputAction.search,
-                        width: previewWidth - 20,
-                        initialSelection: _filterValue,
-                        textStyle: Theme.of(context).textTheme.labelSmall,
-                        enableFilter: true,
-                        enableSearch: true,
-                        filterCallback: _filterDropdownEntries,
-                        searchCallback: _searchFilterDropdownEntry,
-                        inputDecorationTheme: const InputDecorationTheme(
-                          isDense: true,
-                          border: OutlineInputBorder(),
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 8,
-                          ),
-                        ),
-                        dropdownMenuEntries: _filterEntries(),
-                        onSelected: _setFilter,
-                      ),
+                    child: ImageFilterDropdown(
+                      images: widget.images,
+                      labelClasses: widget.labelClasses,
+                      annotationsByImage: widget.annotationsByImage,
+                      value: _filterValue,
+                      width: previewWidth - 20,
+                      onSelected: _setFilter,
                     ),
                   ),
                 ],

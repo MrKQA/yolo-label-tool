@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 
 import '../models/ai_assist.dart';
 import '../services/i18n.dart';
+import 'dialog_shortcuts.dart';
 
 class Sam3RuntimeDialog extends StatefulWidget {
   const Sam3RuntimeDialog({required this.initial});
@@ -92,137 +93,140 @@ class _Sam3RuntimeDialogState extends State<Sam3RuntimeDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(t('ai.sam3RuntimeConfig')),
-      content: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              DropdownButtonFormField<String>(
-                initialValue: _precision,
-                decoration: InputDecoration(labelText: t('ai.sam3Precision')),
-                items: const [
-                  DropdownMenuItem(value: 'fp16', child: Text('fp16')),
-                  DropdownMenuItem(value: 'bf16', child: Text('bf16')),
-                  DropdownMenuItem(value: 'fp32', child: Text('fp32')),
-                ],
-                onChanged: (value) {
-                  if (value != null) {
-                    setState(() => _precision = value);
-                  }
-                },
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                initialValue: _encoder,
-                decoration: InputDecoration(labelText: t('ai.sam3Encoder')),
-                items: const [
-                  DropdownMenuItem(value: 'vit_b', child: Text('vit_b')),
-                  DropdownMenuItem(value: 'vit_l', child: Text('vit_l')),
-                  DropdownMenuItem(value: 'vit_h', child: Text('vit_h')),
-                ],
-                onChanged: (value) {
-                  if (value != null) {
-                    setState(() => _encoder = value);
-                  }
-                },
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                initialValue: _resizeMethod,
-                decoration: InputDecoration(
-                  labelText: t('ai.sam3ResizeMethod'),
+    return DialogPrimaryAction(
+      onInvoke: _save,
+      child: AlertDialog(
+        title: Text(t('ai.sam3RuntimeConfig')),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<String>(
+                  initialValue: _precision,
+                  decoration: InputDecoration(labelText: t('ai.sam3Precision')),
+                  items: const [
+                    DropdownMenuItem(value: 'fp16', child: Text('fp16')),
+                    DropdownMenuItem(value: 'bf16', child: Text('bf16')),
+                    DropdownMenuItem(value: 'fp32', child: Text('fp32')),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) {
+                      setState(() => _precision = value);
+                    }
+                  },
                 ),
-                items: [
-                  DropdownMenuItem(
-                    value: 'shorter_side',
-                    child: Text(t('ai.sam3ResizeShorterSide')),
-                  ),
-                ],
-                onChanged: (value) {
-                  if (value != null) {
-                    setState(() => _resizeMethod = value);
-                  }
-                },
-              ),
-              const SizedBox(height: 12),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(t('ai.sam3Compile')),
-                value: _compile,
-                onChanged: (value) {
-                  setState(() => _compile = value);
-                },
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _imageBatchController,
-                      keyboardType: TextInputType.number,
-                      decoration: InputDecoration(
-                        labelText: t('ai.sam3BatchImage'),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: TextField(
-                      controller: _videoBatchController,
-                      keyboardType: TextInputType.number,
-                      decoration: InputDecoration(
-                        labelText: t('ai.sam3BatchVideo'),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _interactiveBatchController,
-                keyboardType: TextInputType.number,
-                decoration: InputDecoration(
-                  labelText: t('ai.sam3BatchInteractive'),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: _encoder,
+                  decoration: InputDecoration(labelText: t('ai.sam3Encoder')),
+                  items: const [
+                    DropdownMenuItem(value: 'vit_b', child: Text('vit_b')),
+                    DropdownMenuItem(value: 'vit_l', child: Text('vit_l')),
+                    DropdownMenuItem(value: 'vit_h', child: Text('vit_h')),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) {
+                      setState(() => _encoder = value);
+                    }
+                  },
                 ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _maxWidthController,
-                      keyboardType: TextInputType.number,
-                      decoration: InputDecoration(
-                        labelText: t('ai.sam3MaxWidth'),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: _resizeMethod,
+                  decoration: InputDecoration(
+                    labelText: t('ai.sam3ResizeMethod'),
+                  ),
+                  items: [
+                    DropdownMenuItem(
+                      value: 'shorter_side',
+                      child: Text(t('ai.sam3ResizeShorterSide')),
+                    ),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) {
+                      setState(() => _resizeMethod = value);
+                    }
+                  },
+                ),
+                const SizedBox(height: 12),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(t('ai.sam3Compile')),
+                  value: _compile,
+                  onChanged: (value) {
+                    setState(() => _compile = value);
+                  },
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _imageBatchController,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: t('ai.sam3BatchImage'),
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: TextField(
-                      controller: _maxHeightController,
-                      keyboardType: TextInputType.number,
-                      decoration: InputDecoration(
-                        labelText: t('ai.sam3MaxHeight'),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextField(
+                        controller: _videoBatchController,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: t('ai.sam3BatchVideo'),
+                        ),
                       ),
                     ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _interactiveBatchController,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: t('ai.sam3BatchInteractive'),
                   ),
-                ],
-              ),
-            ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _maxWidthController,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: t('ai.sam3MaxWidth'),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextField(
+                        controller: _maxHeightController,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: t('ai.sam3MaxHeight'),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(t('action.cancel')),
+          ),
+          FilledButton(onPressed: _save, child: Text(t('action.save'))),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: Text(t('action.cancel')),
-        ),
-        FilledButton(onPressed: _save, child: Text(t('action.save'))),
-      ],
     );
   }
 }

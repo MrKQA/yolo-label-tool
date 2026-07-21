@@ -779,8 +779,12 @@ class _ImageCanvasState extends State<_ImageCanvas> {
 
   AnnotationRegion? _annotationAt(Offset point) {
     final imagePoint = _toImagePoint(point);
+    final edgeTolerance = 2 / _scale;
     final hits = widget.annotations
-        .where((annotation) => annotation.hitTest(imagePoint))
+        .where(
+          (annotation) =>
+              annotation.hitTest(imagePoint, edgeTolerance: edgeTolerance),
+        )
         .toList();
     if (hits.isEmpty) {
       return null;
@@ -792,10 +796,8 @@ class _ImageCanvasState extends State<_ImageCanvas> {
     if (selectedIndex < 0) {
       return hits.last;
     }
-    if (selectedIndex + 1 < hits.length) {
-      return hits[selectedIndex + 1];
-    }
-    return null;
+    final nextIndex = (selectedIndex - 1) % hits.length;
+    return hits[nextIndex];
   }
 
   AnnotationRegion? _selectedAnnotation() {
@@ -993,8 +995,12 @@ class _ImageCanvasState extends State<_ImageCanvas> {
         return;
       }
       final imagePoint = _toImagePoint(rawPoint);
+      final edgeTolerance = 2 / _scale;
       final rightHit = widget.annotations
-          .where((annotation) => annotation.hitTest(imagePoint))
+          .where(
+            (annotation) =>
+                annotation.hitTest(imagePoint, edgeTolerance: edgeTolerance),
+          )
           .toList()
           .lastOrNull;
       if (rightHit != null) {

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
@@ -12,10 +13,14 @@ import '../../controllers/dataset_import_controller.dart';
 import '../../controllers/project_controller.dart';
 import '../../controllers/workspace_navigation_controller.dart';
 import '../../controllers/workspace_viewport_controller.dart';
+import '../../dialogs/clear_project_items_dialog.dart';
+import '../../models/annotation.dart';
 import '../../models/imported_dataset.dart';
 import '../../services/app_runtime.dart';
 import '../../services/i18n.dart';
 import '../../services/logger.dart';
+import '../../services/path_utils.dart';
+import '../label/image_filter_dropdown.dart';
 
 const _imageTypeGroup = XTypeGroup(
   label: 'Images',
@@ -232,6 +237,103 @@ class WorkspaceProjectActions extends ChangeNotifier {
     collaborationSync.broadcastProjectSnapshot('image deleted');
     scheduleResumeSave();
     database.scheduleSave();
+  }
+
+  Future<void> showClearProjectItems() async {
+    if (guardProjectChangeBlocked()) return;
+    final request = await showClearProjectItemsDialog(
+      context: context(),
+      images: project.images,
+      labelClasses: project.labelClasses,
+      annotationsByImage: project.annotationsByImage,
+    );
+    if (request == null || !mounted()) return;
+    final confirmed = await showClearProjectItemsConfirmation(
+      context: context(),
+      request: request,
+    );
+    if (!confirmed || !mounted()) return;
+
+    if (request.removeImages) {
+      await _removeFilteredImages(request);
+    } else if (request.clearAnnotations) {
+      _clearFilteredAnnotations(request);
+    }
+  }
+
+  Future<void> _removeFilteredImages(ClearProjectItemsRequest request) async {
+    final candidates = project.images
+        .where(
+          (image) => imageMatchesFilter(
+            image: image,
+            filterValue: request.filterValue,
+            annotationsByImage: project.annotationsByImage,
+          ),
+        )
+        .toList(growable: false);
+    final selected = _selectRandomItems(candidates, request.quantity);
+    if (selected.isEmpty) return;
+    final previousProjectKey = database.projectKey;
+    final removed = project.deleteImagesByPaths({
+      for (final image in selected) image.path,
+    });
+    if (removed.isEmpty) return;
+    for (final image in removed) {
+      ai.clearImage(image.path);
+    }
+    if (project.images.isEmpty) ai.clearProject();
+    logApp(
+      'LABEL',
+      'Filtered images cleared: count=${removed.length}, filter=${request.filterValue}',
+    );
+    collaborationSync.broadcastProjectSnapshot('filtered images cleared');
+    if (project.images.isEmpty) {
+      await database.saveNow(
+        projectKeyOverride: previousProjectKey,
+        allowEmptyProject: true,
+      );
+    } else {
+      scheduleResumeSave();
+      database.scheduleSave();
+    }
+    showMessage('${t('label.clearImagesDone')} ${removed.length}');
+  }
+
+  void _clearFilteredAnnotations(ClearProjectItemsRequest request) {
+    final classId = imageFilterClassId(request.filterValue);
+    final candidates = <AnnotationRegion>[];
+    for (final image in project.images) {
+      final annotations =
+          project.annotationsByImage[pathKey(image.path)] ??
+          const <AnnotationRegion>[];
+      if (request.filterValue == imageFilterAllValue) {
+        candidates.addAll(annotations);
+      } else if (classId != null) {
+        candidates.addAll(
+          annotations.where((annotation) => annotation.classId == classId),
+        );
+      }
+    }
+    final selected = _selectRandomItems(candidates, request.quantity);
+    final removedCount = project.deleteAnnotationsByIds({
+      for (final annotation in selected) annotation.id,
+    });
+    if (removedCount == 0) return;
+    logApp(
+      'ANNOTATION',
+      'Filtered annotations cleared: count=$removedCount, filter=${request.filterValue}',
+    );
+    collaborationSync.broadcastAllAnnotations('filtered annotations cleared');
+    database.scheduleSave();
+    showMessage('${t('label.clearAnnotationsDone')} $removedCount');
+  }
+
+  List<T> _selectRandomItems<T>(List<T> candidates, int quantity) {
+    final count = quantity.clamp(0, candidates.length);
+    if (count == 0) return const [];
+    if (count == candidates.length) return candidates;
+    final shuffled = List<T>.of(candidates)..shuffle(math.Random());
+    return shuffled.take(count).toList(growable: false);
   }
 
   void setSelectedImageSplit(String split) {

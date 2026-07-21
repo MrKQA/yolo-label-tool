@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import '../services/config_store.dart';
 import '../services/i18n.dart';
 import '../theme/colors.dart';
+import 'dialog_shortcuts.dart';
 
 Future<void> showLogViewerDialogForContext({
   required BuildContext context,
@@ -100,104 +101,109 @@ Future<void> showLogViewerDialogForContext({
               onMessage('${t('logs.deleted')}: $deleted');
             }
 
-            return AlertDialog(
-              title: Text(t('logs.title')),
-              content: SizedBox(
-                width: 760,
-                height: 520,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: DropdownButtonFormField<String>(
-                            initialValue: selectedDate,
-                            decoration: InputDecoration(
-                              labelText: t('logs.date'),
-                              isDense: true,
+            return DialogCancelAction(
+              child: AlertDialog(
+                title: Text(t('logs.title')),
+                content: SizedBox(
+                  width: 760,
+                  height: 520,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              initialValue: selectedDate,
+                              decoration: InputDecoration(
+                                labelText: t('logs.date'),
+                                isDense: true,
+                              ),
+                              items: [
+                                for (final date in dates)
+                                  DropdownMenuItem(
+                                    value: date,
+                                    child: Text(date),
+                                  ),
+                              ],
+                              onChanged: dates.isEmpty
+                                  ? null
+                                  : (value) {
+                                      if (value == null) return;
+                                      setDialogState(() {
+                                        selectedDate = value;
+                                        logText = ConfigStore.readLogsForDate(
+                                          value,
+                                        );
+                                      });
+                                      WidgetsBinding.instance
+                                          .addPostFrameCallback((_) {
+                                            if (logScrollController
+                                                .hasClients) {
+                                              logScrollController.jumpTo(0);
+                                            }
+                                          });
+                                    },
                             ),
-                            items: [
-                              for (final date in dates)
-                                DropdownMenuItem(
-                                  value: date,
-                                  child: Text(date),
-                                ),
-                            ],
-                            onChanged: dates.isEmpty
-                                ? null
-                                : (value) {
-                                    if (value == null) return;
-                                    setDialogState(() {
-                                      selectedDate = value;
-                                      logText = ConfigStore.readLogsForDate(
-                                        value,
-                                      );
-                                    });
-                                    WidgetsBinding.instance
-                                        .addPostFrameCallback((_) {
-                                          if (logScrollController.hasClients) {
-                                            logScrollController.jumpTo(0);
-                                          }
-                                        });
-                                  },
                           ),
-                        ),
-                        const SizedBox(width: 12),
-                        OutlinedButton.icon(
-                          onPressed: logText.isEmpty ? null : scrollLogToTop,
-                          icon: const Icon(Icons.vertical_align_top),
-                          label: Text(t('logs.top')),
-                        ),
-                        const SizedBox(width: 8),
-                        OutlinedButton.icon(
-                          onPressed: logText.isEmpty ? null : scrollLogToBottom,
-                          icon: const Icon(Icons.vertical_align_bottom),
-                          label: Text(t('logs.bottom')),
-                        ),
-                        const SizedBox(width: 8),
-                        OutlinedButton.icon(
-                          onPressed: dates.isEmpty ? null : deleteLogRange,
-                          icon: const Icon(Icons.delete_outline),
-                          label: Text(t('logs.deleteRange')),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Expanded(
-                      child: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(12),
-                        color: Theme.of(context).brightness == Brightness.dark
-                            ? appDarkLevel8
-                            : Colors.black,
-                        child: Scrollbar(
-                          controller: logScrollController,
-                          thumbVisibility: true,
-                          child: SingleChildScrollView(
+                          const SizedBox(width: 12),
+                          OutlinedButton.icon(
+                            onPressed: logText.isEmpty ? null : scrollLogToTop,
+                            icon: const Icon(Icons.vertical_align_top),
+                            label: Text(t('logs.top')),
+                          ),
+                          const SizedBox(width: 8),
+                          OutlinedButton.icon(
+                            onPressed: logText.isEmpty
+                                ? null
+                                : scrollLogToBottom,
+                            icon: const Icon(Icons.vertical_align_bottom),
+                            label: Text(t('logs.bottom')),
+                          ),
+                          const SizedBox(width: 8),
+                          OutlinedButton.icon(
+                            onPressed: dates.isEmpty ? null : deleteLogRange,
+                            icon: const Icon(Icons.delete_outline),
+                            label: Text(t('logs.deleteRange')),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Expanded(
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? appDarkLevel8
+                              : Colors.black,
+                          child: Scrollbar(
                             controller: logScrollController,
-                            child: SelectableText(
-                              logText,
-                              style: const TextStyle(
-                                color: appDarkLevel3,
-                                fontFamily: 'Consolas',
-                                fontSize: 12.5,
-                                height: 1.35,
+                            thumbVisibility: true,
+                            child: SingleChildScrollView(
+                              controller: logScrollController,
+                              child: SelectableText(
+                                logText,
+                                style: const TextStyle(
+                                  color: appDarkLevel3,
+                                  fontFamily: 'Consolas',
+                                  fontSize: 12.5,
+                                  height: 1.35,
+                                ),
                               ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: Text(t('action.close')),
+                  ),
+                ],
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: Text(t('action.close')),
-                ),
-              ],
             );
           },
         );

@@ -12,6 +12,7 @@ A YOLO image labeling, training, and video processing tool built with Flutter + 
 - **Frontend**: Flutter (Dart) — UI, annotation interaction, charts, video playback
 - **Backend**: Rust — communicates with Flutter via Flutter Rust Bridge; training engine embeds Python through PyO3 to call Ultralytics
 - **Video**: Rust integrates FFmpeg for frame extraction, metadata reading, and hardware decoding
+- **Typography**: The application UI uses the MiSans font under the [MiSans Fonts License Agreement](https://hyperos.mi.com/font/en/download/).
 
 ## Current Features
 

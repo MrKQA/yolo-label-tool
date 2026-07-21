@@ -305,25 +305,26 @@ TextTheme _buildTextTheme(TextTheme base, AppSemanticColors palette) {
       color: color,
       height: height,
       letterSpacing: 0,
+      leadingDistribution: TextLeadingDistribution.even,
     );
   }
 
   return base.copyWith(
-    displayLarge: style(28, FontWeight.w600, palette.textPrimary),
-    displayMedium: style(24, FontWeight.w600, palette.textPrimary),
-    displaySmall: style(21, FontWeight.w600, palette.textPrimary),
-    headlineLarge: style(22, FontWeight.w600, palette.textPrimary),
-    headlineMedium: style(19, FontWeight.w600, palette.textPrimary),
-    headlineSmall: style(17, FontWeight.w600, palette.textPrimary),
-    titleLarge: style(17, FontWeight.w600, palette.textPrimary),
-    titleMedium: style(15, FontWeight.w600, palette.textPrimary),
-    titleSmall: style(13, FontWeight.w600, palette.textPrimary),
-    bodyLarge: style(15, FontWeight.w400, palette.textBody),
-    bodyMedium: style(13, FontWeight.w400, palette.textBody),
-    bodySmall: style(12, FontWeight.w400, palette.textSecondary),
-    labelLarge: style(13, FontWeight.w600, palette.textBody, height: 1.2),
-    labelMedium: style(12, FontWeight.w500, palette.textSecondary, height: 1.2),
-    labelSmall: style(11, FontWeight.w500, palette.textSecondary, height: 1.2),
+    displayLarge: style(28, FontWeight.w700, palette.textPrimary),
+    displayMedium: style(24, FontWeight.w700, palette.textPrimary),
+    displaySmall: style(21, FontWeight.w700, palette.textPrimary),
+    headlineLarge: style(22, FontWeight.w700, palette.textPrimary),
+    headlineMedium: style(19, FontWeight.w700, palette.textPrimary),
+    headlineSmall: style(17, FontWeight.w700, palette.textPrimary),
+    titleLarge: style(18, FontWeight.w700, palette.textPrimary),
+    titleMedium: style(16, FontWeight.w500, palette.textPrimary),
+    titleSmall: style(14, FontWeight.w500, palette.textPrimary),
+    bodyLarge: style(16, FontWeight.w400, palette.textBody),
+    bodyMedium: style(14, FontWeight.w400, palette.textBody),
+    bodySmall: style(13, FontWeight.w300, palette.textSecondary),
+    labelLarge: style(13, FontWeight.w500, palette.textBody, height: 1.2),
+    labelMedium: style(12, FontWeight.w400, palette.textSecondary, height: 1.2),
+    labelSmall: style(11, FontWeight.w300, palette.textSecondary, height: 1.2),
   );
 }
 

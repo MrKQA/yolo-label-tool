@@ -6,6 +6,7 @@ flutter/build/
 flutter/.dart_tool/
 flutter/.flutter-plugins
 flutter/.flutter-plugins-dependencies
+flutter/assets/fonts/MiSans.zip
 # FFmpeg
 ffmpeg/
 

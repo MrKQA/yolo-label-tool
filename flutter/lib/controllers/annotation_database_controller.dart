@@ -40,7 +40,11 @@ class AnnotationDatabaseController {
     images: project.images,
   );
 
-  String payload({bool includeClasses = true, bool includeAnnotations = true}) {
+  String payload({
+    bool includeClasses = true,
+    bool includeAnnotations = true,
+    String? projectKeyOverride,
+  }) {
     return buildAnnotationDatabasePayload(
       images: project.images,
       labelClasses: project.labelClasses,
@@ -56,6 +60,7 @@ class AnnotationDatabaseController {
       collaborationStartIndex: collaboration.assignmentStart,
       collaborationEndIndex: collaboration.assignmentEnd,
       collaborationPeers: collaboration.peers,
+      projectKeyOverride: projectKeyOverride,
       includeClasses: includeClasses,
       includeAnnotations: includeAnnotations,
     );
@@ -74,8 +79,13 @@ class AnnotationDatabaseController {
     _saveTimer = null;
   }
 
-  Future<void> saveNow() async {
-    if (_disposed || _applying || project.images.isEmpty) {
+  Future<void> saveNow({
+    String? projectKeyOverride,
+    bool allowEmptyProject = false,
+  }) async {
+    if (_disposed ||
+        _applying ||
+        (!allowEmptyProject && project.images.isEmpty)) {
       return;
     }
     if (collaboration.mode == CollaborationMode.client) {
@@ -85,7 +95,9 @@ class AnnotationDatabaseController {
       return;
     }
     try {
-      final result = await _saveRunner(payload());
+      final result = await _saveRunner(
+        payload(projectKeyOverride: projectKeyOverride),
+      );
       if (_disposed) {
         return;
       }

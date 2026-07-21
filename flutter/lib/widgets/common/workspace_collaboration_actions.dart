@@ -8,6 +8,7 @@ import '../../controllers/collaboration_sync_controller.dart';
 import '../../controllers/collaboration_workspace_controller.dart';
 import '../../controllers/project_controller.dart';
 import '../../controllers/workspace_navigation_controller.dart';
+import '../../dialogs/dialog_shortcuts.dart';
 import '../../models/collaboration.dart';
 import '../../services/app_runtime.dart';
 import '../../services/collaboration_identity.dart';
@@ -148,21 +149,24 @@ class WorkspaceCollaborationActions {
   Future<void> _confirmJoin(CollaborationJoinRequest request) async {
     final allow = await showDialog<bool>(
       context: context(),
-      builder: (context) => AlertDialog(
-        title: Text(t('collab.joinRequestTitle')),
-        content: Text(
-          '${t('collab.joinRequestBody')}\n${request.userName}#${shortCollaborationId(request.userId)}\n${request.address}',
+      builder: (context) => DialogPrimaryAction(
+        onInvoke: () => Navigator.of(context).pop(true),
+        child: AlertDialog(
+          title: Text(t('collab.joinRequestTitle')),
+          content: Text(
+            '${t('collab.joinRequestBody')}\n${request.userName}#${shortCollaborationId(request.userId)}\n${request.address}',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(t('collab.reject')),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text(t('collab.allow')),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text(t('collab.reject')),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text(t('collab.allow')),
-          ),
-        ],
       ),
     );
     if (!mounted()) {

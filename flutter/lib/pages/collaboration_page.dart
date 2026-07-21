@@ -13,6 +13,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../dialogs/dialog_shortcuts.dart';
 import '../models/collaboration.dart';
 import '../services/collaboration_identity.dart';
 import '../services/i18n.dart';
@@ -71,7 +72,9 @@ class CollaborationPage extends StatelessWidget {
       mode == CollaborationMode.off &&
       !joining &&
       selectedHostId != null &&
-      discoveredHosts.any((host) => host.hostId == selectedHostId && host.online);
+      discoveredHosts.any(
+        (host) => host.hostId == selectedHostId && host.online,
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -177,9 +180,7 @@ class CollaborationPage extends StatelessWidget {
                           label: Text(t('collab.startHost')),
                         ),
                         OutlinedButton.icon(
-                          onPressed: _canJoinSelectedHost
-                              ? onJoinClient
-                              : null,
+                          onPressed: _canJoinSelectedHost ? onJoinClient : null,
                           icon: joining
                               ? const SizedBox(
                                   width: 18,
@@ -224,10 +225,12 @@ class CollaborationPage extends StatelessWidget {
                             crossAxisAlignment: WrapCrossAlignment.center,
                             children: [
                               _CollaborationStatusPill(
-                                label: '${t('collab.startIndex')}: $assignmentStart',
+                                label:
+                                    '${t('collab.startIndex')}: $assignmentStart',
                               ),
                               _CollaborationStatusPill(
-                                label: '${t('collab.endIndex')}: $assignmentEnd',
+                                label:
+                                    '${t('collab.endIndex')}: $assignmentEnd',
                               ),
                               _CollaborationStatusPill(
                                 label:
@@ -264,8 +267,9 @@ class CollaborationPage extends StatelessWidget {
                                   alignment: Alignment.centerLeft,
                                   child: Text(
                                     t('collab.tapUserPermissions'),
-                                    style:
-                                        Theme.of(context).textTheme.bodySmall,
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.bodySmall,
                                   ),
                                 ),
                                 const SizedBox(height: 8),
@@ -288,18 +292,15 @@ class CollaborationPage extends StatelessWidget {
                                       ? IconButton(
                                           tooltip: t('collab.permissions'),
                                           icon: const Icon(Icons.tune_outlined),
-                                          onPressed: () =>
-                                              _editPeerPermissions(
-                                                context,
-                                                peer,
-                                              ),
+                                          onPressed: () => _editPeerPermissions(
+                                            context,
+                                            peer,
+                                          ),
                                         )
                                       : null,
                                   onTap: canEditPeers
-                                      ? () => _editPeerPermissions(
-                                          context,
-                                          peer,
-                                        )
+                                      ? () =>
+                                            _editPeerPermissions(context, peer)
                                       : null,
                                 ),
                             ],
@@ -474,132 +475,136 @@ class _CollaborationPeerPermissionDialogState
   Widget build(BuildContext context) {
     final peer = widget.peer;
     final maxImageCount = math.max(1, widget.imageCount);
-    return AlertDialog(
-      title: Text(t('collab.peerPermissions')),
-      content: SizedBox(
-        width: 420,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 12,
-                  height: 12,
-                  decoration: BoxDecoration(
-                    color: Color(peer.colorValue),
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    '${peer.userName}#${shortCollaborationId(peer.userId)}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              t('collab.permissionsHint'),
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              t('collab.assignment'),
-              style: Theme.of(context).textTheme.titleSmall,
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: _CollaborationIndexField(
-                    label: t('collab.startIndex'),
-                    value: _assignmentStart.clamp(1, maxImageCount).toInt(),
-                    maxValue: maxImageCount,
-                    onChanged: (value) => setState(() {
-                      _assignmentStart = value.clamp(1, maxImageCount).toInt();
-                      if (_assignmentEnd < _assignmentStart) {
-                        _assignmentEnd = _assignmentStart;
-                      }
-                    }),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _CollaborationIndexField(
-                    label: t('collab.endIndex'),
-                    value: _assignmentEnd.clamp(1, maxImageCount).toInt(),
-                    maxValue: maxImageCount,
-                    onChanged: (value) => setState(() {
-                      _assignmentEnd = value
-                          .clamp(_assignmentStart, maxImageCount)
-                          .toInt();
-                    }),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Text(
-              t('collab.permissions'),
-              style: Theme.of(context).textTheme.titleSmall,
-            ),
-            const SizedBox(height: 8),
-            _CollaborationSwitch(
-              title: t('collab.canEditOthers'),
-              value: _permissions.canEditOthers,
-              onChanged: (value) => setState(
-                () => _permissions = _permissions.copyWith(
-                  canEditOthers: value,
-                ),
-              ),
-            ),
-            _CollaborationSwitch(
-              title: t('collab.canDeleteOthers'),
-              value: _permissions.canDeleteOthers,
-              onChanged: (value) => setState(
-                () => _permissions = _permissions.copyWith(
-                  canDeleteOthers: value,
-                ),
-              ),
-            ),
-            _CollaborationSwitch(
-              title: t('collab.canChangeClass'),
-              value: _permissions.canChangeClass,
-              onChanged: (value) => setState(
-                () => _permissions = _permissions.copyWith(
-                  canChangeClass: value,
-                ),
-              ),
-            ),
-          ],
+    void save() {
+      Navigator.of(context).pop(
+        CollaborationPeerPermissionResult(
+          userId: peer.userId,
+          permissions: _permissions,
+          assignmentStart: _assignmentStart.clamp(1, maxImageCount).toInt(),
+          assignmentEnd: _assignmentEnd
+              .clamp(_assignmentStart, maxImageCount)
+              .toInt(),
         ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: Text(t('action.cancel')),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(
-            CollaborationPeerPermissionResult(
-              userId: peer.userId,
-              permissions: _permissions,
-              assignmentStart: _assignmentStart
-                  .clamp(1, maxImageCount)
-                  .toInt(),
-              assignmentEnd: _assignmentEnd
-                  .clamp(_assignmentStart, maxImageCount)
-                  .toInt(),
-            ),
+      );
+    }
+
+    return DialogPrimaryAction(
+      onInvoke: save,
+      child: AlertDialog(
+        title: Text(t('collab.peerPermissions')),
+        content: SizedBox(
+          width: 420,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 12,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      color: Color(peer.colorValue),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${peer.userName}#${shortCollaborationId(peer.userId)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                t('collab.permissionsHint'),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                t('collab.assignment'),
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: _CollaborationIndexField(
+                      label: t('collab.startIndex'),
+                      value: _assignmentStart.clamp(1, maxImageCount).toInt(),
+                      maxValue: maxImageCount,
+                      onChanged: (value) => setState(() {
+                        _assignmentStart = value
+                            .clamp(1, maxImageCount)
+                            .toInt();
+                        if (_assignmentEnd < _assignmentStart) {
+                          _assignmentEnd = _assignmentStart;
+                        }
+                      }),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _CollaborationIndexField(
+                      label: t('collab.endIndex'),
+                      value: _assignmentEnd.clamp(1, maxImageCount).toInt(),
+                      maxValue: maxImageCount,
+                      onChanged: (value) => setState(() {
+                        _assignmentEnd = value
+                            .clamp(_assignmentStart, maxImageCount)
+                            .toInt();
+                      }),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Text(
+                t('collab.permissions'),
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              const SizedBox(height: 8),
+              _CollaborationSwitch(
+                title: t('collab.canEditOthers'),
+                value: _permissions.canEditOthers,
+                onChanged: (value) => setState(
+                  () => _permissions = _permissions.copyWith(
+                    canEditOthers: value,
+                  ),
+                ),
+              ),
+              _CollaborationSwitch(
+                title: t('collab.canDeleteOthers'),
+                value: _permissions.canDeleteOthers,
+                onChanged: (value) => setState(
+                  () => _permissions = _permissions.copyWith(
+                    canDeleteOthers: value,
+                  ),
+                ),
+              ),
+              _CollaborationSwitch(
+                title: t('collab.canChangeClass'),
+                value: _permissions.canChangeClass,
+                onChanged: (value) => setState(
+                  () => _permissions = _permissions.copyWith(
+                    canChangeClass: value,
+                  ),
+                ),
+              ),
+            ],
           ),
-          child: Text(t('action.save')),
         ),
-      ],
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(t('action.cancel')),
+          ),
+          FilledButton(onPressed: save, child: Text(t('action.save'))),
+        ],
+      ),
     );
   }
 }

@@ -69,10 +69,11 @@ String? readTrainingDataPath(File argsYaml, String runDir) {
   return resolveImportDatasetPath(runDir, value);
 }
 
-int? readLastTrainingResultEpoch(File resultsCsv) {
+int? readCompletedTrainingEpochs(File resultsCsv) {
   if (!resultsCsv.existsSync()) {
     return null;
   }
+  int? firstEpoch;
   int? lastEpoch;
   for (final rawLine in resultsCsv.readAsLinesSync()) {
     final line = rawLine.trim();
@@ -82,10 +83,15 @@ int? readLastTrainingResultEpoch(File resultsCsv) {
     final first = line.split(',').first.trim();
     final parsed = double.tryParse(first);
     if (parsed != null) {
-      lastEpoch = parsed.round();
+      final epoch = parsed.round();
+      firstEpoch ??= epoch;
+      lastEpoch = epoch;
     }
   }
-  return lastEpoch;
+  if (firstEpoch == null || lastEpoch == null) {
+    return null;
+  }
+  return lastEpoch + (firstEpoch == 0 ? 1 : 0);
 }
 
 List<TrainingMetricPoint> readTrainingMetricPoints(File resultsCsv) {
@@ -104,7 +110,8 @@ List<TrainingMetricPoint> readTrainingMetricPoints(File resultsCsv) {
     return const [];
   }
 
-  final pointsByEpoch = <int, TrainingMetricPoint>{};
+  int? firstRawEpoch;
+  final metricsByRawEpoch = <int, TrainingMetrics>{};
   for (final rawLine in lines.skip(headerIndex + 1)) {
     final line = rawLine.trim();
     if (line.isEmpty || line.toLowerCase().startsWith('epoch')) {
@@ -126,18 +133,26 @@ List<TrainingMetricPoint> readTrainingMetricPoints(File resultsCsv) {
     if (rawEpoch == null) {
       continue;
     }
-    final epoch = rawEpoch.round() + 1;
-    if (epoch <= 0) {
-      continue;
-    }
+    final epoch = rawEpoch.round();
+    firstRawEpoch ??= epoch;
     final metrics = _trainingMetricsFromResultsMap(map);
     if (!_hasAnyTrainingMetric(metrics)) {
+      continue;
+    }
+    metricsByRawEpoch[epoch] = metrics;
+  }
+
+  final epochOffset = firstRawEpoch == 0 ? 1 : 0;
+  final pointsByEpoch = <int, TrainingMetricPoint>{};
+  for (final entry in metricsByRawEpoch.entries) {
+    final epoch = entry.key + epochOffset;
+    if (epoch <= 0) {
       continue;
     }
     pointsByEpoch[epoch] = TrainingMetricPoint(
       epoch: epoch,
       timestamp: DateTime.now(),
-      metrics: metrics,
+      metrics: entry.value,
     );
   }
 
@@ -301,12 +316,13 @@ except Exception as error:
         error: 'OpenVINO device list is missing',
       );
     }
-    final devices = rawDevices
-        .map((item) => '$item'.trim().toUpperCase())
-        .where((item) => item.isNotEmpty)
-        .toSet()
-        .toList()
-      ..sort(naturalCompare);
+    final devices =
+        rawDevices
+            .map((item) => '$item'.trim().toUpperCase())
+            .where((item) => item.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort(naturalCompare);
     return OpenVinoDeviceInfo(devices: devices, rawOutput: stdout);
   } on Object catch (error) {
     return OpenVinoDeviceInfo(error: '$error');

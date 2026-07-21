@@ -9,31 +9,34 @@
 // =============================================================================
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../models/export.dart';
 import '../services/i18n.dart';
+import 'dialog_shortcuts.dart';
 
 Future<bool?> showOverwriteImportedDatasetDialog(BuildContext context) {
   return showDialog<bool>(
     context: context,
-    builder: (context) => AlertDialog(
-      title: Text(t('export.overwriteTitle')),
-      content: Text(t('export.overwriteMessage')),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(null),
-          child: Text(t('action.cancel')),
-        ),
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          child: Text(t('export.keepNew')),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(true),
-          child: Text(t('export.overwriteOriginal')),
-        ),
-      ],
+    builder: (context) => DialogPrimaryAction(
+      onInvoke: () => Navigator.of(context).pop(true),
+      child: AlertDialog(
+        title: Text(t('export.overwriteTitle')),
+        content: Text(t('export.overwriteMessage')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(null),
+            child: Text(t('action.cancel')),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(t('export.keepNew')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(t('export.overwriteOriginal')),
+          ),
+        ],
+      ),
     ),
   );
 }
@@ -55,8 +58,7 @@ class _ExportDialogState extends State<ExportDialog> {
   late final TextEditingController _folderNameController;
 
   double get _trainPercent => _splitBoundaries.start;
-  double get _valPercent =>
-      _splitBoundaries.end - _splitBoundaries.start;
+  double get _valPercent => _splitBoundaries.end - _splitBoundaries.start;
   double get _testPercent => 100 - _splitBoundaries.end;
 
   @override
@@ -88,17 +90,8 @@ class _ExportDialogState extends State<ExportDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return Focus(
-      autofocus: true,
-      onKeyEvent: (node, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.enter ||
-                event.logicalKey == LogicalKeyboardKey.numpadEnter)) {
-          _confirm();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
+    return DialogPrimaryAction(
+      onInvoke: _confirm,
       child: AlertDialog(
         title: Text(t('export.title')),
         content: SizedBox(

@@ -12,9 +12,9 @@ import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../models/config.dart';
+import 'dialog_shortcuts.dart';
 import '../services/config_store.dart';
 import '../services/i18n.dart';
 import '../services/logger.dart';
@@ -181,19 +181,22 @@ class _SettingsDialogState extends State<SettingsDialog> {
   Future<void> _clearCache() async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(t('settings.clearCache')),
-        content: Text(t('settings.clearCacheConfirm')),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text(t('action.cancel')),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text(t('action.clear')),
-          ),
-        ],
+      builder: (context) => DialogPrimaryAction(
+        onInvoke: () => Navigator.of(context).pop(true),
+        child: AlertDialog(
+          title: Text(t('settings.clearCache')),
+          content: Text(t('settings.clearCacheConfirm')),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(t('action.cancel')),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text(t('action.clear')),
+            ),
+          ],
+        ),
       ),
     );
     if (confirmed != true) {
@@ -223,17 +226,8 @@ class _SettingsDialogState extends State<SettingsDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return Focus(
-      autofocus: true,
-      onKeyEvent: (node, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.enter ||
-                event.logicalKey == LogicalKeyboardKey.numpadEnter)) {
-          _save();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
+    return DialogPrimaryAction(
+      onInvoke: _save,
       child: AlertDialog(
         title: Text(t('settings.title')),
         content: SizedBox(

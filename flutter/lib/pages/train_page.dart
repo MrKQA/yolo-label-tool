@@ -16,6 +16,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
 import '../dialogs/color_picker_dialog.dart';
+import '../dialogs/dialog_shortcuts.dart';
 import '../dialogs/yolo_export_settings_dialog.dart';
 import '../models/config.dart';
 import '../models/detection.dart';
@@ -49,6 +50,36 @@ class TrainPage extends StatefulWidget {
 }
 
 class TrainPageState extends State<TrainPage> {
+  void startFromShortcut() {
+    if (_datasetLoading ||
+        _trainingRunning ||
+        _trainingStopping ||
+        !_validYoloModel ||
+        _datasetSummary == null) {
+      return;
+    }
+    unawaited(_startTraining());
+  }
+
+  void stopFromShortcut() {
+    _stopTraining();
+  }
+
+  void chooseModelFromShortcut() {
+    if (_datasetLoading) return;
+    unawaited(_chooseModel());
+  }
+
+  void chooseDatasetFromShortcut() {
+    if (_datasetLoading) return;
+    unawaited(_chooseDataset());
+  }
+
+  void exportFromShortcut() {
+    if (_datasetLoading || _exportingModel) return;
+    unawaited(_showExportSettingsDialog());
+  }
+
   final TextEditingController _datasetPathController = TextEditingController();
   final Map<String, double> _parameters = Map<String, double>.from(
     defaultTrainingParameters,
@@ -268,6 +299,8 @@ class TrainPageState extends State<TrainPage> {
         _datasetSummary = loadDatasetSummary(prefs.datasetPath!);
       }
     });
+    _selectDatasetFromCheckpoint(_modelPath);
+    _refreshResumeInfo();
   }
 
   void _savePreferences() {
@@ -634,65 +667,72 @@ class TrainPageState extends State<TrainPage> {
               });
             }
 
-            return AlertDialog(
-              title: Text(t('train.exportModelTitle')),
-              content: SizedBox(
-                width: 460,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(t('train.exportModelMessage')),
-                    const SizedBox(height: 12),
-                    if (options.isEmpty)
-                      Text(
-                        t('train.noModels'),
-                        style: Theme.of(context).textTheme.bodySmall,
-                      )
-                    else
-                      DropdownButtonFormField<String>(
-                        initialValue: selected,
-                        isExpanded: true,
-                        decoration: InputDecoration(
-                          labelText: t('path.model'),
-                          isDense: true,
-                          border: const OutlineInputBorder(),
+            return DialogPrimaryAction(
+              onInvoke: () {
+                final value = selected;
+                if (value != null) Navigator.of(dialogContext).pop(value);
+              },
+              enabled: selected != null,
+              child: AlertDialog(
+                title: Text(t('train.exportModelTitle')),
+                content: SizedBox(
+                  width: 460,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(t('train.exportModelMessage')),
+                      const SizedBox(height: 12),
+                      if (options.isEmpty)
+                        Text(
+                          t('train.noModels'),
+                          style: Theme.of(context).textTheme.bodySmall,
+                        )
+                      else
+                        DropdownButtonFormField<String>(
+                          initialValue: selected,
+                          isExpanded: true,
+                          decoration: InputDecoration(
+                            labelText: t('path.model'),
+                            isDense: true,
+                            border: const OutlineInputBorder(),
+                          ),
+                          items: [
+                            for (final path in options)
+                              DropdownMenuItem<String>(
+                                value: path,
+                                child: Text(fileName(path)),
+                              ),
+                          ],
+                          onChanged: (value) {
+                            if (value == null) {
+                              return;
+                            }
+                            setDialogState(() => selected = value);
+                          },
                         ),
-                        items: [
-                          for (final path in options)
-                            DropdownMenuItem<String>(
-                              value: path,
-                              child: Text(fileName(path)),
-                            ),
-                        ],
-                        onChanged: (value) {
-                          if (value == null) {
-                            return;
-                          }
-                          setDialogState(() => selected = value);
-                        },
+                      const SizedBox(height: 8),
+                      TextButton.icon(
+                        onPressed: chooseModelFile,
+                        icon: const Icon(Icons.folder_open_outlined),
+                        label: Text(t('train.chooseModel')),
                       ),
-                    const SizedBox(height: 8),
-                    TextButton.icon(
-                      onPressed: chooseModelFile,
-                      icon: const Icon(Icons.folder_open_outlined),
-                      label: Text(t('train.chooseModel')),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    child: Text(t('action.cancel')),
+                  ),
+                  FilledButton(
+                    onPressed: selected == null
+                        ? null
+                        : () => Navigator.of(dialogContext).pop(selected),
+                    child: Text(t('train.confirmStart')),
+                  ),
+                ],
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(),
-                  child: Text(t('action.cancel')),
-                ),
-                FilledButton(
-                  onPressed: selected == null
-                      ? null
-                      : () => Navigator.of(dialogContext).pop(selected),
-                  child: Text(t('train.confirmStart')),
-                ),
-              ],
             );
           },
         );
@@ -1173,12 +1213,29 @@ class TrainPageState extends State<TrainPage> {
   void _refreshResumeInfo() {
     final modelPath = _modelPath;
     final info = modelPath == null ? null : _detectResumeInfo(modelPath);
+    final checkpointRunDir = _checkpointRunDirectory(modelPath);
+    final resultsCsv = checkpointRunDir == null
+        ? null
+        : File('${checkpointRunDir.path}\\results.csv');
+    final metricPoints = resultsCsv?.existsSync() == true
+        ? readTrainingMetricPoints(resultsCsv!)
+        : const <TrainingMetricPoint>[];
     setState(() {
       _resumeInfo = info;
       if (info?.canResume == true) {
         _resumeEnabled = true;
       } else {
         _resumeEnabled = false;
+      }
+      if (!_trainingRunning) {
+        _trainingMetricPoints = metricPoints;
+        _trainingMetrics = metricPoints.isEmpty
+            ? null
+            : metricPoints.last.metrics;
+        _currentEpoch = metricPoints.isEmpty ? 0 : metricPoints.last.epoch;
+        _activeRunDir = checkpointRunDir?.path;
+        _trainingInterrupted = false;
+        _resourceUsage = const TrainingResourceUsage();
       }
     });
   }
@@ -1203,23 +1260,24 @@ class TrainPageState extends State<TrainPage> {
   }
 
   String? _checkpointDataYamlPath(String? modelPath) {
+    final runDir = _checkpointRunDirectory(modelPath);
+    if (runDir == null) return null;
+    return readTrainingDataPath(File('${runDir.path}\\args.yaml'), runDir.path);
+  }
+
+  Directory? _checkpointRunDirectory(String? modelPath) {
     if (modelPath == null || fileName(modelPath).toLowerCase() != 'last.pt') {
       return null;
     }
     final checkpoint = File(modelPath);
-    if (!checkpoint.existsSync()) {
-      return null;
-    }
+    if (!checkpoint.existsSync()) return null;
     final weightsDir = checkpoint.parent;
     final runDir = weightsDir.parent;
     if (weightsDir.path == runDir.path ||
         fileName(weightsDir.path).toLowerCase() != 'weights') {
       return null;
     }
-    return readTrainingDataPath(
-      File('${runDir.path}\\args.yaml'),
-      runDir.path,
-    );
+    return runDir;
   }
 
   ResumeTrainingInfo? _detectResumeInfo(String modelPath) {
@@ -1243,8 +1301,8 @@ class TrainPageState extends State<TrainPage> {
     }
     final targetEpochs =
         readTrainingEpochs(argsYaml) ?? _parameters['epochs']?.round() ?? 0;
-    final lastEpoch = readLastTrainingResultEpoch(resultsCsv);
-    if (targetEpochs <= 0 || lastEpoch == null) {
+    final completedEpochs = readCompletedTrainingEpochs(resultsCsv);
+    if (targetEpochs <= 0 || completedEpochs == null) {
       return ResumeTrainingInfo.unavailable(t('train.resumeUnknownProgress'));
     }
     final selectedData = _datasetPath;
@@ -1256,7 +1314,6 @@ class TrainPageState extends State<TrainPage> {
     if (!dataMatches) {
       return ResumeTrainingInfo.unavailable(t('train.resumeDataMismatch'));
     }
-    final completedEpochs = lastEpoch + 1;
     if (completedEpochs >= targetEpochs) {
       return ResumeTrainingInfo.unavailable(t('train.resumeAlreadyDone'));
     }
@@ -1371,7 +1428,7 @@ class TrainPageState extends State<TrainPage> {
                                   ? t('train.stop')
                                   : _showContinueTraining
                                   ? t('train.continueTraining')
-                              : t('train.start'),
+                                  : t('train.start'),
                             ),
                           ),
                           OutlinedButton.icon(
@@ -1630,4 +1687,3 @@ class TrainPageState extends State<TrainPage> {
     );
   }
 }
-

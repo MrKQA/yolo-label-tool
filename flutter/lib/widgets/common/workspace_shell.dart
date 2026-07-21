@@ -71,8 +71,9 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
   Timer? _topMenuHideTimer;
   DateTime? _lastPreviousBoundaryNoticeAt;
   DateTime? _lastNextBoundaryNoticeAt;
+  DateTime? _lastAnnotationModeNoticeAt;
 
-  static const _imageBoundaryNoticeInterval = Duration(milliseconds: 1800);
+  static const _imageBoundaryNoticeInterval = appNoticeRepeatInterval;
 
   final ProjectController _project = ProjectController();
   late final AnnotationDatabaseController _annotationDatabase;
@@ -183,7 +184,9 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
       context: () => context,
       projectChangeBlocked: _projectActions.guardProjectChangeBlocked,
       showMessage: _showFloatingMessage,
+      showModeIncompatibleMessage: _showAnnotationModeIncompatibleMessage,
       showExport: () => unawaited(_exportActions.showExportDialog()),
+      showClearItems: () => unawaited(_projectActions.showClearProjectItems()),
     );
     _settingsActions = WorkspaceSettingsActions(
       settings: _settingsController,
@@ -228,6 +231,9 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
         copy: _annotationActions.copySelected,
         paste: _annotationActions.paste,
         cancelSelection: () {
+          if (_aiPanelVisible) {
+            setState(() => _aiPanelVisible = false);
+          }
           _navigation.cancelSelection();
           _project.selectAnnotation(null);
         },
@@ -244,6 +250,10 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
         onNoPreviousImage: () => _showImageBoundaryNotice(previous: true),
         onNoNextImage: () => _showImageBoundaryNotice(previous: false),
         adjustZoom: _viewport.adjustZoom,
+        toggleZoomLock: _viewport.toggleZoomLock,
+        resetLabelView: _viewport.reset,
+        importDataset: () => unawaited(_projectActions.importYoloDataset()),
+        exportDataset: () => unawaited(_exportActions.showExportDialog()),
         activateMode: _annotationActions.activateMode,
         deleteSelected: _annotationActions.deleteSelected,
         toggleClassLabels: () {
@@ -252,6 +262,13 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
         rotateObb: _annotationActions.rotateSelected,
         aiAnnotateCurrent: () => unawaited(_aiActions.annotateCurrent()),
         aiAnnotateAll: () => unawaited(_aiActions.annotateAll()),
+        trainStart: () => _trainPageKey.currentState?.startFromShortcut(),
+        trainStop: () => _trainPageKey.currentState?.stopFromShortcut(),
+        trainChooseModel: () =>
+            _trainPageKey.currentState?.chooseModelFromShortcut(),
+        trainChooseDataset: () =>
+            _trainPageKey.currentState?.chooseDatasetFromShortcut(),
+        trainExport: () => _trainPageKey.currentState?.exportFromShortcut(),
       ),
     );
     _workspaceListenable = Listenable.merge([
@@ -263,6 +280,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
       _ai,
       _projectActions,
     ]);
+    _project.addListener(_syncAnnotationModeWithProject);
     _collaboration.onTransportError = _handleCollaborationTransportError;
     _loadPersistedConfig();
     _loadAvailableLanguages();
@@ -288,6 +306,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     _settingsController.dispose();
     _viewport.dispose();
     _collaboration.dispose();
+    _project.removeListener(_syncAnnotationModeWithProject);
     _project.dispose();
     _ai.dispose();
     _projectActions.dispose();
@@ -340,14 +359,36 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     );
   }
 
-  void _showFloatingMessage(String message) {
+  void _showFloatingMessage(
+    String message, {
+    Duration duration = const Duration(milliseconds: 1800),
+  }) {
     final overlay = Overlay.of(context);
     late final OverlayEntry entry;
-    entry = OverlayEntry(builder: (_) => FloatingMessage(message: message));
+    entry = OverlayEntry(
+      builder: (_) => FloatingMessage(message: message, duration: duration),
+    );
     overlay.insert(entry);
-    Future<void>.delayed(const Duration(milliseconds: 950), () {
-      entry.remove();
+    Future<void>.delayed(duration + const Duration(milliseconds: 80), () {
+      if (entry.mounted) entry.remove();
     });
+  }
+
+  void _syncAnnotationModeWithProject() {
+    final projectMode = _project.projectAnnotationMode;
+    if (projectMode != null && _navigation.annotationMode != projectMode) {
+      _navigation.activateAnnotationMode(projectMode);
+    }
+  }
+
+  void _showAnnotationModeIncompatibleMessage(String message) {
+    final now = DateTime.now();
+    final last = _lastAnnotationModeNoticeAt;
+    if (last != null && now.difference(last) < appNoticeRepeatInterval) {
+      return;
+    }
+    _lastAnnotationModeNoticeAt = now;
+    _showFloatingMessage(message, duration: appNoticeDisplayDuration);
   }
 
   void _showImageBoundaryNotice({required bool previous}) {
@@ -365,6 +406,7 @@ class _WorkspaceShellState extends State<WorkspaceShell> {
     }
     _showFloatingMessage(
       t(previous ? 'detect.hudNoPrevious' : 'detect.hudNoNext'),
+      duration: appNoticeDisplayDuration,
     );
   }
 
