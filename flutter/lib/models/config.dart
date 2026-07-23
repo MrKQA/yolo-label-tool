@@ -144,7 +144,10 @@ class LabelResumePositionsConfig {
 }
 
 class CollaborationIdentityConfig {
-  const CollaborationIdentityConfig({required this.hostId, required this.userId});
+  const CollaborationIdentityConfig({
+    required this.hostId,
+    required this.userId,
+  });
 
   final String hostId;
   final String userId;
@@ -178,13 +181,13 @@ class AppSettings {
   });
 
   const AppSettings.empty()
-      : pythonPath = '',
-        outputPath = '',
-        exportPath = '',
-        logLevelIndex = 2,
-        darkMode = false,
-        collaborationHostId = '',
-        collaborationUserId = '';
+    : pythonPath = '',
+      outputPath = '',
+      exportPath = '',
+      logLevelIndex = 2,
+      darkMode = false,
+      collaborationHostId = '',
+      collaborationUserId = '';
 
   final String pythonPath;
   final String outputPath;
@@ -276,6 +279,7 @@ class TrainingPreferences {
     required this.batchModeIndex,
     required this.batchSize,
     required this.batchRatio,
+    this.architectureVariant = 'standard',
     this.ampEnabled = false,
     required this.selectedDeviceIds,
     this.manualDeviceSelection = false,
@@ -290,6 +294,7 @@ class TrainingPreferences {
   final int batchModeIndex;
   final double batchSize;
   final double batchRatio;
+  final String architectureVariant;
   final bool ampEnabled;
   final List<String> selectedDeviceIds;
   final bool manualDeviceSelection;
@@ -306,6 +311,7 @@ class TrainingPreferences {
     'batchModeIndex': batchModeIndex,
     'batchSize': batchSize,
     'batchRatio': batchRatio,
+    'architectureVariant': architectureVariant,
     'ampEnabled': ampEnabled,
     'selectedDeviceIds': selectedDeviceIds,
     'manualDeviceSelection': manualDeviceSelection,
@@ -345,7 +351,9 @@ class TrainingPreferences {
     }
     final selectedDeviceIds = _stringListFromJson(value['selectedDeviceIds']);
     return TrainingPreferences(
-      modelPath: value['modelPath'] is String ? value['modelPath'] as String : null,
+      modelPath: value['modelPath'] is String
+          ? value['modelPath'] as String
+          : null,
       datasetPath: value['datasetPath'] is String
           ? value['datasetPath'] as String
           : null,
@@ -360,8 +368,15 @@ class TrainingPreferences {
       batchRatio: value['batchRatio'] is num
           ? (value['batchRatio'] as num).toDouble()
           : 0.70,
+      architectureVariant: switch (value['architectureVariant']) {
+        'p2' => 'p2',
+        'p6' => 'p6',
+        _ => 'standard',
+      },
       ampEnabled: value['ampEnabled'] == true,
-      selectedDeviceIds: selectedDeviceIds.isEmpty ? ['cpu'] : selectedDeviceIds,
+      selectedDeviceIds: selectedDeviceIds.isEmpty
+          ? ['cpu']
+          : selectedDeviceIds,
       manualDeviceSelection: value['manualDeviceSelection'] == true,
       chartColors: _intMapFromJson(value['chartColors']),
       exportSettings: YoloExportSettings.fromJson(value['exportSettings']),

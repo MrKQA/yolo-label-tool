@@ -6,20 +6,25 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_python_environment`, `dedupe_pathbufs`, `file_name_eq`, `find_python_dll`, `from_executable`, `has_python_encodings`, `load_library`, `load_python_runtime`, `load_symbol`, `normalize_path`, `path_key`, `python_dll_score`, `resolve_python_home`, `run_python_code_with_runtime`
+// These functions are ignored because they are not marked as `pub`: `apply_python_environment`, `dedupe_pathbufs`, `file_name_eq`, `find_python_dll`, `from_executable`, `has_python_encodings`, `load_library`, `load_python_runtime`, `load_symbol`, `normalize_path`, `path_key`, `python_dll_score`, `python_string_literal`, `resolve_python_home`, `run_python_code_with_runtime`, `unix_millis_now`, `wrap_python_code_for_traceback`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `PythonRuntimePaths`, `PythonRuntime`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `fmt`
 
-Future<String> initializePython({required String pythonPath}) =>
-    RustLib.instance.api.crateApiIniPythonInitializePython(pythonPath: pythonPath);
+Future<String> initializePython({required String pythonPath}) => RustLib
+    .instance
+    .api
+    .crateApiIniPythonInitializePython(pythonPath: pythonPath);
 
 Future<String> verifyPythonPath({required String path}) =>
     RustLib.instance.api.crateApiIniPythonVerifyPythonPath(path: path);
 
-Future<void> configurePythonRuntime({required String pythonPath}) =>
-    RustLib.instance.api.crateApiIniPythonConfigurePythonRuntime(pythonPath: pythonPath);
+Future<void> configurePythonRuntime({required String pythonPath}) => RustLib
+    .instance
+    .api
+    .crateApiIniPythonConfigurePythonRuntime(pythonPath: pythonPath);
 
-Future<void> preloadYoloModules() => RustLib.instance.api.crateApiIniPythonPreloadYoloModules();
+Future<void> preloadYoloModules() =>
+    RustLib.instance.api.crateApiIniPythonPreloadYoloModules();
 
 Future<void> shutdownPythonRuntime() =>
     RustLib.instance.api.crateApiIniPythonShutdownPythonRuntime();
@@ -27,4 +32,5 @@ Future<void> shutdownPythonRuntime() =>
 Future<void> runPythonCode({required String code}) =>
     RustLib.instance.api.crateApiIniPythonRunPythonCode(code: code);
 
-Future<bool> pythonIsInitialized() => RustLib.instance.api.crateApiIniPythonPythonIsInitialized();
+Future<bool> pythonIsInitialized() =>
+    RustLib.instance.api.crateApiIniPythonPythonIsInitialized();

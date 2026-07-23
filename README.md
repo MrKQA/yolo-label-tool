@@ -21,11 +21,14 @@ A YOLO image labeling, training, and video processing tool built with Flutter + 
 - Collaborative annotation over LAN with host approval and collaborator image-range assignment.
 - `data.yaml` import, export, and Roboflow path compatibility.
 - Training page: select `.pt` model, read dataset statistics, configure hyperparameters.
+- Training architecture selector supports Standard, P2, and P6. P2/P6 reuse compatible weights from the selected PT checkpoint and require a matching YAML in the installed Ultralytics version.
 - Training engine uses PyO3 to call Python/Ultralytics for training.
 - Training charts use `fl_chart` to display loss, mAP, precision, recall, LR.
 - Resume training from `last.pt`: auto-detects `args.yaml` and `data.yaml`.
 - Training history saved locally (up to 40 entries) with timestamps.
 - Browse page includes Rust + FFmpeg video playback capabilities.
+- Browse page supports PT model heatmaps for YOLOv8, YOLO11, and YOLO26: original detection, EigenCAM, Grad-CAM, Grad-CAM++, XGrad-CAM, and ScoreCAM. The analysis dialog provides full-image aggregate, bounding-box, and SEG mask explanation modes. Each CAM method directly compares the automatically fused features with the model's P3/P4/P5 target layers, and supports optional `aug_smooth` / `aug + eigen smooth`, class filtering, and confidence adjustment. Up to 12 highest-confidence detections are analyzed per image.
+- Predict All loads the model once per batch task and streams images through the same Python process; the process exits after completion to release RAM and VRAM.
 - Database table browsing supports project filtering, pagination, horizontal scrolling, row details, and a resizable detail panel.
 - Read-only SQL queries are supported for inspection.
 
@@ -39,6 +42,7 @@ A YOLO image labeling, training, and video processing tool built with Flutter + 
 |   +-- api.rs                    # Public API exposed to Flutter
 |   +-- training.rs               # Ultralytics training backend and Python process control
 |   +-- detecting.rs              # YOLO / OpenVINO inference backend
+|   +-- cam_analysis.rs           # PyTorch YOLO CAM heatmap analysis
 |   +-- collaboration.rs          # LAN collaboration transport
 |   +-- main.rs                   # Dev launcher entry
 |   +-- frb_generated.rs          # Generated Flutter Rust Bridge glue
@@ -118,6 +122,12 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 pip install ultralytics opencv-python
 ```
 
+The Browse page model heatmap feature additionally requires `grad-cam` and currently supports PyTorch `.pt` models only:
+
+```bash
+pip install grad-cam
+```
+
 `onnxruntime-gpu` is only needed when using ONNX/GPU inference. If the app logs an ONNX import warning but you only train with `.pt` models, it can be ignored.
 
 #### OpenVINO Inference on Intel Devices
@@ -162,9 +172,11 @@ Notes:
 
 1. Configure Python environment and output path in Settings
 2. Training page: select `.pt` model → select `data.yaml` dataset
-3. Adjust hyperparameters → click "Start Training"
+3. Choose Standard, P2, or P6 architecture, adjust hyperparameters → click "Start Training"
 4. Click "Stop" during training; "Continue Training" to resume
 5. Real-time charts for loss, mAP, precision, etc.
+
+P2 is intended for smaller targets, while P6 is intended for higher-resolution inputs and larger targets. The app derives the model family, scale, and task from the selected PT checkpoint. If that Ultralytics installation does not provide the corresponding YAML (for example, a specific task/version combination), training stops with the attempted YAML and available P2/P6 configurations written to the terminal log. Resume always keeps the architecture stored in `last.pt`.
 
 ### Video Frame Extraction
 
@@ -252,6 +264,21 @@ Verify Rust: `rustc --version`. PyO3 errors: `conda activate yolo && cargo check
 
 Check Python green checkmark, `ultralytics` installed, `data.yaml` path valid, device exists.
 
+### Heatmap generation reports that grad-cam is missing
+
+The Browse page heatmap feature requires `grad-cam` in the same Python environment selected in Settings. The package is installed as `grad-cam` but imported as `pytorch_grad_cam`:
+
+```bash
+"path\to\python.exe" -m pip install -U grad-cam
+"path\to\python.exe" -c "import pytorch_grad_cam; print('grad-cam OK')"
+```
+
+If generation still fails, check the application log. The UI displays a short dependency warning while the complete Python error and traceback are written to the log.
+
+### Heatmap generation reports no detected target
+
+This warning applies to bounding-box and semantic explanation modes: the model loaded correctly, but no prediction met the confidence threshold. Lower the threshold in the heatmap dialog and try again. Full-image aggregate mode can use the highest raw class score and generate heatmaps without a postprocessed detection box. Smoothing does not affect whether a detection passes the threshold.
+
 ### Stop not immediate
 
 Safe interruption via Ultralytics callbacks at batch/epoch boundaries — short delay expected.
@@ -278,11 +305,14 @@ All pages kept alive via `IndexedStack` — training, playback, crop state prese
 - 局域网协助标注：主机确认加入，并为协助者分配图片索引范围。
 - `data.yaml` 导入、导出和 Roboflow 路径兼容。
 - 训练页支持选择 `.pt` 模型、读取数据集统计、设置超参数。
+- 训练页可选择标准、P2、P6 网络结构；P2/P6 会从所选 PT 迁移兼容权重，并要求当前 Ultralytics 环境存在匹配的 YAML。
 - 训练引擎使用 PyO3 调用 Python / Ultralytics 执行训练。
 - 训练曲线使用 `fl_chart` 显示 loss、mAP、precision、recall、LR 等指标。
 - 支持从 `last.pt` 读取训练目录和 `args.yaml`，自动匹配 `data.yaml` 并启用 resume。
 - 最近训练记录保存到本地配置，最多保留 40 条，并显示明确时间点。
 - 浏览页包含 Rust + FFmpeg 视频处理能力。
+- 浏览页支持 YOLOv8、YOLO11、YOLO26 的 PT 模型热力图：原始检测、EigenCAM、Grad-CAM、Grad-CAM++、XGrad-CAM、ScoreCAM。分析弹窗支持全图聚合、边界框和 SEG mask 解释模式；每种 CAM 会直接对比自动融合特征与模型的 P3/P4/P5 目标层，并可选择 `aug_smooth` / `aug + eigen smooth`、目标类别和置信度；每张图最多分析置信度最高的 12 个检测框。
+- “全部预测”在一次批量任务中只加载一次模型，图片在同一 Python 子进程中逐张推理；任务结束后退出子进程并释放内存和显存。
 - 数据库表浏览支持项目筛选、分页、横向滚动、行详情和可拖拽伸缩的详情区域。
 - SQL 查看支持只读查询。
 
@@ -296,6 +326,7 @@ All pages kept alive via `IndexedStack` — training, playback, crop state prese
 |   +-- api.rs                    # 暴露给 Flutter 的公共 API
 |   +-- training.rs               # Ultralytics 训练后端与 Python 子进程控制
 |   +-- detecting.rs              # YOLO / OpenVINO 推理后端
+|   +-- cam_analysis.rs           # PyTorch YOLO CAM 热力图分析
 |   +-- collaboration.rs          # 局域网协助标注通信
 |   +-- main.rs                   # 开发启动入口
 |   +-- frb_generated.rs          # Flutter Rust Bridge 生成代码
@@ -372,6 +403,12 @@ cd ultralytics
 pip install -e . opencv-python
 ```
 
+浏览页面的模型热力图还需要安装 `grad-cam`，当前仅支持 PyTorch `.pt` 模型：
+
+```bash
+pip install grad-cam
+```
+
 `onnxruntime-gpu` 只在 ONNX/GPU 推理时需要。如果只使用 `.pt` 模型训练，日志中出现 ONNX 导入警告可以忽略。
 
 #### Intel 设备 OpenVINO 推理
@@ -416,9 +453,11 @@ pip install opencv-python matplotlib pandas tqdm psutil
 
 1. 设置中配置 Python 环境和训练输出路径
 2. 训练页选择 `.pt` 模型 → 选择 `data.yaml` 数据集
-3. 调整超参数 → 点击"开始训练"
+3. 选择标准、P2 或 P6 网络结构，调整超参数 → 点击"开始训练"
 4. 训练中可点击"停止"，后续可"继续训练"
 5. 训练曲线实时显示 loss、mAP、precision 等指标
+
+P2 主要面向小目标，P6 主要面向高分辨率输入和较大目标。程序会从所选 PT 中识别模型版本、尺寸和任务；如果当前 Ultralytics 版本没有提供对应任务的 YAML，训练会停止，并在终端日志中写明尝试的 YAML 和环境中可用的 P2/P6 配置。恢复训练始终沿用 `last.pt` 内保存的网络结构。
 
 ### 视频取帧
 
@@ -502,6 +541,21 @@ ffmpeg/
 ### 训练启动后立刻失败
 
 检查 Python 绿色勾、`ultralytics` 已安装、`data.yaml` 路径正确、device 存在。
+
+### 热力图生成提示未安装 grad-cam
+
+浏览页热力图功能要求在设置中选中的同一个 Python 环境内安装 `grad-cam`。安装包名是 `grad-cam`，Python 导入名是 `pytorch_grad_cam`：
+
+```bash
+"Python路径\python.exe" -m pip install -U grad-cam
+"Python路径\python.exe" -c "import pytorch_grad_cam; print('grad-cam OK')"
+```
+
+如果仍然生成失败，请查看应用日志。界面只显示简短的依赖提示，完整的 Python 错误和 Traceback 会写入日志。
+
+### 热力图生成提示未检测到目标
+
+该提示只适用于“边界框内”和“语义分割解释”模式：模型已经正常加载，但没有预测结果达到当前置信度阈值，请在热力图弹窗中降低阈值后重试。“全图聚合分数”会改用最高的原始类别分数，即使没有后处理检测框也能生成热力图。是否启用平滑不会影响检测框能否通过阈值。
 
 ### 停止不立即生效
 

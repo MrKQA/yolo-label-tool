@@ -34,6 +34,7 @@ class RustBackend {
   static Future<String> startYoloTraining({
     required String pythonPath,
     required String modelPath,
+    required String architectureVariant,
     required String dataYamlPath,
     required String projectDir,
     required String experimentName,
@@ -69,6 +70,7 @@ class RustBackend {
   }) => RustLib.instance.api.crateApiStartYoloTraining(
     pythonPath: pythonPath,
     modelPath: modelPath,
+    architectureVariant: architectureVariant,
     dataYamlPath: dataYamlPath,
     projectDir: projectDir,
     experimentName: experimentName,
@@ -300,12 +302,70 @@ class RustBackend {
     );
   }
 
+  static Future<BatchDetectResult> detectImages({
+    required String pythonPath,
+    required String modelPath,
+    required List<String> inputPaths,
+    required List<String> outputNames,
+    required String outputDir,
+    required double confThreshold,
+    required double iouThreshold,
+    required int imgsz,
+    required String device,
+  }) {
+    return Isolate.run(
+      () => _detectImagesSync(
+        pythonPath: pythonPath,
+        modelPath: modelPath,
+        inputPaths: inputPaths,
+        outputNames: outputNames,
+        outputDir: outputDir,
+        confThreshold: confThreshold,
+        iouThreshold: iouThreshold,
+        imgsz: imgsz,
+        device: device,
+      ),
+    );
+  }
+
   static Future<DetectModelTaskResult> detectModelTask({
     required String pythonPath,
     required String modelPath,
   }) {
     return Isolate.run(
       () => _detectModelTaskSync(pythonPath: pythonPath, modelPath: modelPath),
+    );
+  }
+
+  static Future<CamAnalysisResult> analyzeCam({
+    required String pythonPath,
+    required String modelPath,
+    required String inputPath,
+    required String outputDir,
+    required double confThreshold,
+    required double iouThreshold,
+    required int imgsz,
+    required String device,
+    required String mode,
+    required String smoothing,
+    required int targetLayerIndex,
+    required int targetClassId,
+  }) {
+    return Isolate.run(
+      () => _analyzeCamSync(
+        pythonPath: pythonPath,
+        modelPath: modelPath,
+        inputPath: inputPath,
+        outputDir: outputDir,
+        confThreshold: confThreshold,
+        iouThreshold: iouThreshold,
+        imgsz: imgsz,
+        device: device,
+        mode: mode,
+        smoothing: smoothing,
+        targetLayerIndex: targetLayerIndex,
+        targetClassId: targetClassId,
+      ),
     );
   }
 
@@ -540,6 +600,65 @@ class RustBackend {
     }
   }
 
+  static BatchDetectResult _detectImagesSync({
+    required String pythonPath,
+    required String modelPath,
+    required List<String> inputPaths,
+    required List<String> outputNames,
+    required String outputDir,
+    required double confThreshold,
+    required double iouThreshold,
+    required int imgsz,
+    required String device,
+  }) {
+    if (inputPaths.length != outputNames.length) {
+      throw ArgumentError('Batch detection input/output count mismatch');
+    }
+    final bindings = RustVideoBindings.open();
+    final request = jsonEncode({
+      'pythonPath': pythonPath,
+      'modelPath': modelPath,
+      'inputPathsText': inputPaths.join('\n'),
+      'outputNamesText': outputNames.join('\n'),
+      'outputDir': outputDir,
+      'confThreshold': confThreshold,
+      'iouThreshold': iouThreshold,
+      'imgsz': imgsz,
+      'device': device,
+    });
+    final requestBytes = Uint8List.fromList(utf8.encode(request));
+    final requestPtr = bindings.allocator.allocate(requestBytes);
+    try {
+      final buffer = bindings.detectImagesJson(requestPtr, requestBytes.length);
+      final jsonText = bindings.takeUtf8(buffer);
+      final decoded = jsonDecode(jsonText);
+      if (decoded is! Map<String, dynamic>) {
+        throw StateError('Invalid batch detection response');
+      }
+      if (decoded['ok'] != true) {
+        throw StateError('${decoded['error'] ?? 'Batch detection failed'}');
+      }
+      final rawItems = decoded['items'];
+      return BatchDetectResult(
+        items: rawItems is List
+            ? [
+                for (final value in rawItems)
+                  if (value is Map)
+                    BatchDetectItem(
+                      inputPath: '${value['inputPath'] ?? ''}',
+                      outputPath: '${value['outputPath'] ?? ''}',
+                      labelCount: (value['labelCount'] as num?)?.round() ?? 0,
+                    ),
+              ]
+            : const [],
+        labelCount: (decoded['labelCount'] as num?)?.round() ?? 0,
+        device: '${decoded['device'] ?? device}',
+      );
+    } finally {
+      bindings.allocator.free(requestPtr);
+    }
+  }
+
   static DetectModelTaskResult _detectModelTaskSync({
     required String pythonPath,
     required String modelPath,
@@ -566,6 +685,95 @@ class RustBackend {
         task: '${decoded['task'] ?? ''}',
         folder: '${decoded['folder'] ?? 'hbb'}',
         error: decoded['error']?.toString(),
+      );
+    } finally {
+      bindings.allocator.free(requestPtr);
+    }
+  }
+
+  static CamAnalysisResult _analyzeCamSync({
+    required String pythonPath,
+    required String modelPath,
+    required String inputPath,
+    required String outputDir,
+    required double confThreshold,
+    required double iouThreshold,
+    required int imgsz,
+    required String device,
+    required String mode,
+    required String smoothing,
+    required int targetLayerIndex,
+    required int targetClassId,
+  }) {
+    final bindings = RustVideoBindings.open();
+    final request = jsonEncode({
+      'pythonPath': pythonPath,
+      'modelPath': modelPath,
+      'inputPath': inputPath,
+      'outputDir': outputDir,
+      'confThreshold': confThreshold,
+      'iouThreshold': iouThreshold,
+      'imgsz': imgsz,
+      'device': device,
+      'mode': mode,
+      'smoothing': smoothing,
+      'targetLayerIndex': targetLayerIndex,
+      'targetClassId': targetClassId,
+    });
+    final requestBytes = Uint8List.fromList(utf8.encode(request));
+    final requestPtr = bindings.allocator.allocate(requestBytes);
+    try {
+      final buffer = bindings.analyzeCamJson(requestPtr, requestBytes.length);
+      final jsonText = bindings.takeUtf8(buffer);
+      final decoded = jsonDecode(jsonText);
+      if (decoded is! Map<String, dynamic>) {
+        throw StateError('Invalid CAM analysis response');
+      }
+      if (decoded['ok'] != true) {
+        throw StateError('${decoded['error'] ?? 'CAM analysis failed'}');
+      }
+      final rawLayers = decoded['targetLayers'];
+      final rawOutputs = decoded['outputs'];
+      return CamAnalysisResult(
+        family: '${decoded['family'] ?? 'ultralytics-yolo'}',
+        task: '${decoded['task'] ?? ''}',
+        device: '${decoded['device'] ?? ''}',
+        ultralyticsVersion: '${decoded['ultralyticsVersion'] ?? ''}',
+        targetLayers: rawLayers is List
+            ? rawLayers.map((value) => '$value').toList(growable: false)
+            : const [],
+        availableTargetLayers: decoded['availableTargetLayers'] is List
+            ? (decoded['availableTargetLayers'] as List)
+                  .map((value) => '$value')
+                  .toList(growable: false)
+            : const [],
+        targetLayerIndex:
+            (decoded['targetLayerIndex'] as num?)?.round() ?? targetLayerIndex,
+        outputs: rawOutputs is List
+            ? [
+                for (final value in rawOutputs)
+                  if (value is Map)
+                    CamAnalysisOutput(
+                      id: '${value['id'] ?? ''}',
+                      label: '${value['label'] ?? ''}',
+                      path: '${value['path'] ?? ''}',
+                      durationMs: (value['durationMs'] as num?)?.round() ?? 0,
+                      targetLayerIndex:
+                          (value['targetLayerIndex'] as num?)?.round() ?? -1,
+                      targetLayerName: '${value['targetLayerName'] ?? ''}',
+                    ),
+              ]
+            : const [],
+        durationMs: (decoded['durationMs'] as num?)?.round() ?? 0,
+        detectedBoxes: (decoded['detectedBoxes'] as num?)?.round() ?? 0,
+        analyzedBoxes: (decoded['analyzedBoxes'] as num?)?.round() ?? 0,
+        minimumMatchIou: (decoded['minimumMatchIou'] as num?)?.toDouble() ?? 0,
+        mode: '${decoded['mode'] ?? mode}',
+        smoothing: '${decoded['smoothing'] ?? smoothing}',
+        targetClassId:
+            (decoded['targetClassId'] as num?)?.round() ?? targetClassId,
+        targetClassName: '${decoded['targetClassName'] ?? ''}',
+        threshold: (decoded['threshold'] as num?)?.toDouble() ?? confThreshold,
       );
     } finally {
       bindings.allocator.free(requestPtr);
@@ -956,6 +1164,7 @@ class RustBackend {
         throw StateError('${decoded['error'] ?? 'Failed to read classes'}');
       }
       final classes = <AiModelClass>[];
+      final targetLayers = <CamTargetLayerOption>[];
       final rawClasses = decoded['classes'];
       if (rawClasses is List) {
         for (final item in rawClasses) {
@@ -969,9 +1178,24 @@ class RustBackend {
           }
         }
       }
+      final rawTargetLayers = decoded['targetLayers'];
+      if (rawTargetLayers is List) {
+        for (final item in rawTargetLayers) {
+          if (item is Map) {
+            targetLayers.add(
+              CamTargetLayerOption(
+                index: (item['index'] as num?)?.toInt() ?? targetLayers.length,
+                moduleIndex: (item['moduleIndex'] as num?)?.toInt() ?? -1,
+                name: '${item['name'] ?? 'P${targetLayers.length + 3}'}',
+              ),
+            );
+          }
+        }
+      }
       return AiModelClassesResult(
         task: '${decoded['task'] ?? 'detect'}',
         classes: classes,
+        targetLayers: targetLayers,
       );
     } finally {
       bindings.allocator.free(requestPtr);

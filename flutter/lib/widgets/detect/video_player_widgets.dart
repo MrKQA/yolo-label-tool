@@ -197,18 +197,18 @@ class VideoPlayerPanel extends StatelessWidget {
 
     return ValueListenableBuilder<video_player_win.WinVideoPlayerValue>(
       valueListenable: controller,
-      builder: (context, value, _) {
+      child: _ScaledVideoSurface(
+        controller: controller,
+        mode: session.scaleMode,
+      ),
+      builder: (context, value, videoSurface) {
         final initialized = value.isInitialized;
         return _VideoPlayerShell(
           session: session,
           value: value,
           fullscreen: fullscreen,
           child: initialized
-              ? _ScaledVideoSurface(
-                  controller: controller,
-                  value: value,
-                  mode: session.scaleMode,
-                )
+              ? videoSurface!
               : _VideoPlaceholder(loading: session.videoLoading),
         );
       },
@@ -217,20 +217,16 @@ class VideoPlayerPanel extends StatelessWidget {
 }
 
 class _ScaledVideoSurface extends StatelessWidget {
-  const _ScaledVideoSurface({
-    required this.controller,
-    required this.value,
-    required this.mode,
-  });
+  const _ScaledVideoSurface({required this.controller, required this.mode});
 
   final video_player_win.WinVideoPlayerController controller;
-  final video_player_win.WinVideoPlayerValue value;
   final VideoScaleMode mode;
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
+        final value = controller.value;
         final bounds = Size(constraints.maxWidth, constraints.maxHeight);
         if (bounds.width <= 0 ||
             bounds.height <= 0 ||

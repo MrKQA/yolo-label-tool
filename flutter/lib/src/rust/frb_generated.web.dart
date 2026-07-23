@@ -7,6 +7,7 @@
 // ignore_for_file: argument_type_not_assignable
 
 import 'api.dart';
+import 'api/cam_analysis_mod.dart';
 import 'api/collaboration_mod.dart';
 import 'api/detecting_mod.dart';
 import 'api/ini_python.dart';
@@ -37,13 +38,23 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool dco_decode_bool(dynamic raw);
 
   @protected
-  AiAnnotateBatchRequest dco_decode_box_autoadd_ai_annotate_batch_request(dynamic raw);
+  AiAnnotateBatchRequest dco_decode_box_autoadd_ai_annotate_batch_request(
+    dynamic raw,
+  );
 
   @protected
-  AiAnnotateImageRequest dco_decode_box_autoadd_ai_annotate_image_request(dynamic raw);
+  AiAnnotateImageRequest dco_decode_box_autoadd_ai_annotate_image_request(
+    dynamic raw,
+  );
+
+  @protected
+  CamAnalysisRequest dco_decode_box_autoadd_cam_analysis_request(dynamic raw);
 
   @protected
   DetectImageRequest dco_decode_box_autoadd_detect_image_request(dynamic raw);
+
+  @protected
+  DetectImagesRequest dco_decode_box_autoadd_detect_images_request(dynamic raw);
 
   @protected
   DetectVideoRequest dco_decode_box_autoadd_detect_video_request(dynamic raw);
@@ -58,10 +69,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   TrainingProgress dco_decode_box_autoadd_training_progress(dynamic raw);
 
   @protected
+  CamAnalysisRequest dco_decode_cam_analysis_request(dynamic raw);
+
+  @protected
   DecodedVideoFrame dco_decode_decoded_video_frame(dynamic raw);
 
   @protected
   DetectImageRequest dco_decode_detect_image_request(dynamic raw);
+
+  @protected
+  DetectImagesRequest dco_decode_detect_images_request(dynamic raw);
 
   @protected
   DetectModelTaskResult dco_decode_detect_model_task_result(dynamic raw);
@@ -77,6 +94,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   FrameExtractionResult dco_decode_frame_extraction_result(dynamic raw);
+
+  @protected
+  int dco_decode_i_32(dynamic raw);
 
   @protected
   List<String> dco_decode_list_String(dynamic raw);
@@ -124,10 +144,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String sse_decode_String(SseDeserializer deserializer);
 
   @protected
-  AiAnnotateBatchRequest sse_decode_ai_annotate_batch_request(SseDeserializer deserializer);
+  AiAnnotateBatchRequest sse_decode_ai_annotate_batch_request(
+    SseDeserializer deserializer,
+  );
 
   @protected
-  AiAnnotateImageRequest sse_decode_ai_annotate_image_request(SseDeserializer deserializer);
+  AiAnnotateImageRequest sse_decode_ai_annotate_image_request(
+    SseDeserializer deserializer,
+  );
 
   @protected
   bool sse_decode_bool(SseDeserializer deserializer);
@@ -143,40 +167,81 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  DetectImageRequest sse_decode_box_autoadd_detect_image_request(SseDeserializer deserializer);
+  CamAnalysisRequest sse_decode_box_autoadd_cam_analysis_request(
+    SseDeserializer deserializer,
+  );
 
   @protected
-  DetectVideoRequest sse_decode_box_autoadd_detect_video_request(SseDeserializer deserializer);
+  DetectImageRequest sse_decode_box_autoadd_detect_image_request(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  DetectImagesRequest sse_decode_box_autoadd_detect_images_request(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  DetectVideoRequest sse_decode_box_autoadd_detect_video_request(
+    SseDeserializer deserializer,
+  );
 
   @protected
   double sse_decode_box_autoadd_f_64(SseDeserializer deserializer);
 
   @protected
-  TrainingConfig sse_decode_box_autoadd_training_config(SseDeserializer deserializer);
+  TrainingConfig sse_decode_box_autoadd_training_config(
+    SseDeserializer deserializer,
+  );
 
   @protected
-  TrainingProgress sse_decode_box_autoadd_training_progress(SseDeserializer deserializer);
+  TrainingProgress sse_decode_box_autoadd_training_progress(
+    SseDeserializer deserializer,
+  );
 
   @protected
-  DecodedVideoFrame sse_decode_decoded_video_frame(SseDeserializer deserializer);
+  CamAnalysisRequest sse_decode_cam_analysis_request(
+    SseDeserializer deserializer,
+  );
 
   @protected
-  DetectImageRequest sse_decode_detect_image_request(SseDeserializer deserializer);
+  DecodedVideoFrame sse_decode_decoded_video_frame(
+    SseDeserializer deserializer,
+  );
 
   @protected
-  DetectModelTaskResult sse_decode_detect_model_task_result(SseDeserializer deserializer);
+  DetectImageRequest sse_decode_detect_image_request(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  DetectImagesRequest sse_decode_detect_images_request(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  DetectModelTaskResult sse_decode_detect_model_task_result(
+    SseDeserializer deserializer,
+  );
 
   @protected
   DetectResult sse_decode_detect_result(SseDeserializer deserializer);
 
   @protected
-  DetectVideoRequest sse_decode_detect_video_request(SseDeserializer deserializer);
+  DetectVideoRequest sse_decode_detect_video_request(
+    SseDeserializer deserializer,
+  );
 
   @protected
   double sse_decode_f_64(SseDeserializer deserializer);
 
   @protected
-  FrameExtractionResult sse_decode_frame_extraction_result(SseDeserializer deserializer);
+  FrameExtractionResult sse_decode_frame_extraction_result(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  int sse_decode_i_32(SseDeserializer deserializer);
 
   @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
@@ -191,10 +256,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   double? sse_decode_opt_box_autoadd_f_64(SseDeserializer deserializer);
 
   @protected
-  TrainingProgress? sse_decode_opt_box_autoadd_training_progress(SseDeserializer deserializer);
+  TrainingProgress? sse_decode_opt_box_autoadd_training_progress(
+    SseDeserializer deserializer,
+  );
 
   @protected
-  (String, String) sse_decode_record_string_string(SseDeserializer deserializer);
+  (String, String) sse_decode_record_string_string(
+    SseDeserializer deserializer,
+  );
 
   @protected
   TrainingConfig sse_decode_training_config(SseDeserializer deserializer);
@@ -218,19 +287,24 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BigInt sse_decode_usize(SseDeserializer deserializer);
 
   @protected
-  VideoPlaybackInfo sse_decode_video_playback_info(SseDeserializer deserializer);
-
-  @protected
-  int sse_decode_i_32(SseDeserializer deserializer);
+  VideoPlaybackInfo sse_decode_video_playback_info(
+    SseDeserializer deserializer,
+  );
 
   @protected
   void sse_encode_String(String self, SseSerializer serializer);
 
   @protected
-  void sse_encode_ai_annotate_batch_request(AiAnnotateBatchRequest self, SseSerializer serializer);
+  void sse_encode_ai_annotate_batch_request(
+    AiAnnotateBatchRequest self,
+    SseSerializer serializer,
+  );
 
   @protected
-  void sse_encode_ai_annotate_image_request(AiAnnotateImageRequest self, SseSerializer serializer);
+  void sse_encode_ai_annotate_image_request(
+    AiAnnotateImageRequest self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_bool(bool self, SseSerializer serializer);
@@ -248,8 +322,20 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_cam_analysis_request(
+    CamAnalysisRequest self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_detect_image_request(
     DetectImageRequest self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_detect_images_request(
+    DetectImagesRequest self,
     SseSerializer serializer,
   );
 
@@ -263,37 +349,76 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_box_autoadd_f_64(double self, SseSerializer serializer);
 
   @protected
-  void sse_encode_box_autoadd_training_config(TrainingConfig self, SseSerializer serializer);
+  void sse_encode_box_autoadd_training_config(
+    TrainingConfig self,
+    SseSerializer serializer,
+  );
 
   @protected
-  void sse_encode_box_autoadd_training_progress(TrainingProgress self, SseSerializer serializer);
+  void sse_encode_box_autoadd_training_progress(
+    TrainingProgress self,
+    SseSerializer serializer,
+  );
 
   @protected
-  void sse_encode_decoded_video_frame(DecodedVideoFrame self, SseSerializer serializer);
+  void sse_encode_cam_analysis_request(
+    CamAnalysisRequest self,
+    SseSerializer serializer,
+  );
 
   @protected
-  void sse_encode_detect_image_request(DetectImageRequest self, SseSerializer serializer);
+  void sse_encode_decoded_video_frame(
+    DecodedVideoFrame self,
+    SseSerializer serializer,
+  );
 
   @protected
-  void sse_encode_detect_model_task_result(DetectModelTaskResult self, SseSerializer serializer);
+  void sse_encode_detect_image_request(
+    DetectImageRequest self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_detect_images_request(
+    DetectImagesRequest self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_detect_model_task_result(
+    DetectModelTaskResult self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_detect_result(DetectResult self, SseSerializer serializer);
 
   @protected
-  void sse_encode_detect_video_request(DetectVideoRequest self, SseSerializer serializer);
+  void sse_encode_detect_video_request(
+    DetectVideoRequest self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_f_64(double self, SseSerializer serializer);
 
   @protected
-  void sse_encode_frame_extraction_result(FrameExtractionResult self, SseSerializer serializer);
+  void sse_encode_frame_extraction_result(
+    FrameExtractionResult self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_i_32(int self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
 
   @protected
-  void sse_encode_list_prim_u_8_strict(Uint8List self, SseSerializer serializer);
+  void sse_encode_list_prim_u_8_strict(
+    Uint8List self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
@@ -308,13 +433,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_record_string_string((String, String) self, SseSerializer serializer);
+  void sse_encode_record_string_string(
+    (String, String) self,
+    SseSerializer serializer,
+  );
 
   @protected
-  void sse_encode_training_config(TrainingConfig self, SseSerializer serializer);
+  void sse_encode_training_config(
+    TrainingConfig self,
+    SseSerializer serializer,
+  );
 
   @protected
-  void sse_encode_training_progress(TrainingProgress self, SseSerializer serializer);
+  void sse_encode_training_progress(
+    TrainingProgress self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_u_32(int self, SseSerializer serializer);
@@ -332,10 +466,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_usize(BigInt self, SseSerializer serializer);
 
   @protected
-  void sse_encode_video_playback_info(VideoPlaybackInfo self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_i_32(int self, SseSerializer serializer);
+  void sse_encode_video_playback_info(
+    VideoPlaybackInfo self,
+    SseSerializer serializer,
+  );
 }
 
 // Section: wire_class

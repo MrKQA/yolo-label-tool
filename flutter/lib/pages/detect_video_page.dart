@@ -32,9 +32,11 @@ import '../services/path_utils.dart';
 import '../services/python_environment.dart';
 import '../services/rust_backend.dart';
 import '../theme/theme_helpers.dart';
+import '../widgets/common/floating_message.dart';
 import '../widgets/detect/detect_panels.dart';
 import '../widgets/detect/detect_playback_surface.dart';
 import '../widgets/detect/detect_support.dart';
+import '../widgets/detect/cam_analysis_dialog.dart';
 import '../widgets/detect/video_player_widgets.dart';
 import '../widgets/train/train_runtime_support.dart';
 
@@ -335,6 +337,7 @@ class DetectVideoSession extends ChangeNotifier {
     _positionTimer = null;
     await oldController?.dispose();
 
+    video_player_win.WinVideoPlayerController? loadingController;
     try {
       String? metadataError;
       final metadataFuture = RustBackend.loadInfo(input)
@@ -347,6 +350,7 @@ class DetectVideoSession extends ChangeNotifier {
         File(input),
       );
       controller = nextController;
+      loadingController = nextController;
       _controllerPath = input;
       await nextController.initialize();
       if (_disposed || requestSerial != _loadSerial) {
@@ -380,6 +384,7 @@ class DetectVideoSession extends ChangeNotifier {
       );
       _emit();
     } on Object catch (error) {
+      await loadingController?.dispose();
       if (_disposed || requestSerial != _loadSerial) {
         return;
       }
@@ -838,14 +843,7 @@ class VideoShortcutHud {
   final bool hold;
 }
 
-enum VideoScaleMode {
-  auto,
-  ratio4x3,
-  ratio16x9,
-  fitWidth,
-  fitHeight,
-  original,
-}
+enum VideoScaleMode { auto, ratio4x3, ratio16x9, fitWidth, fitHeight, original }
 
 extension VideoScaleModeLabel on VideoScaleMode {
   String get labelKey => switch (this) {
@@ -885,6 +883,11 @@ class DetectVideoPageState extends State<DetectVideoPage> {
   Timer? _previewHideTimer;
   Timer? _parameterHideTimer;
   bool _parameterPanelVisible = true;
+  bool _analyzingCam = false;
+  String? _camClassesModelPath;
+  String _camModelTask = 'detect';
+  List<AiModelClass> _camModelClasses = const [];
+  List<CamTargetLayerOption> _camTargetLayers = const [];
 
   DetectVideoSession get _session => widget.session;
 
@@ -1032,6 +1035,289 @@ class DetectVideoPageState extends State<DetectVideoPage> {
     await _runDetection(save: true, allImages: true);
   }
 
+  Future<void> _handlePredictAll() async {
+    await _runDetection(save: false, allImages: true);
+  }
+
+  Future<void> _handleCamAnalysis() async {
+    if (_session.predicting || _analyzingCam) {
+      return;
+    }
+    final input = _session.selectedInput;
+    if (input == null || (!isImagePath(input) && !isVideoPath(input))) {
+      _showDetectMessage(t('detect.camNoInput'));
+      return;
+    }
+    final pythonPath = widget.settings.pythonPath.trim();
+    if (resolvePythonExecutable(pythonPath) == null) {
+      _showDetectMessage(t('detect.pythonNotConfigured'));
+      return;
+    }
+    await _ensureDetectModel();
+    final modelPath = _session.detectModelPath;
+    if (modelPath == null) {
+      return;
+    }
+    if (!modelPath.toLowerCase().endsWith('.pt')) {
+      _showDetectMessage(t('detect.camRequiresPt'));
+      return;
+    }
+
+    final hasCachedModelInfo =
+        pathKey(_camClassesModelPath ?? '') == pathKey(modelPath);
+    final initialModelInfo = hasCachedModelInfo
+        ? AiModelClassesResult(
+            task: _camModelTask,
+            classes: _camModelClasses,
+            targetLayers: _camTargetLayers,
+          )
+        : null;
+    final modelInfo = hasCachedModelInfo
+        ? null
+        : _loadCamModelInfo(pythonPath: pythonPath, modelPath: modelPath);
+    if (!mounted) {
+      return;
+    }
+    await showCamAnalysisDialog(
+      context,
+      initialModelInfo: initialModelInfo,
+      modelInfo: modelInfo,
+      initialThreshold: _session.detectConf,
+      onAnalyze: (options) => _runCamAnalysisRequest(
+        input: input,
+        pythonPath: pythonPath,
+        modelPath: modelPath,
+        options: options,
+      ),
+    );
+  }
+
+  Future<CamAnalysisResult> _runCamAnalysisRequest({
+    required String input,
+    required String pythonPath,
+    required String modelPath,
+    required CamAnalysisOptions options,
+  }) async {
+    if (_analyzingCam) {
+      throw StateError(t('detect.camRunning'));
+    }
+    setState(() => _analyzingCam = true);
+    _session.videoStatus = t('detect.camRunning');
+    _session._emit();
+    String? temporaryFramePath;
+    try {
+      final camRoot = Directory(
+        joinPath(
+          joinPath(_detectPreviewDirectory(), 'cam_analysis'),
+          _pathHash(input),
+        ),
+      );
+      camRoot.createSync(recursive: true);
+      final outputDir = Directory(
+        joinPath(camRoot.path, 'run_${DateTime.now().microsecondsSinceEpoch}'),
+      );
+      outputDir.createSync(recursive: true);
+
+      var analysisInput = input;
+      if (isVideoPath(input)) {
+        final frameBytes = await RustBackend.decodeFrame(
+          videoPath: input,
+          timestampSeconds: _session.positionSeconds,
+          maxWidth: 2048,
+        );
+        if (frameBytes.isEmpty) {
+          throw StateError(t('detect.camFrameFailed'));
+        }
+        temporaryFramePath = joinPath(outputDir.path, '_video_frame.png');
+        await File(temporaryFramePath).writeAsBytes(frameBytes, flush: true);
+        analysisInput = temporaryFramePath;
+      }
+
+      final device = _detectDeviceArgument(_selectedDetectDeviceValue);
+      logApp(
+        'CAM',
+        'CAM analysis started: input=$input, model=$modelPath, '
+            'device=$device, imgsz=${_session.detectImageSize}, '
+            'mode=${options.mode}, smoothing=${options.smoothing}, '
+            'targetLayers=auto+separate, '
+            'classId=${options.targetClassId}, '
+            'threshold=${options.threshold.toStringAsFixed(2)}',
+      );
+      final result = await RustBackend.analyzeCam(
+        pythonPath: pythonPath,
+        modelPath: modelPath,
+        inputPath: analysisInput,
+        outputDir: outputDir.path,
+        confThreshold: options.threshold,
+        iouThreshold: 0.45,
+        imgsz: _session.detectImageSize,
+        device: device,
+        mode: options.mode,
+        smoothing: options.smoothing,
+        targetLayerIndex: -3,
+        targetClassId: options.targetClassId,
+      );
+      final expectedOutputCount = result.targetLayerIndex == -3
+          ? 1 + (result.availableTargetLayers.length + 1) * 5
+          : 6;
+      if (result.outputs.length != expectedOutputCount) {
+        throw StateError(t('detect.camNoResults'));
+      }
+      logApp(
+        'CAM',
+        'CAM analysis completed: family=${result.family}, task=${result.task}, '
+            'device=${result.device}, durationMs=${result.durationMs}, '
+            'mode=${result.mode}, smoothing=${result.smoothing}, '
+            'targetLayer=${result.targetLayerIndex}, '
+            'classId=${result.targetClassId}, threshold=${result.threshold}, '
+            'layers=${result.targetLayers.join(' | ')}',
+      );
+      _session.videoStatus = t('detect.camDone');
+      _session._emit();
+      _pruneCamAnalysisRuns(camRoot, keep: 3);
+      return result;
+    } on Object catch (error) {
+      final detail = '$error';
+      final gradCamMissing = _isGradCamDependencyMissing(detail);
+      final noPredictions = _isCamNoPredictions(detail);
+      var failure = 'runtime';
+      if (gradCamMissing) {
+        failure = 'grad_cam_dependency';
+      } else if (noPredictions) {
+        failure = 'no_predictions';
+      }
+      logApp(
+        'CAM',
+        'CAM analysis failed: failure=$failure',
+        level: AppLogLevel.error,
+      );
+      logAppMultiline(
+        'CAM',
+        detail,
+        level: AppLogLevel.error,
+        prefix: 'detail: ',
+      );
+      _session.videoStatus = '${t('detect.camFailed')}: $error';
+      _session._emit();
+      if (gradCamMissing) {
+        final message = t('detect.camGradCamMissing');
+        _session.videoStatus = message;
+        _session._emit();
+        _showCamFloatingMessage(message);
+        throw StateError(message);
+      }
+      if (noPredictions) {
+        final message = t('detect.camNoPredictions');
+        _session.videoStatus = message;
+        _session._emit();
+        _showCamFloatingMessage(message);
+        throw StateError(message);
+      }
+      rethrow;
+    } finally {
+      if (temporaryFramePath != null) {
+        try {
+          final file = File(temporaryFramePath);
+          if (file.existsSync()) {
+            file.deleteSync();
+          }
+        } on Object {
+          // The temporary source frame is bounded and will be replaced next run.
+        }
+      }
+      if (mounted) {
+        setState(() => _analyzingCam = false);
+      }
+    }
+  }
+
+  void _pruneCamAnalysisRuns(Directory root, {required int keep}) {
+    try {
+      final directories =
+          root
+              .listSync(followLinks: false)
+              .whereType<Directory>()
+              .toList(growable: false)
+            ..sort((left, right) => right.path.compareTo(left.path));
+      for (final directory in directories.skip(keep)) {
+        directory.deleteSync(recursive: true);
+      }
+    } on Object catch (error) {
+      logApp(
+        'CAM',
+        'CAM preview cleanup failed: $error',
+        level: AppLogLevel.warning,
+      );
+    }
+  }
+
+  bool _isGradCamDependencyMissing(String detail) {
+    final normalized = detail.toLowerCase();
+    return normalized.contains("no module named 'pytorch_grad_cam'") ||
+        normalized.contains('no module named "pytorch_grad_cam"') ||
+        normalized.contains('pip install grad-cam') ||
+        normalized.contains('grad-cam dependency import failed');
+  }
+
+  bool _isCamNoPredictions(String detail) {
+    return detail.toLowerCase().contains(
+      'no predictions met confidence threshold',
+    );
+  }
+
+  Future<AiModelClassesResult> _loadCamModelInfo({
+    required String pythonPath,
+    required String modelPath,
+  }) async {
+    try {
+      final info = await RustBackend.aiModelClasses(
+        pythonPath: pythonPath,
+        modelPath: modelPath,
+      );
+      _camClassesModelPath = modelPath;
+      _camModelTask = info.task;
+      _camModelClasses = info.classes;
+      _camTargetLayers = info.targetLayers;
+      logApp(
+        'CAM',
+        'CAM model info loaded: task=${info.task}, '
+            'classes=${info.classes.length}, '
+            'layers=${info.targetLayers.map((item) => item.name).join(' | ')}',
+      );
+      return info;
+    } on Object catch (error) {
+      logApp('CAM', 'CAM model info failed', level: AppLogLevel.error);
+      logAppMultiline(
+        'CAM',
+        '$error',
+        level: AppLogLevel.error,
+        prefix: 'detail: ',
+      );
+      rethrow;
+    }
+  }
+
+  void _showCamFloatingMessage(String message) {
+    if (!mounted) {
+      return;
+    }
+    final overlay = Overlay.of(context, rootOverlay: true);
+    late final OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (_) =>
+          FloatingMessage(message: message, duration: appNoticeDisplayDuration),
+    );
+    overlay.insert(entry);
+    Future<void>.delayed(
+      appNoticeDisplayDuration + const Duration(milliseconds: 80),
+      () {
+        if (entry.mounted) {
+          entry.remove();
+        }
+      },
+    );
+  }
+
   Future<void> _runDetection({
     required bool save,
     int startFrame = 0,
@@ -1112,6 +1398,57 @@ class DetectVideoPageState extends State<DetectVideoPage> {
         'DETECT',
         'Detection started: save=$save, currentOnly=$currentOnly, allImages=$allImages, targets=${targets.length}, model=${fileName(modelPath)}, device=$deviceArgument, deviceSelection=${_session.detectDevice}, imgsz=${_session.detectImageSize}, conf=${_session.detectConf.toStringAsFixed(2)}, outputDir=$outputDir, startFrame=$startFrame',
       );
+      if (allImages && targets.every(isImagePath)) {
+        final batchResult = await RustBackend.detectImages(
+          pythonPath: pythonPath,
+          modelPath: modelPath,
+          inputPaths: targets,
+          outputNames: [
+            for (final target in targets) _detectOutputName(target, save: save),
+          ],
+          outputDir: outputDir,
+          confThreshold: _session.detectConf,
+          iouThreshold: 0.45,
+          imgsz: _session.detectImageSize,
+          device: deviceArgument,
+        );
+        if (batchResult.items.length != targets.length) {
+          throw StateError(
+            'Batch prediction returned ${batchResult.items.length} '
+            'results for ${targets.length} images',
+          );
+        }
+        for (final item in batchResult.items) {
+          _session.cachePredictionOutputForInput(
+            item.inputPath,
+            item.outputPath,
+          );
+        }
+        final selectedKey = pathKey(_session.selectedInput ?? '');
+        BatchDetectItem? selectedResult;
+        for (final item in batchResult.items) {
+          if (pathKey(item.inputPath) == selectedKey) {
+            selectedResult = item;
+            break;
+          }
+        }
+        if (selectedResult != null) {
+          _session.predictVideo = false;
+          _session.showPredictionResult = true;
+          await _session.setPredictionOutput(selectedResult.outputPath);
+        }
+        _session.videoStatus =
+            '${save ? t('detect.saveDone') : t('detect.detectDone')} '
+            '${targets.length}/${targets.length} '
+            '(${t('detect.detectCount')}: ${batchResult.labelCount})';
+        logApp(
+          'DETECT',
+          'Batch detection completed: save=$save, targets=${targets.length}, '
+              'labels=${batchResult.labelCount}, device=${batchResult.device}',
+        );
+        _showDetectMessage(_session.videoStatus!);
+        return;
+      }
       for (final target in targets) {
         if (!mounted) {
           return;
@@ -1151,8 +1488,7 @@ class DetectVideoPageState extends State<DetectVideoPage> {
           cancelPath: cancelPath,
           startFrame: previewVideo ? startFrame : 0,
         );
-        if (pathKey(_activePredictionCancelPath ?? '') ==
-            pathKey(cancelPath)) {
+        if (pathKey(_activePredictionCancelPath ?? '') == pathKey(cancelPath)) {
           _activePredictionCancelPath = null;
         }
         if (!mounted) {
@@ -1553,7 +1889,8 @@ class DetectVideoPageState extends State<DetectVideoPage> {
     final intelDeviceLabel = hasOpenVinoDevice
         ? 'Intel OpenVINO | ${_openVinoInfo.displayDevices}'
         : t('detect.deviceIntelUnavailable');
-    final autoFallbackLabel = _nvidiaDeviceOptions.firstOrNullValue?.label ??
+    final autoFallbackLabel =
+        _nvidiaDeviceOptions.firstOrNullValue?.label ??
         (hasOpenVinoDevice ? intelDeviceLabel : _autoFallbackDeviceLabel);
     final autoDeviceLabel =
         '${t('detect.deviceAuto')} | ${friendlyDeviceLabel(autoFallbackLabel)}';
@@ -1693,10 +2030,13 @@ class DetectVideoPageState extends State<DetectVideoPage> {
                         hasNvidiaDevice: hasNvidiaDevice,
                         intelDeviceLabel: intelDeviceLabel,
                         hasOpenVinoDevice: hasOpenVinoDevice,
+                        analyzingCam: _analyzingCam,
                         onChooseModel: () => unawaited(_chooseDetectModel()),
                         onResetEffect: () =>
                             unawaited(_resetPredictionEffect()),
                         onPredict: () => unawaited(_handlePredictButton()),
+                        onPredictAll: () => unawaited(_handlePredictAll()),
+                        onAnalyzeCam: () => unawaited(_handleCamAnalysis()),
                         onSaveCurrent: () => unawaited(_handleSaveCurrent()),
                         onSaveAll: () => unawaited(_handleSaveAll()),
                         onToggleResult: () =>
@@ -1726,4 +2066,3 @@ class DetectVideoPageState extends State<DetectVideoPage> {
     );
   }
 }
-

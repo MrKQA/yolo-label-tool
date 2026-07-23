@@ -96,9 +96,12 @@ class DetectParameterPanel extends StatelessWidget {
     required this.hasNvidiaDevice,
     required this.intelDeviceLabel,
     required this.hasOpenVinoDevice,
+    required this.analyzingCam,
     required this.onChooseModel,
     required this.onResetEffect,
     required this.onPredict,
+    required this.onPredictAll,
+    required this.onAnalyzeCam,
     required this.onSaveCurrent,
     required this.onSaveAll,
     required this.onToggleResult,
@@ -115,9 +118,12 @@ class DetectParameterPanel extends StatelessWidget {
   final bool hasNvidiaDevice;
   final String intelDeviceLabel;
   final bool hasOpenVinoDevice;
+  final bool analyzingCam;
   final VoidCallback onChooseModel;
   final VoidCallback onResetEffect;
   final VoidCallback onPredict;
+  final VoidCallback onPredictAll;
+  final VoidCallback onAnalyzeCam;
   final VoidCallback onSaveCurrent;
   final VoidCallback onSaveAll;
   final VoidCallback onToggleResult;
@@ -128,7 +134,10 @@ class DetectParameterPanel extends StatelessWidget {
   bool get _hasFolderImageTargets => session.folderItems.any(isImagePath);
 
   bool get _canRunCurrent =>
-      !session.predicting && session.selectedInput != null;
+      !session.predicting && !analyzingCam && session.selectedInput != null;
+
+  bool get _hasPtModel =>
+      session.detectModelPath?.toLowerCase().endsWith('.pt') == true;
 
   @override
   Widget build(BuildContext context) {
@@ -155,7 +164,9 @@ class DetectParameterPanel extends StatelessWidget {
                         message: selectedModel ?? t('detect.chooseModel'),
                         waitDuration: const Duration(milliseconds: 500),
                         child: OutlinedButton.icon(
-                          onPressed: session.predicting ? null : onChooseModel,
+                          onPressed: session.predicting || analyzingCam
+                              ? null
+                              : onChooseModel,
                           icon: const Icon(Icons.folder_open, size: 16),
                           label: Text(
                             selectedModel == null
@@ -170,7 +181,9 @@ class DetectParameterPanel extends StatelessWidget {
                     if (selectedModel != null) ...[
                       const SizedBox(width: 8),
                       OutlinedButton.icon(
-                        onPressed: session.predicting ? null : onResetEffect,
+                        onPressed: session.predicting || analyzingCam
+                            ? null
+                            : onResetEffect,
                         icon: const Icon(Icons.restart_alt, size: 16),
                         label: Text(t('detect.resetEffect')),
                       ),
@@ -184,14 +197,16 @@ class DetectParameterPanel extends StatelessWidget {
                   dense: true,
                   title: Text(t('detect.playVideo')),
                   value: session.playVideo,
-                  onChanged: session.predicting
+                  onChanged: session.predicting || analyzingCam
                       ? null
                       : (value) => unawaited(session.setPlayMode(value)),
                 ),
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(
-                    onPressed: session.predicting ? null : onPredict,
+                    onPressed: session.predicting || analyzingCam
+                        ? null
+                        : onPredict,
                     icon: session.predicting
                         ? const SizedBox(
                             width: 16,
@@ -212,6 +227,20 @@ class DetectParameterPanel extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed:
+                        !session.predicting &&
+                            !analyzingCam &&
+                            _hasFolderImageTargets
+                        ? onPredictAll
+                        : null,
+                    icon: const Icon(Icons.auto_awesome_motion, size: 16),
+                    label: Text(t('detect.predictAll')),
+                  ),
+                ),
+                const SizedBox(height: 8),
                 Row(
                   children: [
                     Expanded(
@@ -224,7 +253,10 @@ class DetectParameterPanel extends StatelessWidget {
                     const SizedBox(width: 8),
                     Expanded(
                       child: OutlinedButton.icon(
-                        onPressed: !session.predicting && _hasFolderImageTargets
+                        onPressed:
+                            !session.predicting &&
+                                !analyzingCam &&
+                                _hasFolderImageTargets
                             ? onSaveAll
                             : null,
                         icon: const Icon(Icons.library_add_check, size: 16),
@@ -233,12 +265,33 @@ class DetectParameterPanel extends StatelessWidget {
                     ),
                   ],
                 ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _canRunCurrent && _hasPtModel
+                        ? onAnalyzeCam
+                        : null,
+                    icon: analyzingCam
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.analytics_outlined, size: 16),
+                    label: Text(
+                      analyzingCam
+                          ? t('detect.camRunning')
+                          : t('detect.analyzeCam'),
+                    ),
+                  ),
+                ),
                 if (hasPrediction) ...[
                   const SizedBox(height: 8),
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton.icon(
-                      onPressed: onToggleResult,
+                      onPressed: analyzingCam ? null : onToggleResult,
                       icon: const Icon(Icons.compare, size: 16),
                       label: Text(
                         session.showPredictionResult
@@ -252,7 +305,7 @@ class DetectParameterPanel extends StatelessWidget {
                 ParameterSectionTitle(title: t('detect.inferenceParams')),
                 ImageSizeParameterEditor(
                   value: session.detectImageSize.toDouble(),
-                  enabled: !session.predicting,
+                  enabled: !session.predicting && !analyzingCam,
                   onChanged: (value) => onImageSizeChanged(value.round()),
                 ),
                 const SizedBox(height: 10),
@@ -274,7 +327,7 @@ class DetectParameterPanel extends StatelessWidget {
                           max: 1.0,
                           divisions: 99,
                           label: session.detectConf.toStringAsFixed(2),
-                          enabled: !session.predicting,
+                          enabled: !session.predicting && !analyzingCam,
                           onChanged: onConfChanged,
                         ),
                       ],
@@ -303,14 +356,17 @@ class DetectParameterPanel extends StatelessWidget {
                               value: 'auto',
                               label: autoDeviceLabel,
                               selected: deviceValue == 'auto',
-                              enabled: !session.predicting,
+                              enabled: !session.predicting && !analyzingCam,
                               onSelected: onDeviceChanged,
                             ),
                             _DetectDeviceChip(
                               value: 'nv',
                               label: nvidiaDeviceLabel,
                               selected: deviceValue == 'nv',
-                              enabled: !session.predicting && hasNvidiaDevice,
+                              enabled:
+                                  !session.predicting &&
+                                  !analyzingCam &&
+                                  hasNvidiaDevice,
                               onSelected: onDeviceChanged,
                             ),
                             _DetectDeviceChip(
@@ -318,14 +374,16 @@ class DetectParameterPanel extends StatelessWidget {
                               label: intelDeviceLabel,
                               selected: deviceValue == 'intel',
                               enabled:
-                                  !session.predicting && hasOpenVinoDevice,
+                                  !session.predicting &&
+                                  !analyzingCam &&
+                                  hasOpenVinoDevice,
                               onSelected: onDeviceChanged,
                             ),
                             _DetectDeviceChip(
                               value: 'cpu',
                               label: t('detect.deviceCpu'),
                               selected: deviceValue == 'cpu',
-                              enabled: !session.predicting,
+                              enabled: !session.predicting && !analyzingCam,
                               onSelected: onDeviceChanged,
                             ),
                           ],

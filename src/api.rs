@@ -17,6 +17,9 @@ pub mod ini_python;
 #[path = "detecting.rs"]
 pub mod detecting_mod;
 
+#[path = "cam_analysis.rs"]
+pub mod cam_analysis_mod;
+
 #[path = "database.rs"]
 pub mod database_mod;
 
@@ -203,6 +206,19 @@ pub unsafe extern "C" fn rust_label_detect_json(
     vec_into_ffi_buffer(result.into_bytes())
 }
 
+/// C ABI: run YOLO detection for multiple images in one Python process.
+#[frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn rust_label_detect_images_json(
+    request_ptr: *const u8,
+    request_len: usize,
+) -> RustLabelByteBuffer {
+    let result = string_from_ffi(request_ptr, request_len)
+        .and_then(|request| detect_images_from_json_request(&request))
+        .unwrap_or_else(error_json);
+    vec_into_ffi_buffer(result.into_bytes())
+}
+
 /// C ABI: inspect a YOLO model and return its `model.task`.
 #[frb(ignore)]
 #[no_mangle]
@@ -213,6 +229,19 @@ pub unsafe extern "C" fn rust_label_detect_model_task_json(
     let result = string_from_ffi(request_ptr, request_len)
         .and_then(|request| detect_model_task_from_json_request(&request))
         .map(detect_model_task_result_json)
+        .unwrap_or_else(error_json);
+    vec_into_ffi_buffer(result.into_bytes())
+}
+
+/// C ABI: generate CAM analysis previews for one image using a PyTorch YOLO model.
+#[frb(ignore)]
+#[no_mangle]
+pub unsafe extern "C" fn rust_label_analyze_cam_json(
+    request_ptr: *const u8,
+    request_len: usize,
+) -> RustLabelByteBuffer {
+    let result = string_from_ffi(request_ptr, request_len)
+        .and_then(|request| cam_analysis_from_json_request(&request))
         .unwrap_or_else(error_json);
     vec_into_ffi_buffer(result.into_bytes())
 }
@@ -1268,6 +1297,28 @@ fn detect_model_task_from_json_request(
     Ok(detecting_mod::detect_model_task(&python_path, &model_path))
 }
 
+fn cam_analysis_from_json_request(request: &str) -> Result<String, String> {
+    let req = cam_analysis_mod::CamAnalysisRequest {
+        python_path: required_json_string(request, "pythonPath")?,
+        model_path: required_json_string(request, "modelPath")?,
+        input_path: required_json_string(request, "inputPath")?,
+        output_dir: required_json_string(request, "outputDir")?,
+        conf_threshold: json_f64_field(request, "confThreshold").unwrap_or(0.25),
+        iou_threshold: json_f64_field(request, "iouThreshold").unwrap_or(0.45),
+        imgsz: json_u32_field(request, "imgsz").unwrap_or(640),
+        device: json_string_field(request, "device").unwrap_or_else(|| "auto".to_string()),
+        mode: json_string_field(request, "mode").unwrap_or_else(|| "bbox".to_string()),
+        smoothing: json_string_field(request, "smoothing").unwrap_or_else(|| "none".to_string()),
+        target_layer_index: json_f64_field(request, "targetLayerIndex")
+            .map(|value| value.round() as i32)
+            .unwrap_or(-1),
+        target_class_id: json_f64_field(request, "targetClassId")
+            .map(|value| value.round() as i32)
+            .unwrap_or(-1),
+    };
+    cam_analysis_mod::analyze_cam(&req)
+}
+
 fn ai_model_classes_from_json_request(request: &str) -> Result<String, String> {
     let python_path = required_json_string(request, "pythonPath")?;
     let model_path = required_json_string(request, "modelPath")?;
@@ -1502,6 +1553,21 @@ fn detect_from_json_request(request: &str) -> Result<detecting_mod::DetectResult
     }
 }
 
+fn detect_images_from_json_request(request: &str) -> Result<String, String> {
+    let req = detecting_mod::DetectImagesRequest {
+        python_path: required_json_string(request, "pythonPath")?,
+        model_path: required_json_string(request, "modelPath")?,
+        input_paths_text: required_json_string(request, "inputPathsText")?,
+        output_names_text: required_json_string(request, "outputNamesText")?,
+        output_dir: required_json_string(request, "outputDir")?,
+        conf_threshold: json_f64_field(request, "confThreshold").unwrap_or(0.25),
+        iou_threshold: json_f64_field(request, "iouThreshold").unwrap_or(0.45),
+        imgsz: json_u32_field(request, "imgsz").unwrap_or(640),
+        device: json_string_field(request, "device").unwrap_or_else(|| "auto".to_string()),
+    };
+    detecting_mod::detect_images_json(&req)
+}
+
 fn required_json_string(request: &str, key: &str) -> Result<String, String> {
     json_string_field(request, key)
         .filter(|value| !value.trim().is_empty())
@@ -1690,6 +1756,7 @@ fn jpeg_quality_to_qscale(image_quality: u8) -> String {
 pub fn start_yolo_training(
     python_path: String,
     model_path: String,
+    architecture_variant: String,
     data_yaml_path: String,
     project_dir: String,
     experiment_name: String,
@@ -1726,6 +1793,7 @@ pub fn start_yolo_training(
     let config = TrainingConfig {
         python_path,
         model_path,
+        architecture_variant,
         data_yaml_path,
         project_dir,
         experiment_name,

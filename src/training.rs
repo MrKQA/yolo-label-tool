@@ -23,6 +23,8 @@ static ACTIVE_CHILD_PID: Lazy<Mutex<Option<u32>>> = Lazy::new(|| Mutex::new(None
 
 const TRAINING_SUBPROCESS_CODE: &str = r#"
 import os
+import pathlib
+import re
 import sys
 
 _rustlabel_dll_handles = []
@@ -109,6 +111,89 @@ def _rustlabel_configure_multiprocessing(worker_python_path):
     except Exception as error:
         print(f"[rustlabel] configure multiprocessing executable failed: {error}", flush=True)
 
+def _rustlabel_available_architectures(ultralytics_module, variant):
+    try:
+        config_root = pathlib.Path(ultralytics_module.__file__).resolve().parent / "cfg" / "models"
+        return sorted(
+            str(path.relative_to(config_root)).replace("\\", "/")
+            for path in config_root.rglob(f"*-{variant}.yaml")
+        )
+    except Exception:
+        return []
+
+def _rustlabel_architecture_model(source_model, variant, ultralytics_module, yolo_type):
+    selected = str(variant or "standard").strip().lower()
+    if selected == "standard" or resume:
+        if resume and selected != "standard":
+            print(
+                f"[rustlabel] architecture={selected} ignored because resume uses checkpoint architecture",
+                flush=True,
+            )
+        return source_model
+    if selected not in ("p2", "p6"):
+        raise RuntimeError(f"Unsupported architecture variant: {selected}")
+
+    core_model = getattr(source_model, "model", None)
+    yaml_config = getattr(core_model, "yaml", {}) or {}
+    yaml_file = os.path.basename(str(yaml_config.get("yaml_file", "") or ""))
+    source_task = str(getattr(source_model, "task", "") or "unknown")
+    if not yaml_file:
+        raise RuntimeError(
+            "The selected PT checkpoint does not expose model.yaml_file; "
+            f"cannot derive a {selected.upper()} architecture"
+        )
+
+    source_stem = pathlib.Path(yaml_file).stem
+    family_match = re.match(r"^yolo(?:v)?(\d+)", source_stem, flags=re.IGNORECASE)
+    if family_match is None or int(family_match.group(1)) < 8:
+        raise RuntimeError(
+            f"{selected.upper()} selection requires a YOLOv8 or newer checkpoint; "
+            f"source config={yaml_file}, task={source_task}"
+        )
+
+    current_variant = re.search(r"-(p2|p6)$", source_stem, flags=re.IGNORECASE)
+    if current_variant is not None and current_variant.group(1).lower() == selected:
+        print(
+            f"[rustlabel] selected checkpoint already uses {selected.upper()}: {yaml_file}",
+            flush=True,
+        )
+        return source_model
+
+    standard_stem = re.sub(
+        r"-(p2|p6)$", "", source_stem, flags=re.IGNORECASE
+    )
+    candidate = f"{standard_stem}-{selected}.yaml"
+    available = _rustlabel_available_architectures(ultralytics_module, selected)
+    print(
+        f"[rustlabel] architecture source={yaml_file}, task={source_task}, "
+        f"variant={selected}, candidate={candidate}",
+        flush=True,
+    )
+    try:
+        variant_model = yolo_type(candidate)
+    except Exception as error:
+        available_text = ", ".join(available) if available else "none"
+        raise RuntimeError(
+            f"Ultralytics {getattr(ultralytics_module, '__version__', 'unknown')} "
+            f"does not provide {candidate} for task={source_task}. "
+            f"Available {selected.upper()} configs: {available_text}. "
+            f"Original error: {type(error).__name__}: {error}"
+        ) from error
+
+    variant_task = str(getattr(variant_model, "task", "") or "unknown")
+    if source_task != "unknown" and variant_task != source_task:
+        raise RuntimeError(
+            f"Architecture task mismatch: source={source_task}, "
+            f"candidate={candidate} ({variant_task})"
+        )
+    print(
+        f"[rustlabel] loading compatible weights from {model_path} into {candidate}",
+        flush=True,
+    )
+    variant_model.load(model_path)
+    print(f"[rustlabel] architecture model ready: {candidate}", flush=True)
+    return variant_model
+
 def _rustlabel_main():
     python_exe_dir, python_root, worker_python_path = _rustlabel_configure_environment()
     _rustlabel_configure_multiprocessing(worker_python_path)
@@ -118,6 +203,7 @@ def _rustlabel_main():
     print(f"[rustlabel] worker_python_path={worker_python_path}", flush=True)
     print(f"[rustlabel] python_root={python_root}", flush=True)
     print(f"[rustlabel] model_path={model_path}", flush=True)
+    print(f"[rustlabel] architecture_variant={architecture_variant}", flush=True)
     print(f"[rustlabel] data_yaml_path={data_yaml_path}", flush=True)
     print(f"[rustlabel] project_dir={project_dir}", flush=True)
     print(f"[rustlabel] experiment_name={experiment_name}", flush=True)
@@ -128,11 +214,15 @@ def _rustlabel_main():
     )
 
     print("[rustlabel] importing ultralytics.YOLO", flush=True)
+    import ultralytics
     from ultralytics import YOLO
     print("[rustlabel] ultralytics import complete", flush=True)
 
-    print("[rustlabel] loading model", flush=True)
-    model = YOLO(model_path)
+    print("[rustlabel] loading source model", flush=True)
+    source_model = YOLO(model_path)
+    model = _rustlabel_architecture_model(
+        source_model, architecture_variant, ultralytics, YOLO
+    )
     print("[rustlabel] model loaded", flush=True)
     try:
         model.add_callback("on_train_start", _rustlabel_stop_callback)
@@ -196,6 +286,7 @@ if __name__ == "__main__":
 pub struct TrainingConfig {
     pub python_path: String,
     pub model_path: String,
+    pub architecture_variant: String,
     pub data_yaml_path: String,
     pub project_dir: String,
     pub experiment_name: String,
@@ -253,10 +344,24 @@ pub fn start_training(mut config: TrainingConfig) -> Result<String, String> {
     }
 
     config.python_path = ini_python::verify_python_path(&config.python_path)?;
+    config.architecture_variant = config.architecture_variant.trim().to_ascii_lowercase();
+    if !matches!(
+        config.architecture_variant.as_str(),
+        "standard" | "p2" | "p6"
+    ) {
+        return Err(format!(
+            "Unsupported training architecture variant: {}",
+            config.architecture_variant
+        ));
+    }
     let log_path = training_log_path()?;
     append_log_line(&log_path, "training start requested");
     append_log_line(&log_path, &format!("python_path={}", config.python_path));
     append_log_line(&log_path, &format!("model_path={}", config.model_path));
+    append_log_line(
+        &log_path,
+        &format!("architecture_variant={}", config.architecture_variant),
+    );
     append_log_line(
         &log_path,
         &format!("data_yaml_path={}", config.data_yaml_path),
@@ -656,6 +761,7 @@ fn training_code_with_locals(config: &TrainingConfig, stop_file: &Path, log_path
         concat!(
             "python_path = {}\n",
             "model_path = {}\n",
+            "architecture_variant = {}\n",
             "data_yaml_path = {}\n",
             "project_dir = {}\n",
             "experiment_name = {}\n",
@@ -694,6 +800,7 @@ fn training_code_with_locals(config: &TrainingConfig, stop_file: &Path, log_path
         ),
         python_string_literal(&config.python_path),
         python_string_literal(&config.model_path),
+        python_string_literal(&config.architecture_variant),
         python_string_literal(&config.data_yaml_path),
         python_string_literal(&config.project_dir),
         python_string_literal(&config.experiment_name),

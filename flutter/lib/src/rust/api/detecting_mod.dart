@@ -6,8 +6,8 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `detect_video_frames`, `model_task_to_folder`, `parse_json_string`, `parse_json_u32`, `parse_label_count`, `parse_u32_field`, `python_string_list_literal`, `python_string_literal`, `register_python_child`, `run_python_script`, `terminate_process_tree`, `unix_millis_now`, `unregister_python_child`, `verify_python`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `ai_annotate_sam3_image_json`, `ai_annotate_sam3_images_json`, `classify_python_error`, `detect_video_frames`, `extract_json_from_python_stdout`, `model_task_to_folder`, `parse_json_string`, `parse_json_u32`, `parse_label_count`, `parse_u32_field`, `python_string_list_literal`, `python_string_literal`, `register_python_child`, `run_python_json_script`, `run_python_script`, `sam3_script`, `terminate_process_tree`, `unix_millis_now`, `unregister_python_child`, `verify_python`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 Future<DetectModelTaskResult> detectModelTask({
   required String pythonPath,
@@ -17,20 +17,54 @@ Future<DetectModelTaskResult> detectModelTask({
   modelPath: modelPath,
 );
 
-Future<String> aiModelClassesJson({required String pythonPath, required String modelPath}) =>
-    RustLib.instance.api.crateApiDetectingModAiModelClassesJson(
-      pythonPath: pythonPath,
-      modelPath: modelPath,
-    );
+Future<String> aiModelClassesJson({
+  required String pythonPath,
+  required String modelPath,
+}) => RustLib.instance.api.crateApiDetectingModAiModelClassesJson(
+  pythonPath: pythonPath,
+  modelPath: modelPath,
+);
 
 Future<String> aiAnnotateImageJson({required AiAnnotateImageRequest req}) =>
     RustLib.instance.api.crateApiDetectingModAiAnnotateImageJson(req: req);
 
+Future<String> aiAnnotateImageJsonWithSamCompile({
+  required AiAnnotateImageRequest req,
+  required bool samCompile,
+}) =>
+    RustLib.instance.api.crateApiDetectingModAiAnnotateImageJsonWithSamCompile(
+      req: req,
+      samCompile: samCompile,
+    );
+
 Future<String> aiAnnotateImagesJson({required AiAnnotateBatchRequest req}) =>
     RustLib.instance.api.crateApiDetectingModAiAnnotateImagesJson(req: req);
 
+Future<String> aiAnnotateImagesJsonWithSamPromptFrame({
+  required AiAnnotateBatchRequest req,
+  required int samPromptFrameIndex,
+}) => RustLib.instance.api
+    .crateApiDetectingModAiAnnotateImagesJsonWithSamPromptFrame(
+      req: req,
+      samPromptFrameIndex: samPromptFrameIndex,
+    );
+
+Future<String> aiAnnotateImagesJsonWithSamOptions({
+  required AiAnnotateBatchRequest req,
+  required int samPromptFrameIndex,
+  required bool samCompile,
+}) =>
+    RustLib.instance.api.crateApiDetectingModAiAnnotateImagesJsonWithSamOptions(
+      req: req,
+      samPromptFrameIndex: samPromptFrameIndex,
+      samCompile: samCompile,
+    );
+
 Future<DetectResult> detectImage({required DetectImageRequest req}) =>
     RustLib.instance.api.crateApiDetectingModDetectImage(req: req);
+
+Future<String> detectImagesJson({required DetectImagesRequest req}) =>
+    RustLib.instance.api.crateApiDetectingModDetectImagesJson(req: req);
 
 Future<DetectResult> detectVideo({required DetectVideoRequest req}) =>
     RustLib.instance.api.crateApiDetectingModDetectVideo(req: req);
@@ -39,6 +73,7 @@ Future<BigInt> shutdownPythonChildren() =>
     RustLib.instance.api.crateApiDetectingModShutdownPythonChildren();
 
 class AiAnnotateBatchRequest {
+  final String backend;
   final String pythonPath;
   final String modelPath;
   final String inputPathsText;
@@ -47,8 +82,21 @@ class AiAnnotateBatchRequest {
   final double iouThreshold;
   final int imgsz;
   final String device;
+  final String samMode;
+  final String samPromptMode;
+  final String promptsText;
+  final String samClickPointsText;
+  final String samPrecision;
+  final String samEncoder;
+  final int samImageBatchSize;
+  final int samVideoBatchSize;
+  final int samInteractiveBatchSize;
+  final int samMaxImageWidth;
+  final int samMaxImageHeight;
+  final String samResizeMethod;
 
   const AiAnnotateBatchRequest({
+    required this.backend,
     required this.pythonPath,
     required this.modelPath,
     required this.inputPathsText,
@@ -57,10 +105,23 @@ class AiAnnotateBatchRequest {
     required this.iouThreshold,
     required this.imgsz,
     required this.device,
+    required this.samMode,
+    required this.samPromptMode,
+    required this.promptsText,
+    required this.samClickPointsText,
+    required this.samPrecision,
+    required this.samEncoder,
+    required this.samImageBatchSize,
+    required this.samVideoBatchSize,
+    required this.samInteractiveBatchSize,
+    required this.samMaxImageWidth,
+    required this.samMaxImageHeight,
+    required this.samResizeMethod,
   });
 
   @override
   int get hashCode =>
+      backend.hashCode ^
       pythonPath.hashCode ^
       modelPath.hashCode ^
       inputPathsText.hashCode ^
@@ -68,13 +129,26 @@ class AiAnnotateBatchRequest {
       confThreshold.hashCode ^
       iouThreshold.hashCode ^
       imgsz.hashCode ^
-      device.hashCode;
+      device.hashCode ^
+      samMode.hashCode ^
+      samPromptMode.hashCode ^
+      promptsText.hashCode ^
+      samClickPointsText.hashCode ^
+      samPrecision.hashCode ^
+      samEncoder.hashCode ^
+      samImageBatchSize.hashCode ^
+      samVideoBatchSize.hashCode ^
+      samInteractiveBatchSize.hashCode ^
+      samMaxImageWidth.hashCode ^
+      samMaxImageHeight.hashCode ^
+      samResizeMethod.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is AiAnnotateBatchRequest &&
           runtimeType == other.runtimeType &&
+          backend == other.backend &&
           pythonPath == other.pythonPath &&
           modelPath == other.modelPath &&
           inputPathsText == other.inputPathsText &&
@@ -82,10 +156,23 @@ class AiAnnotateBatchRequest {
           confThreshold == other.confThreshold &&
           iouThreshold == other.iouThreshold &&
           imgsz == other.imgsz &&
-          device == other.device;
+          device == other.device &&
+          samMode == other.samMode &&
+          samPromptMode == other.samPromptMode &&
+          promptsText == other.promptsText &&
+          samClickPointsText == other.samClickPointsText &&
+          samPrecision == other.samPrecision &&
+          samEncoder == other.samEncoder &&
+          samImageBatchSize == other.samImageBatchSize &&
+          samVideoBatchSize == other.samVideoBatchSize &&
+          samInteractiveBatchSize == other.samInteractiveBatchSize &&
+          samMaxImageWidth == other.samMaxImageWidth &&
+          samMaxImageHeight == other.samMaxImageHeight &&
+          samResizeMethod == other.samResizeMethod;
 }
 
 class AiAnnotateImageRequest {
+  final String backend;
   final String pythonPath;
   final String modelPath;
   final String inputPath;
@@ -94,8 +181,21 @@ class AiAnnotateImageRequest {
   final double iouThreshold;
   final int imgsz;
   final String device;
+  final String samMode;
+  final String samPromptMode;
+  final String promptsText;
+  final String samClickPointsText;
+  final String samPrecision;
+  final String samEncoder;
+  final int samImageBatchSize;
+  final int samVideoBatchSize;
+  final int samInteractiveBatchSize;
+  final int samMaxImageWidth;
+  final int samMaxImageHeight;
+  final String samResizeMethod;
 
   const AiAnnotateImageRequest({
+    required this.backend,
     required this.pythonPath,
     required this.modelPath,
     required this.inputPath,
@@ -104,10 +204,23 @@ class AiAnnotateImageRequest {
     required this.iouThreshold,
     required this.imgsz,
     required this.device,
+    required this.samMode,
+    required this.samPromptMode,
+    required this.promptsText,
+    required this.samClickPointsText,
+    required this.samPrecision,
+    required this.samEncoder,
+    required this.samImageBatchSize,
+    required this.samVideoBatchSize,
+    required this.samInteractiveBatchSize,
+    required this.samMaxImageWidth,
+    required this.samMaxImageHeight,
+    required this.samResizeMethod,
   });
 
   @override
   int get hashCode =>
+      backend.hashCode ^
       pythonPath.hashCode ^
       modelPath.hashCode ^
       inputPath.hashCode ^
@@ -115,13 +228,26 @@ class AiAnnotateImageRequest {
       confThreshold.hashCode ^
       iouThreshold.hashCode ^
       imgsz.hashCode ^
-      device.hashCode;
+      device.hashCode ^
+      samMode.hashCode ^
+      samPromptMode.hashCode ^
+      promptsText.hashCode ^
+      samClickPointsText.hashCode ^
+      samPrecision.hashCode ^
+      samEncoder.hashCode ^
+      samImageBatchSize.hashCode ^
+      samVideoBatchSize.hashCode ^
+      samInteractiveBatchSize.hashCode ^
+      samMaxImageWidth.hashCode ^
+      samMaxImageHeight.hashCode ^
+      samResizeMethod.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is AiAnnotateImageRequest &&
           runtimeType == other.runtimeType &&
+          backend == other.backend &&
           pythonPath == other.pythonPath &&
           modelPath == other.modelPath &&
           inputPath == other.inputPath &&
@@ -129,7 +255,19 @@ class AiAnnotateImageRequest {
           confThreshold == other.confThreshold &&
           iouThreshold == other.iouThreshold &&
           imgsz == other.imgsz &&
-          device == other.device;
+          device == other.device &&
+          samMode == other.samMode &&
+          samPromptMode == other.samPromptMode &&
+          promptsText == other.promptsText &&
+          samClickPointsText == other.samClickPointsText &&
+          samPrecision == other.samPrecision &&
+          samEncoder == other.samEncoder &&
+          samImageBatchSize == other.samImageBatchSize &&
+          samVideoBatchSize == other.samVideoBatchSize &&
+          samInteractiveBatchSize == other.samInteractiveBatchSize &&
+          samMaxImageWidth == other.samMaxImageWidth &&
+          samMaxImageHeight == other.samMaxImageHeight &&
+          samResizeMethod == other.samResizeMethod;
 }
 
 class DetectImageRequest {
@@ -183,6 +321,57 @@ class DetectImageRequest {
           device == other.device;
 }
 
+class DetectImagesRequest {
+  final String pythonPath;
+  final String modelPath;
+  final String inputPathsText;
+  final String outputNamesText;
+  final String outputDir;
+  final double confThreshold;
+  final double iouThreshold;
+  final int imgsz;
+  final String device;
+
+  const DetectImagesRequest({
+    required this.pythonPath,
+    required this.modelPath,
+    required this.inputPathsText,
+    required this.outputNamesText,
+    required this.outputDir,
+    required this.confThreshold,
+    required this.iouThreshold,
+    required this.imgsz,
+    required this.device,
+  });
+
+  @override
+  int get hashCode =>
+      pythonPath.hashCode ^
+      modelPath.hashCode ^
+      inputPathsText.hashCode ^
+      outputNamesText.hashCode ^
+      outputDir.hashCode ^
+      confThreshold.hashCode ^
+      iouThreshold.hashCode ^
+      imgsz.hashCode ^
+      device.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DetectImagesRequest &&
+          runtimeType == other.runtimeType &&
+          pythonPath == other.pythonPath &&
+          modelPath == other.modelPath &&
+          inputPathsText == other.inputPathsText &&
+          outputNamesText == other.outputNamesText &&
+          outputDir == other.outputDir &&
+          confThreshold == other.confThreshold &&
+          iouThreshold == other.iouThreshold &&
+          imgsz == other.imgsz &&
+          device == other.device;
+}
+
 class DetectModelTaskResult {
   final bool ok;
   final String task;
@@ -197,7 +386,8 @@ class DetectModelTaskResult {
   });
 
   @override
-  int get hashCode => ok.hashCode ^ task.hashCode ^ folder.hashCode ^ error.hashCode;
+  int get hashCode =>
+      ok.hashCode ^ task.hashCode ^ folder.hashCode ^ error.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -224,7 +414,8 @@ class DetectResult {
   });
 
   @override
-  int get hashCode => ok.hashCode ^ outputPath.hashCode ^ error.hashCode ^ labelCount.hashCode;
+  int get hashCode =>
+      ok.hashCode ^ outputPath.hashCode ^ error.hashCode ^ labelCount.hashCode;
 
   @override
   bool operator ==(Object other) =>

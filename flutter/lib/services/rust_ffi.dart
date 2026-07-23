@@ -45,9 +45,17 @@ typedef _DetectJsonNative =
     RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
 typedef DetectJsonDart =
     RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+typedef _DetectImagesJsonNative =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef DetectImagesJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _DetectModelTaskJsonNative =
     RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
 typedef DetectModelTaskJsonDart =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
+typedef _AnalyzeCamJsonNative =
+    RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
+typedef AnalyzeCamJsonDart =
     RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, int);
 typedef AiModelClassesJsonNative =
     RustVideoByteBuffer Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr);
@@ -167,9 +175,17 @@ class RustVideoBindings {
       detectJson = library.lookupFunction<_DetectJsonNative, DetectJsonDart>(
         'rust_label_detect_json',
       ),
+      detectImagesJson = library
+          .lookupFunction<_DetectImagesJsonNative, DetectImagesJsonDart>(
+            'rust_label_detect_images_json',
+          ),
       detectModelTaskJson = library
           .lookupFunction<_DetectModelTaskJsonNative, DetectModelTaskJsonDart>(
             'rust_label_detect_model_task_json',
+          ),
+      analyzeCamJson = library
+          .lookupFunction<_AnalyzeCamJsonNative, AnalyzeCamJsonDart>(
+            'rust_label_analyze_cam_json',
           ),
       aiModelClassesJson = library
           .lookupFunction<AiModelClassesJsonNative, AiModelClassesJsonDart>(
@@ -246,10 +262,9 @@ class RustVideoBindings {
           .lookupFunction<_DbOverviewJsonNative, DbOverviewJsonDart>(
             'rust_label_db_overview_json',
           ),
-      dbTableJson = library
-          .lookupFunction<_DbTableJsonNative, DbTableJsonDart>(
-            'rust_label_db_table_json',
-          ),
+      dbTableJson = library.lookupFunction<_DbTableJsonNative, DbTableJsonDart>(
+        'rust_label_db_table_json',
+      ),
       dbSqlQueryJson = library
           .lookupFunction<_DbSqlQueryJsonNative, DbSqlQueryJsonDart>(
             'rust_label_db_sql_query_json',
@@ -285,7 +300,9 @@ class RustVideoBindings {
   final VideoInfoJsonDart videoInfoJson;
   final DecodeVideoFrameDart decodeVideoFramePng;
   final DetectJsonDart detectJson;
+  final DetectImagesJsonDart detectImagesJson;
   final DetectModelTaskJsonDart detectModelTaskJson;
+  final AnalyzeCamJsonDart analyzeCamJson;
   final AiModelClassesJsonDart aiModelClassesJson;
   final ExportModelJsonDart exportModelJson;
   final AiAnnotateImageJsonDart aiAnnotateImageJson;
@@ -369,8 +386,7 @@ typedef HeapFreeDart =
     int Function(ffi.Pointer<ffi.Void>, int, ffi.Pointer<ffi.Void>);
 
 class WindowsHeapAllocator {
-  WindowsHeapAllocator()
-    : _kernel32 = ffi.DynamicLibrary.open('kernel32.dll') {
+  WindowsHeapAllocator() : _kernel32 = ffi.DynamicLibrary.open('kernel32.dll') {
     _getProcessHeap = _kernel32
         .lookupFunction<_GetProcessHeapNative, GetProcessHeapDart>(
           'GetProcessHeap',

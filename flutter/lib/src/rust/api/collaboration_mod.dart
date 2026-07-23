@@ -12,5 +12,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 Future<String> commandJson({required String request}) =>
     RustLib.instance.api.crateApiCollaborationModCommandJson(request: request);
 
-Future<String> pollEventsJson({required BigInt maxEvents}) =>
-    RustLib.instance.api.crateApiCollaborationModPollEventsJson(maxEvents: maxEvents);
+Future<String> pollEventsJson({required BigInt maxEvents}) => RustLib
+    .instance
+    .api
+    .crateApiCollaborationModPollEventsJson(maxEvents: maxEvents);

@@ -4,6 +4,7 @@
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
 import 'api.dart';
+import 'api/cam_analysis_mod.dart';
 import 'api/collaboration_mod.dart';
 import 'api/detecting_mod.dart';
 import 'api/ini_python.dart';
@@ -68,7 +69,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => 1638531064;
+  int get rustContentHash => -391930276;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -83,13 +84,33 @@ abstract class RustLibApi extends BaseApi {
     required AiAnnotateImageRequest req,
   });
 
+  Future<String> crateApiDetectingModAiAnnotateImageJsonWithSamCompile({
+    required AiAnnotateImageRequest req,
+    required bool samCompile,
+  });
+
   Future<String> crateApiDetectingModAiAnnotateImagesJson({
     required AiAnnotateBatchRequest req,
+  });
+
+  Future<String> crateApiDetectingModAiAnnotateImagesJsonWithSamOptions({
+    required AiAnnotateBatchRequest req,
+    required int samPromptFrameIndex,
+    required bool samCompile,
+  });
+
+  Future<String> crateApiDetectingModAiAnnotateImagesJsonWithSamPromptFrame({
+    required AiAnnotateBatchRequest req,
+    required int samPromptFrameIndex,
   });
 
   Future<String> crateApiDetectingModAiModelClassesJson({
     required String pythonPath,
     required String modelPath,
+  });
+
+  Future<String> crateApiCamAnalysisModAnalyzeCam({
+    required CamAnalysisRequest req,
   });
 
   Future<String> crateApiCollaborationModCommandJson({required String request});
@@ -123,6 +144,10 @@ abstract class RustLibApi extends BaseApi {
 
   Future<DetectResult> crateApiDetectingModDetectImage({
     required DetectImageRequest req,
+  });
+
+  Future<String> crateApiDetectingModDetectImagesJson({
+    required DetectImagesRequest req,
   });
 
   Future<DetectModelTaskResult> crateApiDetectingModDetectModelTask({
@@ -201,6 +226,7 @@ abstract class RustLibApi extends BaseApi {
   Future<String> crateApiStartYoloTraining({
     required String pythonPath,
     required String modelPath,
+    required String architectureVariant,
     required String dataYamlPath,
     required String projectDir,
     required String experimentName,
@@ -296,6 +322,43 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<String> crateApiDetectingModAiAnnotateImageJsonWithSamCompile({
+    required AiAnnotateImageRequest req,
+    required bool samCompile,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_box_autoadd_ai_annotate_image_request(req, serializer);
+          sse_encode_bool(samCompile, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 2,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta:
+            kCrateApiDetectingModAiAnnotateImageJsonWithSamCompileConstMeta,
+        argValues: [req, samCompile],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateApiDetectingModAiAnnotateImageJsonWithSamCompileConstMeta =>
+      const TaskConstMeta(
+        debugName: "ai_annotate_image_json_with_sam_compile",
+        argNames: ["req", "samCompile"],
+      );
+
+  @override
   Future<String> crateApiDetectingModAiAnnotateImagesJson({
     required AiAnnotateBatchRequest req,
   }) {
@@ -307,7 +370,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 2,
+            funcId: 3,
             port: port_,
           );
         },
@@ -329,6 +392,82 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<String> crateApiDetectingModAiAnnotateImagesJsonWithSamOptions({
+    required AiAnnotateBatchRequest req,
+    required int samPromptFrameIndex,
+    required bool samCompile,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_box_autoadd_ai_annotate_batch_request(req, serializer);
+          sse_encode_u_32(samPromptFrameIndex, serializer);
+          sse_encode_bool(samCompile, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 4,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta:
+            kCrateApiDetectingModAiAnnotateImagesJsonWithSamOptionsConstMeta,
+        argValues: [req, samPromptFrameIndex, samCompile],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateApiDetectingModAiAnnotateImagesJsonWithSamOptionsConstMeta =>
+      const TaskConstMeta(
+        debugName: "ai_annotate_images_json_with_sam_options",
+        argNames: ["req", "samPromptFrameIndex", "samCompile"],
+      );
+
+  @override
+  Future<String> crateApiDetectingModAiAnnotateImagesJsonWithSamPromptFrame({
+    required AiAnnotateBatchRequest req,
+    required int samPromptFrameIndex,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_box_autoadd_ai_annotate_batch_request(req, serializer);
+          sse_encode_u_32(samPromptFrameIndex, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 5,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta:
+            kCrateApiDetectingModAiAnnotateImagesJsonWithSamPromptFrameConstMeta,
+        argValues: [req, samPromptFrameIndex],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateApiDetectingModAiAnnotateImagesJsonWithSamPromptFrameConstMeta =>
+      const TaskConstMeta(
+        debugName: "ai_annotate_images_json_with_sam_prompt_frame",
+        argNames: ["req", "samPromptFrameIndex"],
+      );
+
+  @override
   Future<String> crateApiDetectingModAiModelClassesJson({
     required String pythonPath,
     required String modelPath,
@@ -342,7 +481,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 3,
+            funcId: 6,
             port: port_,
           );
         },
@@ -364,6 +503,36 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<String> crateApiCamAnalysisModAnalyzeCam({
+    required CamAnalysisRequest req,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_box_autoadd_cam_analysis_request(req, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 7,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiCamAnalysisModAnalyzeCamConstMeta,
+        argValues: [req],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiCamAnalysisModAnalyzeCamConstMeta =>
+      const TaskConstMeta(debugName: "analyze_cam", argNames: ["req"]);
+
+  @override
   Future<String> crateApiCollaborationModCommandJson({
     required String request,
   }) {
@@ -375,7 +544,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 4,
+            funcId: 8,
             port: port_,
           );
         },
@@ -405,7 +574,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 5,
+            funcId: 9,
             port: port_,
           );
         },
@@ -442,7 +611,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 6,
+            funcId: 10,
             port: port_,
           );
         },
@@ -476,7 +645,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 7,
+            funcId: 11,
             port: port_,
           );
         },
@@ -527,7 +696,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 8,
+            funcId: 12,
             port: port_,
           );
         },
@@ -579,7 +748,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 9,
+            funcId: 13,
             port: port_,
           );
         },
@@ -598,6 +767,36 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "detect_image", argNames: ["req"]);
 
   @override
+  Future<String> crateApiDetectingModDetectImagesJson({
+    required DetectImagesRequest req,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_box_autoadd_detect_images_request(req, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 14,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_String,
+        ),
+        constMeta: kCrateApiDetectingModDetectImagesJsonConstMeta,
+        argValues: [req],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiDetectingModDetectImagesJsonConstMeta =>
+      const TaskConstMeta(debugName: "detect_images_json", argNames: ["req"]);
+
+  @override
   Future<DetectModelTaskResult> crateApiDetectingModDetectModelTask({
     required String pythonPath,
     required String modelPath,
@@ -611,7 +810,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 10,
+            funcId: 15,
             port: port_,
           );
         },
@@ -662,7 +861,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 11,
+            funcId: 16,
             port: port_,
           );
         },
@@ -716,7 +915,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 12,
+            funcId: 17,
             port: port_,
           );
         },
@@ -756,7 +955,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 13,
+            funcId: 18,
             port: port_,
           );
         },
@@ -799,7 +998,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 14,
+            funcId: 19,
             port: port_,
           );
         },
@@ -829,7 +1028,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 15,
+            funcId: 20,
             port: port_,
           );
         },
@@ -862,7 +1061,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 16,
+            funcId: 21,
             port: port_,
           );
         },
@@ -892,7 +1091,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 17,
+            funcId: 22,
             port: port_,
           );
         },
@@ -919,7 +1118,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 18,
+            funcId: 23,
             port: port_,
           );
         },
@@ -949,7 +1148,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 19,
+            funcId: 24,
             port: port_,
           );
         },
@@ -979,7 +1178,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 20,
+            funcId: 25,
             port: port_,
           );
         },
@@ -1009,7 +1208,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 21,
+            funcId: 26,
             port: port_,
           );
         },
@@ -1039,7 +1238,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 22,
+            funcId: 27,
             port: port_,
           );
         },
@@ -1070,7 +1269,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 23,
+            funcId: 28,
             port: port_,
           );
         },
@@ -1098,7 +1297,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 24,
+            funcId: 29,
             port: port_,
           );
         },
@@ -1125,7 +1324,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 25,
+            funcId: 30,
             port: port_,
           );
         },
@@ -1152,7 +1351,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 26,
+            funcId: 31,
             port: port_,
           );
         },
@@ -1182,7 +1381,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 27,
+            funcId: 32,
             port: port_,
           );
         },
@@ -1215,7 +1414,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 28,
+            funcId: 33,
             port: port_,
           );
         },
@@ -1237,6 +1436,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Future<String> crateApiStartYoloTraining({
     required String pythonPath,
     required String modelPath,
+    required String architectureVariant,
     required String dataYamlPath,
     required String projectDir,
     required String experimentName,
@@ -1276,6 +1476,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(pythonPath, serializer);
           sse_encode_String(modelPath, serializer);
+          sse_encode_String(architectureVariant, serializer);
           sse_encode_String(dataYamlPath, serializer);
           sse_encode_String(projectDir, serializer);
           sse_encode_String(experimentName, serializer);
@@ -1311,7 +1512,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 29,
+            funcId: 34,
             port: port_,
           );
         },
@@ -1323,6 +1524,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         argValues: [
           pythonPath,
           modelPath,
+          architectureVariant,
           dataYamlPath,
           projectDir,
           experimentName,
@@ -1366,6 +1568,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     argNames: [
       "pythonPath",
       "modelPath",
+      "architectureVariant",
       "dataYamlPath",
       "projectDir",
       "experimentName",
@@ -1410,7 +1613,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 30,
+            funcId: 35,
             port: port_,
           );
         },
@@ -1437,7 +1640,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 31,
+            funcId: 36,
             port: port_,
           );
         },
@@ -1464,7 +1667,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 32,
+            funcId: 37,
             port: port_,
           );
         },
@@ -1494,7 +1697,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 33,
+            funcId: 38,
             port: port_,
           );
         },
@@ -1524,7 +1727,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 34,
+            funcId: 39,
             port: port_,
           );
         },
@@ -1555,7 +1758,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 35,
+            funcId: 40,
             port: port_,
           );
         },
@@ -1585,7 +1788,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 36,
+            funcId: 41,
             port: port_,
           );
         },
@@ -1615,17 +1818,30 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   AiAnnotateBatchRequest dco_decode_ai_annotate_batch_request(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 8)
-      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    if (arr.length != 21)
+      throw Exception('unexpected arr length: expect 21 but see ${arr.length}');
     return AiAnnotateBatchRequest(
-      pythonPath: dco_decode_String(arr[0]),
-      modelPath: dco_decode_String(arr[1]),
-      inputPathsText: dco_decode_String(arr[2]),
-      classIdsCsv: dco_decode_String(arr[3]),
-      confThreshold: dco_decode_f_64(arr[4]),
-      iouThreshold: dco_decode_f_64(arr[5]),
-      imgsz: dco_decode_u_32(arr[6]),
-      device: dco_decode_String(arr[7]),
+      backend: dco_decode_String(arr[0]),
+      pythonPath: dco_decode_String(arr[1]),
+      modelPath: dco_decode_String(arr[2]),
+      inputPathsText: dco_decode_String(arr[3]),
+      classIdsCsv: dco_decode_String(arr[4]),
+      confThreshold: dco_decode_f_64(arr[5]),
+      iouThreshold: dco_decode_f_64(arr[6]),
+      imgsz: dco_decode_u_32(arr[7]),
+      device: dco_decode_String(arr[8]),
+      samMode: dco_decode_String(arr[9]),
+      samPromptMode: dco_decode_String(arr[10]),
+      promptsText: dco_decode_String(arr[11]),
+      samClickPointsText: dco_decode_String(arr[12]),
+      samPrecision: dco_decode_String(arr[13]),
+      samEncoder: dco_decode_String(arr[14]),
+      samImageBatchSize: dco_decode_u_32(arr[15]),
+      samVideoBatchSize: dco_decode_u_32(arr[16]),
+      samInteractiveBatchSize: dco_decode_u_32(arr[17]),
+      samMaxImageWidth: dco_decode_u_32(arr[18]),
+      samMaxImageHeight: dco_decode_u_32(arr[19]),
+      samResizeMethod: dco_decode_String(arr[20]),
     );
   }
 
@@ -1633,17 +1849,30 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   AiAnnotateImageRequest dco_decode_ai_annotate_image_request(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 8)
-      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    if (arr.length != 21)
+      throw Exception('unexpected arr length: expect 21 but see ${arr.length}');
     return AiAnnotateImageRequest(
-      pythonPath: dco_decode_String(arr[0]),
-      modelPath: dco_decode_String(arr[1]),
-      inputPath: dco_decode_String(arr[2]),
-      classIdsCsv: dco_decode_String(arr[3]),
-      confThreshold: dco_decode_f_64(arr[4]),
-      iouThreshold: dco_decode_f_64(arr[5]),
-      imgsz: dco_decode_u_32(arr[6]),
-      device: dco_decode_String(arr[7]),
+      backend: dco_decode_String(arr[0]),
+      pythonPath: dco_decode_String(arr[1]),
+      modelPath: dco_decode_String(arr[2]),
+      inputPath: dco_decode_String(arr[3]),
+      classIdsCsv: dco_decode_String(arr[4]),
+      confThreshold: dco_decode_f_64(arr[5]),
+      iouThreshold: dco_decode_f_64(arr[6]),
+      imgsz: dco_decode_u_32(arr[7]),
+      device: dco_decode_String(arr[8]),
+      samMode: dco_decode_String(arr[9]),
+      samPromptMode: dco_decode_String(arr[10]),
+      promptsText: dco_decode_String(arr[11]),
+      samClickPointsText: dco_decode_String(arr[12]),
+      samPrecision: dco_decode_String(arr[13]),
+      samEncoder: dco_decode_String(arr[14]),
+      samImageBatchSize: dco_decode_u_32(arr[15]),
+      samVideoBatchSize: dco_decode_u_32(arr[16]),
+      samInteractiveBatchSize: dco_decode_u_32(arr[17]),
+      samMaxImageWidth: dco_decode_u_32(arr[18]),
+      samMaxImageHeight: dco_decode_u_32(arr[19]),
+      samResizeMethod: dco_decode_String(arr[20]),
     );
   }
 
@@ -1670,9 +1899,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  CamAnalysisRequest dco_decode_box_autoadd_cam_analysis_request(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_cam_analysis_request(raw);
+  }
+
+  @protected
   DetectImageRequest dco_decode_box_autoadd_detect_image_request(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_detect_image_request(raw);
+  }
+
+  @protected
+  DetectImagesRequest dco_decode_box_autoadd_detect_images_request(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_detect_images_request(raw);
   }
 
   @protected
@@ -1700,6 +1943,28 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  CamAnalysisRequest dco_decode_cam_analysis_request(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 12)
+      throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
+    return CamAnalysisRequest(
+      pythonPath: dco_decode_String(arr[0]),
+      modelPath: dco_decode_String(arr[1]),
+      inputPath: dco_decode_String(arr[2]),
+      outputDir: dco_decode_String(arr[3]),
+      confThreshold: dco_decode_f_64(arr[4]),
+      iouThreshold: dco_decode_f_64(arr[5]),
+      imgsz: dco_decode_u_32(arr[6]),
+      device: dco_decode_String(arr[7]),
+      mode: dco_decode_String(arr[8]),
+      smoothing: dco_decode_String(arr[9]),
+      targetLayerIndex: dco_decode_i_32(arr[10]),
+      targetClassId: dco_decode_i_32(arr[11]),
+    );
+  }
+
+  @protected
   DecodedVideoFrame dco_decode_decoded_video_frame(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -1724,6 +1989,25 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       inputPath: dco_decode_String(arr[2]),
       outputDir: dco_decode_String(arr[3]),
       outputName: dco_decode_String(arr[4]),
+      confThreshold: dco_decode_f_64(arr[5]),
+      iouThreshold: dco_decode_f_64(arr[6]),
+      imgsz: dco_decode_u_32(arr[7]),
+      device: dco_decode_String(arr[8]),
+    );
+  }
+
+  @protected
+  DetectImagesRequest dco_decode_detect_images_request(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    return DetectImagesRequest(
+      pythonPath: dco_decode_String(arr[0]),
+      modelPath: dco_decode_String(arr[1]),
+      inputPathsText: dco_decode_String(arr[2]),
+      outputNamesText: dco_decode_String(arr[3]),
+      outputDir: dco_decode_String(arr[4]),
       confThreshold: dco_decode_f_64(arr[5]),
       iouThreshold: dco_decode_f_64(arr[6]),
       imgsz: dco_decode_u_32(arr[7]),
@@ -1802,6 +2086,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  int dco_decode_i_32(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as int;
+  }
+
+  @protected
   List<String> dco_decode_list_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_String).toList();
@@ -1845,43 +2135,44 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TrainingConfig dco_decode_training_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 34)
-      throw Exception('unexpected arr length: expect 34 but see ${arr.length}');
+    if (arr.length != 35)
+      throw Exception('unexpected arr length: expect 35 but see ${arr.length}');
     return TrainingConfig(
       pythonPath: dco_decode_String(arr[0]),
       modelPath: dco_decode_String(arr[1]),
-      dataYamlPath: dco_decode_String(arr[2]),
-      projectDir: dco_decode_String(arr[3]),
-      experimentName: dco_decode_String(arr[4]),
-      epochs: dco_decode_u_32(arr[5]),
-      imgsz: dco_decode_u_32(arr[6]),
-      batch: dco_decode_String(arr[7]),
-      device: dco_decode_String(arr[8]),
-      lr0: dco_decode_f_64(arr[9]),
-      momentum: dco_decode_f_64(arr[10]),
-      patience: dco_decode_u_32(arr[11]),
-      hsvH: dco_decode_f_64(arr[12]),
-      hsvS: dco_decode_f_64(arr[13]),
-      hsvV: dco_decode_f_64(arr[14]),
-      translate: dco_decode_f_64(arr[15]),
-      scale: dco_decode_f_64(arr[16]),
-      shear: dco_decode_f_64(arr[17]),
-      flipud: dco_decode_f_64(arr[18]),
-      fliplr: dco_decode_f_64(arr[19]),
-      degrees: dco_decode_f_64(arr[20]),
-      perspective: dco_decode_f_64(arr[21]),
-      bgr: dco_decode_f_64(arr[22]),
-      mosaic: dco_decode_f_64(arr[23]),
-      mixup: dco_decode_f_64(arr[24]),
-      cutmix: dco_decode_f_64(arr[25]),
-      copyPaste: dco_decode_f_64(arr[26]),
-      copyPasteMode: dco_decode_String(arr[27]),
-      autoAugment: dco_decode_String(arr[28]),
-      erasing: dco_decode_f_64(arr[29]),
-      workers: dco_decode_u_32(arr[30]),
-      amp: dco_decode_bool(arr[31]),
-      resume: dco_decode_bool(arr[32]),
-      clsPw: dco_decode_f_64(arr[33]),
+      architectureVariant: dco_decode_String(arr[2]),
+      dataYamlPath: dco_decode_String(arr[3]),
+      projectDir: dco_decode_String(arr[4]),
+      experimentName: dco_decode_String(arr[5]),
+      epochs: dco_decode_u_32(arr[6]),
+      imgsz: dco_decode_u_32(arr[7]),
+      batch: dco_decode_String(arr[8]),
+      device: dco_decode_String(arr[9]),
+      lr0: dco_decode_f_64(arr[10]),
+      momentum: dco_decode_f_64(arr[11]),
+      patience: dco_decode_u_32(arr[12]),
+      hsvH: dco_decode_f_64(arr[13]),
+      hsvS: dco_decode_f_64(arr[14]),
+      hsvV: dco_decode_f_64(arr[15]),
+      translate: dco_decode_f_64(arr[16]),
+      scale: dco_decode_f_64(arr[17]),
+      shear: dco_decode_f_64(arr[18]),
+      flipud: dco_decode_f_64(arr[19]),
+      fliplr: dco_decode_f_64(arr[20]),
+      degrees: dco_decode_f_64(arr[21]),
+      perspective: dco_decode_f_64(arr[22]),
+      bgr: dco_decode_f_64(arr[23]),
+      mosaic: dco_decode_f_64(arr[24]),
+      mixup: dco_decode_f_64(arr[25]),
+      cutmix: dco_decode_f_64(arr[26]),
+      copyPaste: dco_decode_f_64(arr[27]),
+      copyPasteMode: dco_decode_String(arr[28]),
+      autoAugment: dco_decode_String(arr[29]),
+      erasing: dco_decode_f_64(arr[30]),
+      workers: dco_decode_u_32(arr[31]),
+      amp: dco_decode_bool(arr[32]),
+      resume: dco_decode_bool(arr[33]),
+      clsPw: dco_decode_f_64(arr[34]),
     );
   }
 
@@ -1965,6 +2256,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     SseDeserializer deserializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_backend = sse_decode_String(deserializer);
     var var_pythonPath = sse_decode_String(deserializer);
     var var_modelPath = sse_decode_String(deserializer);
     var var_inputPathsText = sse_decode_String(deserializer);
@@ -1973,7 +2265,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_iouThreshold = sse_decode_f_64(deserializer);
     var var_imgsz = sse_decode_u_32(deserializer);
     var var_device = sse_decode_String(deserializer);
+    var var_samMode = sse_decode_String(deserializer);
+    var var_samPromptMode = sse_decode_String(deserializer);
+    var var_promptsText = sse_decode_String(deserializer);
+    var var_samClickPointsText = sse_decode_String(deserializer);
+    var var_samPrecision = sse_decode_String(deserializer);
+    var var_samEncoder = sse_decode_String(deserializer);
+    var var_samImageBatchSize = sse_decode_u_32(deserializer);
+    var var_samVideoBatchSize = sse_decode_u_32(deserializer);
+    var var_samInteractiveBatchSize = sse_decode_u_32(deserializer);
+    var var_samMaxImageWidth = sse_decode_u_32(deserializer);
+    var var_samMaxImageHeight = sse_decode_u_32(deserializer);
+    var var_samResizeMethod = sse_decode_String(deserializer);
     return AiAnnotateBatchRequest(
+      backend: var_backend,
       pythonPath: var_pythonPath,
       modelPath: var_modelPath,
       inputPathsText: var_inputPathsText,
@@ -1982,6 +2287,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       iouThreshold: var_iouThreshold,
       imgsz: var_imgsz,
       device: var_device,
+      samMode: var_samMode,
+      samPromptMode: var_samPromptMode,
+      promptsText: var_promptsText,
+      samClickPointsText: var_samClickPointsText,
+      samPrecision: var_samPrecision,
+      samEncoder: var_samEncoder,
+      samImageBatchSize: var_samImageBatchSize,
+      samVideoBatchSize: var_samVideoBatchSize,
+      samInteractiveBatchSize: var_samInteractiveBatchSize,
+      samMaxImageWidth: var_samMaxImageWidth,
+      samMaxImageHeight: var_samMaxImageHeight,
+      samResizeMethod: var_samResizeMethod,
     );
   }
 
@@ -1990,6 +2307,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     SseDeserializer deserializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_backend = sse_decode_String(deserializer);
     var var_pythonPath = sse_decode_String(deserializer);
     var var_modelPath = sse_decode_String(deserializer);
     var var_inputPath = sse_decode_String(deserializer);
@@ -1998,7 +2316,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_iouThreshold = sse_decode_f_64(deserializer);
     var var_imgsz = sse_decode_u_32(deserializer);
     var var_device = sse_decode_String(deserializer);
+    var var_samMode = sse_decode_String(deserializer);
+    var var_samPromptMode = sse_decode_String(deserializer);
+    var var_promptsText = sse_decode_String(deserializer);
+    var var_samClickPointsText = sse_decode_String(deserializer);
+    var var_samPrecision = sse_decode_String(deserializer);
+    var var_samEncoder = sse_decode_String(deserializer);
+    var var_samImageBatchSize = sse_decode_u_32(deserializer);
+    var var_samVideoBatchSize = sse_decode_u_32(deserializer);
+    var var_samInteractiveBatchSize = sse_decode_u_32(deserializer);
+    var var_samMaxImageWidth = sse_decode_u_32(deserializer);
+    var var_samMaxImageHeight = sse_decode_u_32(deserializer);
+    var var_samResizeMethod = sse_decode_String(deserializer);
     return AiAnnotateImageRequest(
+      backend: var_backend,
       pythonPath: var_pythonPath,
       modelPath: var_modelPath,
       inputPath: var_inputPath,
@@ -2007,6 +2338,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       iouThreshold: var_iouThreshold,
       imgsz: var_imgsz,
       device: var_device,
+      samMode: var_samMode,
+      samPromptMode: var_samPromptMode,
+      promptsText: var_promptsText,
+      samClickPointsText: var_samClickPointsText,
+      samPrecision: var_samPrecision,
+      samEncoder: var_samEncoder,
+      samImageBatchSize: var_samImageBatchSize,
+      samVideoBatchSize: var_samVideoBatchSize,
+      samInteractiveBatchSize: var_samInteractiveBatchSize,
+      samMaxImageWidth: var_samMaxImageWidth,
+      samMaxImageHeight: var_samMaxImageHeight,
+      samResizeMethod: var_samResizeMethod,
     );
   }
 
@@ -2033,11 +2376,27 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  CamAnalysisRequest sse_decode_box_autoadd_cam_analysis_request(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_cam_analysis_request(deserializer));
+  }
+
+  @protected
   DetectImageRequest sse_decode_box_autoadd_detect_image_request(
     SseDeserializer deserializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_detect_image_request(deserializer));
+  }
+
+  @protected
+  DetectImagesRequest sse_decode_box_autoadd_detect_images_request(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_detect_images_request(deserializer));
   }
 
   @protected
@@ -2068,6 +2427,39 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_training_progress(deserializer));
+  }
+
+  @protected
+  CamAnalysisRequest sse_decode_cam_analysis_request(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_pythonPath = sse_decode_String(deserializer);
+    var var_modelPath = sse_decode_String(deserializer);
+    var var_inputPath = sse_decode_String(deserializer);
+    var var_outputDir = sse_decode_String(deserializer);
+    var var_confThreshold = sse_decode_f_64(deserializer);
+    var var_iouThreshold = sse_decode_f_64(deserializer);
+    var var_imgsz = sse_decode_u_32(deserializer);
+    var var_device = sse_decode_String(deserializer);
+    var var_mode = sse_decode_String(deserializer);
+    var var_smoothing = sse_decode_String(deserializer);
+    var var_targetLayerIndex = sse_decode_i_32(deserializer);
+    var var_targetClassId = sse_decode_i_32(deserializer);
+    return CamAnalysisRequest(
+      pythonPath: var_pythonPath,
+      modelPath: var_modelPath,
+      inputPath: var_inputPath,
+      outputDir: var_outputDir,
+      confThreshold: var_confThreshold,
+      iouThreshold: var_iouThreshold,
+      imgsz: var_imgsz,
+      device: var_device,
+      mode: var_mode,
+      smoothing: var_smoothing,
+      targetLayerIndex: var_targetLayerIndex,
+      targetClassId: var_targetClassId,
+    );
   }
 
   @protected
@@ -2105,6 +2497,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       inputPath: var_inputPath,
       outputDir: var_outputDir,
       outputName: var_outputName,
+      confThreshold: var_confThreshold,
+      iouThreshold: var_iouThreshold,
+      imgsz: var_imgsz,
+      device: var_device,
+    );
+  }
+
+  @protected
+  DetectImagesRequest sse_decode_detect_images_request(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_pythonPath = sse_decode_String(deserializer);
+    var var_modelPath = sse_decode_String(deserializer);
+    var var_inputPathsText = sse_decode_String(deserializer);
+    var var_outputNamesText = sse_decode_String(deserializer);
+    var var_outputDir = sse_decode_String(deserializer);
+    var var_confThreshold = sse_decode_f_64(deserializer);
+    var var_iouThreshold = sse_decode_f_64(deserializer);
+    var var_imgsz = sse_decode_u_32(deserializer);
+    var var_device = sse_decode_String(deserializer);
+    return DetectImagesRequest(
+      pythonPath: var_pythonPath,
+      modelPath: var_modelPath,
+      inputPathsText: var_inputPathsText,
+      outputNamesText: var_outputNamesText,
+      outputDir: var_outputDir,
       confThreshold: var_confThreshold,
       iouThreshold: var_iouThreshold,
       imgsz: var_imgsz,
@@ -2201,6 +2620,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  int sse_decode_i_32(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getInt32();
+  }
+
+  @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -2269,6 +2694,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_pythonPath = sse_decode_String(deserializer);
     var var_modelPath = sse_decode_String(deserializer);
+    var var_architectureVariant = sse_decode_String(deserializer);
     var var_dataYamlPath = sse_decode_String(deserializer);
     var var_projectDir = sse_decode_String(deserializer);
     var var_experimentName = sse_decode_String(deserializer);
@@ -2304,6 +2730,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return TrainingConfig(
       pythonPath: var_pythonPath,
       modelPath: var_modelPath,
+      architectureVariant: var_architectureVariant,
       dataYamlPath: var_dataYamlPath,
       projectDir: var_projectDir,
       experimentName: var_experimentName,
@@ -2421,12 +2848,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  int sse_decode_i_32(SseDeserializer deserializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return deserializer.buffer.getInt32();
-  }
-
-  @protected
   void sse_encode_String(String self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_list_prim_u_8_strict(utf8.encoder.convert(self), serializer);
@@ -2438,6 +2859,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.backend, serializer);
     sse_encode_String(self.pythonPath, serializer);
     sse_encode_String(self.modelPath, serializer);
     sse_encode_String(self.inputPathsText, serializer);
@@ -2446,6 +2868,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_f_64(self.iouThreshold, serializer);
     sse_encode_u_32(self.imgsz, serializer);
     sse_encode_String(self.device, serializer);
+    sse_encode_String(self.samMode, serializer);
+    sse_encode_String(self.samPromptMode, serializer);
+    sse_encode_String(self.promptsText, serializer);
+    sse_encode_String(self.samClickPointsText, serializer);
+    sse_encode_String(self.samPrecision, serializer);
+    sse_encode_String(self.samEncoder, serializer);
+    sse_encode_u_32(self.samImageBatchSize, serializer);
+    sse_encode_u_32(self.samVideoBatchSize, serializer);
+    sse_encode_u_32(self.samInteractiveBatchSize, serializer);
+    sse_encode_u_32(self.samMaxImageWidth, serializer);
+    sse_encode_u_32(self.samMaxImageHeight, serializer);
+    sse_encode_String(self.samResizeMethod, serializer);
   }
 
   @protected
@@ -2454,6 +2888,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.backend, serializer);
     sse_encode_String(self.pythonPath, serializer);
     sse_encode_String(self.modelPath, serializer);
     sse_encode_String(self.inputPath, serializer);
@@ -2462,6 +2897,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_f_64(self.iouThreshold, serializer);
     sse_encode_u_32(self.imgsz, serializer);
     sse_encode_String(self.device, serializer);
+    sse_encode_String(self.samMode, serializer);
+    sse_encode_String(self.samPromptMode, serializer);
+    sse_encode_String(self.promptsText, serializer);
+    sse_encode_String(self.samClickPointsText, serializer);
+    sse_encode_String(self.samPrecision, serializer);
+    sse_encode_String(self.samEncoder, serializer);
+    sse_encode_u_32(self.samImageBatchSize, serializer);
+    sse_encode_u_32(self.samVideoBatchSize, serializer);
+    sse_encode_u_32(self.samInteractiveBatchSize, serializer);
+    sse_encode_u_32(self.samMaxImageWidth, serializer);
+    sse_encode_u_32(self.samMaxImageHeight, serializer);
+    sse_encode_String(self.samResizeMethod, serializer);
   }
 
   @protected
@@ -2489,12 +2936,30 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_cam_analysis_request(
+    CamAnalysisRequest self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_cam_analysis_request(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_detect_image_request(
     DetectImageRequest self,
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_detect_image_request(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_detect_images_request(
+    DetectImagesRequest self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_detect_images_request(self, serializer);
   }
 
   @protected
@@ -2531,6 +2996,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_cam_analysis_request(
+    CamAnalysisRequest self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.pythonPath, serializer);
+    sse_encode_String(self.modelPath, serializer);
+    sse_encode_String(self.inputPath, serializer);
+    sse_encode_String(self.outputDir, serializer);
+    sse_encode_f_64(self.confThreshold, serializer);
+    sse_encode_f_64(self.iouThreshold, serializer);
+    sse_encode_u_32(self.imgsz, serializer);
+    sse_encode_String(self.device, serializer);
+    sse_encode_String(self.mode, serializer);
+    sse_encode_String(self.smoothing, serializer);
+    sse_encode_i_32(self.targetLayerIndex, serializer);
+    sse_encode_i_32(self.targetClassId, serializer);
+  }
+
+  @protected
   void sse_encode_decoded_video_frame(
     DecodedVideoFrame self,
     SseSerializer serializer,
@@ -2552,6 +3037,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.inputPath, serializer);
     sse_encode_String(self.outputDir, serializer);
     sse_encode_String(self.outputName, serializer);
+    sse_encode_f_64(self.confThreshold, serializer);
+    sse_encode_f_64(self.iouThreshold, serializer);
+    sse_encode_u_32(self.imgsz, serializer);
+    sse_encode_String(self.device, serializer);
+  }
+
+  @protected
+  void sse_encode_detect_images_request(
+    DetectImagesRequest self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.pythonPath, serializer);
+    sse_encode_String(self.modelPath, serializer);
+    sse_encode_String(self.inputPathsText, serializer);
+    sse_encode_String(self.outputNamesText, serializer);
+    sse_encode_String(self.outputDir, serializer);
     sse_encode_f_64(self.confThreshold, serializer);
     sse_encode_f_64(self.iouThreshold, serializer);
     sse_encode_u_32(self.imgsz, serializer);
@@ -2615,6 +3117,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.ffmpegPath, serializer);
     sse_encode_String(self.outputDir, serializer);
     sse_encode_u_32(self.frameCount, serializer);
+  }
+
+  @protected
+  void sse_encode_i_32(int self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putInt32(self);
   }
 
   @protected
@@ -2687,6 +3195,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.pythonPath, serializer);
     sse_encode_String(self.modelPath, serializer);
+    sse_encode_String(self.architectureVariant, serializer);
     sse_encode_String(self.dataYamlPath, serializer);
     sse_encode_String(self.projectDir, serializer);
     sse_encode_String(self.experimentName, serializer);
@@ -2782,11 +3291,5 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_f_64(self.fps, serializer);
     sse_encode_u_32(self.frameCount, serializer);
     sse_encode_String(self.decoderLabel, serializer);
-  }
-
-  @protected
-  void sse_encode_i_32(int self, SseSerializer serializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    serializer.buffer.putInt32(self);
   }
 }

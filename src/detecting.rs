@@ -31,6 +31,19 @@ pub struct DetectImageRequest {
 }
 
 #[derive(Debug, Clone)]
+pub struct DetectImagesRequest {
+    pub python_path: String,
+    pub model_path: String,
+    pub input_paths_text: String,
+    pub output_names_text: String,
+    pub output_dir: String,
+    pub conf_threshold: f64,
+    pub iou_threshold: f64,
+    pub imgsz: u32,
+    pub device: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct DetectVideoRequest {
     pub python_path: String,
     pub model_path: String,
@@ -191,7 +204,37 @@ else:
         items.append({{"id": int(index), "name": str(value)}})
 items.sort(key=lambda item: item["id"])
 task = str(getattr(model, "task", "") or "detect")
-print(json.dumps({{"ok": True, "task": task, "classes": items}}, ensure_ascii=False))
+target_layers = []
+core_model = getattr(model, "model", None)
+sequence = getattr(core_model, "model", None)
+modules = list(sequence) if sequence is not None else []
+head = modules[-1] if modules else None
+head_sources = getattr(head, "f", None)
+if isinstance(head_sources, int):
+    head_sources = [head_sources]
+elif not isinstance(head_sources, (list, tuple)):
+    head_sources = []
+seen_module_indexes = set()
+for source_index in head_sources:
+    if not isinstance(source_index, int):
+        continue
+    module_index = source_index if source_index >= 0 else len(modules) + source_index
+    if module_index in seen_module_indexes or not (0 <= module_index < len(modules) - 1):
+        continue
+    seen_module_indexes.add(module_index)
+    module = modules[module_index]
+    option_index = len(target_layers)
+    target_layers.append({{
+        "index": option_index,
+        "moduleIndex": module_index,
+        "name": f"P{{option_index + 3}} · model.{{module_index}}:{{module.__class__.__name__}}",
+    }})
+print(json.dumps({{
+    "ok": True,
+    "task": task,
+    "classes": items,
+    "targetLayers": target_layers,
+}}, ensure_ascii=False))
 "##,
         model_path = python_string_literal(model_path),
     );
@@ -1524,6 +1567,245 @@ print(json.dumps({{"ok": True, "label_count": label_count}}))
     }
 }
 
+pub fn detect_images_json(req: &DetectImagesRequest) -> Result<String, String> {
+    let _guard = DETECT_LOCK
+        .lock()
+        .map_err(|_| "Detection lock is poisoned".to_string())?;
+    let python = verify_python(&req.python_path)?;
+    let input_paths = req
+        .input_paths_text
+        .lines()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    let output_names = req
+        .output_names_text
+        .lines()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    if input_paths.is_empty() {
+        return Err("Batch detection received no input images".to_string());
+    }
+    if input_paths.len() != output_names.len() {
+        return Err(format!(
+            "Batch detection input/output count mismatch: {} inputs, {} outputs",
+            input_paths.len(),
+            output_names.len()
+        ));
+    }
+    let output_dir = PathBuf::from(req.output_dir.trim());
+    fs::create_dir_all(&output_dir)
+        .map_err(|error| format!("Failed to create detection output directory: {error}"))?;
+
+    let script = format!(
+        r###"import json
+import os
+import sys
+
+os.environ["ULTRALYTICS_TQDM"] = "false"
+os.environ["YOLO_VERBOSE"] = "false"
+from ultralytics import YOLO
+
+raw_model_path = {model_path}
+input_paths = {input_paths}
+output_names = {output_names}
+output_dir = {output_dir}
+requested_device = {device}.strip()
+
+
+def _openvino_export_path(path):
+    text = str(path)
+    lower = text.lower()
+    if lower.endswith(".xml"):
+        return os.path.dirname(text) or text
+    if os.path.isdir(text):
+        try:
+            if lower.endswith("_openvino_model") or any(name.lower().endswith(".xml") for name in os.listdir(text)):
+                return text
+        except Exception:
+            return ""
+    parent = os.path.dirname(text)
+    stem = os.path.splitext(os.path.basename(text))[0]
+    candidate = os.path.join(parent, stem + "_openvino_model") if stem else ""
+    if candidate and os.path.isdir(candidate):
+        try:
+            if any(name.lower().endswith(".xml") for name in os.listdir(candidate)):
+                return candidate
+        except Exception:
+            pass
+    return ""
+
+
+def _openvino_devices():
+    try:
+        from openvino import Core
+        devices = [str(item).upper() for item in Core().available_devices]
+        print(f"[rustlabel][detect-batch] OpenVINO available_devices={{devices}}", file=sys.stderr)
+        return devices
+    except Exception as error:
+        print(f"[rustlabel][detect-batch] OpenVINO probe failed: {{error}}", file=sys.stderr)
+        return []
+
+
+def _intel_device(requested, available):
+    text = str(requested).strip().upper()
+    priorities = text.split(":", 1)[1].split(",") if text.startswith("AUTO:") else [text]
+    if not priorities or priorities == [""]:
+        priorities = ["GPU", "NPU", "CPU"]
+    for priority in priorities:
+        token = priority.strip().upper().replace("IGPU", "GPU").replace("DGPU", "GPU")
+        prefix = token.split(".", 1)[0]
+        if any(device == token or device.startswith(prefix) for device in available):
+            safe = prefix.lower() if prefix in ("GPU", "NPU", "CPU") else "cpu"
+            return f"intel:{{safe}}"
+    return "cpu"
+
+
+def _resolve_backend(model_path, device):
+    text = str(device).strip()
+    lower = text.lower()
+    export_path = _openvino_export_path(model_path)
+    selected_model = str(model_path)
+    if lower.startswith("openvino:") or lower.startswith("ov:") or lower.startswith("intel:"):
+        if not export_path:
+            print("[rustlabel][detect-batch] OpenVINO export not found; fallback to CPU PT inference", file=sys.stderr)
+            return selected_model, "cpu"
+        request = text.split(":", 1)[1].strip() if ":" in text else "AUTO:GPU,NPU,CPU"
+        return export_path, _intel_device(request, _openvino_devices())
+    if lower in ("", "auto", "cuda", "nv", "nvidia"):
+        try:
+            import torch
+            if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+                return selected_model, "0"
+        except Exception:
+            pass
+        if export_path:
+            available = _openvino_devices()
+            if available:
+                return export_path, _intel_device("AUTO:GPU,NPU,CPU", available)
+        return selected_model, "cpu"
+    if str(model_path).lower().endswith(".xml") or os.path.isdir(str(model_path)):
+        return export_path or selected_model, _intel_device("AUTO:GPU,NPU,CPU", _openvino_devices())
+    return selected_model, text
+
+
+def _load_metadata(path):
+    model_dir = path if os.path.isdir(path) else (os.path.dirname(path) if str(path).lower().endswith(".xml") else "")
+    metadata_path = os.path.join(model_dir, "metadata.yaml") if model_dir else ""
+    if not metadata_path or not os.path.isfile(metadata_path):
+        return {{}}, {{}}
+    try:
+        try:
+            from ultralytics.utils import yaml_load
+            metadata = yaml_load(metadata_path) or {{}}
+        except Exception:
+            import yaml
+            with open(metadata_path, "r", encoding="utf-8") as file:
+                metadata = yaml.safe_load(file) or {{}}
+        raw_names = metadata.get("names", {{}})
+        if isinstance(raw_names, dict):
+            names = {{int(key): str(value) for key, value in raw_names.items()}}
+        else:
+            names = {{index: str(value) for index, value in enumerate(raw_names or [])}}
+        return metadata, names
+    except Exception as error:
+        print(f"[rustlabel][detect-batch] metadata read failed: {{error}}", file=sys.stderr)
+        return {{}}, {{}}
+
+
+model_path, device_value = _resolve_backend(raw_model_path, requested_device)
+metadata, metadata_names = _load_metadata(model_path)
+task = str(metadata.get("task", "") or "").strip().lower()
+model = YOLO(model_path, task=task) if task else YOLO(model_path)
+if metadata_names:
+    try:
+        model.names = dict(metadata_names)
+    except Exception:
+        pass
+print(
+    f"[rustlabel][detect-batch] start images={{len(input_paths)}} model={{model_path}} device={{device_value}}",
+    file=sys.stderr,
+)
+
+
+def _class_names(result):
+    raw = getattr(result, "names", None) or getattr(model, "names", {{}}) or {{}}
+    if isinstance(raw, dict):
+        names = {{int(key): str(value) for key, value in raw.items()}}
+    else:
+        names = {{index: str(value) for index, value in enumerate(raw)}}
+    names.update(metadata_names)
+    container = getattr(result, "obb", None) or getattr(result, "boxes", None)
+    classes = getattr(container, "cls", None)
+    class_ids = [] if classes is None else [int(float(value)) for value in classes.detach().cpu().tolist()]
+    missing = sorted({{class_id for class_id in class_ids if class_id not in names}})
+    if missing:
+        raise RuntimeError(f"model.names is missing class name for class id(s): {{missing}}. model={{model_path}}")
+    result.names = names
+
+
+def _run_batch(active_device):
+    items = []
+    for index, input_path in enumerate(input_paths):
+        predictions = model.predict(
+            source=input_path,
+            save=False,
+            imgsz={imgsz},
+            conf={conf},
+            iou={iou},
+            device=active_device,
+            verbose=False,
+            stream=True,
+        )
+        result = next(iter(predictions))
+        _class_names(result)
+        output_path = os.path.abspath(os.path.join(output_dir, output_names[index]))
+        annotated = result.plot()
+        import cv2
+        if not cv2.imwrite(output_path, annotated):
+            raise RuntimeError(f"Failed to save prediction image: {{output_path}}")
+        container = getattr(result, "obb", None) or getattr(result, "boxes", None)
+        label_count = len(container) if container is not None else 0
+        items.append({{
+            "inputPath": os.path.abspath(input_paths[index]),
+            "outputPath": output_path,
+            "labelCount": int(label_count),
+        }})
+    if len(items) != len(input_paths):
+        raise RuntimeError(f"Batch prediction returned {{len(items)}} results for {{len(input_paths)}} images")
+    return items
+
+
+try:
+    items = _run_batch(device_value)
+except Exception as error:
+    if str(device_value).lower() == "cpu":
+        raise
+    print(f"[rustlabel][detect-batch] device {{device_value}} failed; retry on CPU: {{error}}", file=sys.stderr)
+    items = _run_batch("cpu")
+    device_value = "cpu"
+
+print(json.dumps({{
+    "ok": True,
+    "items": items,
+    "labelCount": sum(item["labelCount"] for item in items),
+    "device": str(device_value),
+}}, ensure_ascii=False))
+"###,
+        model_path = python_string_literal(&req.model_path),
+        input_paths = python_string_list_literal(&req.input_paths_text),
+        output_names = python_string_list_literal(&req.output_names_text),
+        output_dir = python_string_literal(&output_dir.to_string_lossy()),
+        device = python_string_literal(&req.device),
+        imgsz = req.imgsz.max(32),
+        conf = req.conf_threshold.clamp(0.001, 1.0),
+        iou = req.iou_threshold.clamp(0.001, 1.0),
+    );
+
+    run_python_json_script(&python, &script, None)
+}
+
 fn detect_video_frames(req: &DetectVideoRequest) -> DetectResult {
     let _guard = DETECT_LOCK.lock().unwrap();
     let output_dir = PathBuf::from(&req.output_dir);
@@ -2328,7 +2610,7 @@ fn verify_python(path: &str) -> Result<String, String> {
     Ok(trimmed.to_string())
 }
 
-fn python_string_literal(value: &str) -> String {
+pub(crate) fn python_string_literal(value: &str) -> String {
     let mut result = String::from("'");
     for ch in value.chars() {
         match ch {
@@ -2402,7 +2684,7 @@ fn run_python_script(python: &str, script: &str, cwd: Option<&Path>) -> Result<S
     Ok(stdout)
 }
 
-fn run_python_json_script(
+pub(crate) fn run_python_json_script(
     python: &str,
     script: &str,
     cwd: Option<&Path>,

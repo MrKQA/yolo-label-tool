@@ -124,6 +124,7 @@ class TrainPageState extends State<TrainPage> {
   BatchMode _batchMode = BatchMode.fixed;
   double _batchSize = 16;
   double _batchRatio = 0.70;
+  String _architectureVariant = 'standard';
   bool _ampEnabled = false;
   bool _resumeEnabled = false;
   bool _datasetLoading = false;
@@ -280,6 +281,7 @@ class TrainPageState extends State<TrainPage> {
           .values[prefs.batchModeIndex.clamp(0, BatchMode.values.length - 1)];
       _batchSize = prefs.batchSize;
       _batchRatio = prefs.batchRatio;
+      _architectureVariant = prefs.architectureVariant;
       _ampEnabled = prefs.ampEnabled;
       _exportSettings = prefs.exportSettings;
       _manualDeviceSelection = prefs.manualDeviceSelection;
@@ -312,6 +314,7 @@ class TrainPageState extends State<TrainPage> {
       batchModeIndex: _batchMode.index,
       batchSize: _batchSize,
       batchRatio: _batchRatio,
+      architectureVariant: _architectureVariant,
       ampEnabled: _ampEnabled,
       selectedDeviceIds: _selectedDeviceIds.toList(),
       manualDeviceSelection: _manualDeviceSelection,
@@ -332,6 +335,7 @@ class TrainPageState extends State<TrainPage> {
       _batchMode = BatchMode.fixed;
       _batchSize = 16;
       _batchRatio = 0.70;
+      _architectureVariant = 'standard';
       _ampEnabled = false;
       _manualDeviceSelection = false;
       _selectedDeviceIds = _autoTrainingDeviceSelection();
@@ -800,7 +804,7 @@ class TrainPageState extends State<TrainPage> {
     _trainingTimer?.cancel();
     logApp(
       'TRAIN',
-      'Starting training: model=${fileName(_modelPath!)}, data=$_datasetPath, epochs=$totalEpochs, imgsz=${_parameters['imgsz']?.round() ?? 640}, batch=$_batchArgument, device=$_deviceArgument, workers=${_parameters['workers']?.round() ?? 4}, resume=$_useResumeTraining, amp=$_ampEnabled',
+      'Starting training: model=${fileName(_modelPath!)}, architecture=${_useResumeTraining ? 'checkpoint' : _architectureVariant}, data=$_datasetPath, epochs=$totalEpochs, imgsz=${_parameters['imgsz']?.round() ?? 640}, batch=$_batchArgument, device=$_deviceArgument, workers=${_parameters['workers']?.round() ?? 4}, resume=$_useResumeTraining, amp=$_ampEnabled',
     );
 
     setState(() {
@@ -821,6 +825,9 @@ class TrainPageState extends State<TrainPage> {
       final runDir = await RustBackend.startYoloTraining(
         pythonPath: pythonPath,
         modelPath: _modelPath!,
+        architectureVariant: _useResumeTraining
+            ? 'standard'
+            : _architectureVariant,
         dataYamlPath: _datasetPath!,
         projectDir: outputPath.isNotEmpty
             ? outputPath
@@ -1394,6 +1401,45 @@ class TrainPageState extends State<TrainPage> {
                               ),
                             ),
                           ),
+                          Tooltip(
+                            message: _useResumeTraining
+                                ? t('train.architectureResumeHelp')
+                                : t('train.architectureHelp'),
+                            child: SegmentedButton<String>(
+                              segments: [
+                                ButtonSegment(
+                                  value: 'standard',
+                                  label: Text(t('train.architectureStandard')),
+                                ),
+                                const ButtonSegment(
+                                  value: 'p2',
+                                  label: Text('P2'),
+                                ),
+                                const ButtonSegment(
+                                  value: 'p6',
+                                  label: Text('P6'),
+                                ),
+                              ],
+                              selected: {_architectureVariant},
+                              showSelectedIcon: false,
+                              onSelectionChanged:
+                                  _datasetLoading ||
+                                      _trainingRunning ||
+                                      _trainingStopping ||
+                                      _useResumeTraining
+                                  ? null
+                                  : (selection) {
+                                      if (selection.isEmpty) {
+                                        return;
+                                      }
+                                      setState(
+                                        () => _architectureVariant =
+                                            selection.first,
+                                      );
+                                      _savePreferences();
+                                    },
+                            ),
+                          ),
                           OutlinedButton.icon(
                             onPressed: _datasetLoading ? null : _chooseModel,
                             icon: const Icon(Icons.folder_open),
@@ -1457,9 +1503,14 @@ class TrainPageState extends State<TrainPage> {
                                     value: _resumeEnabled && _canResumeTraining,
                                     onChanged: _canResumeTraining
                                         ? (value) {
-                                            setState(
-                                              () => _resumeEnabled = value,
-                                            );
+                                            setState(() {
+                                              _resumeEnabled = value;
+                                              if (value) {
+                                                _architectureVariant =
+                                                    'standard';
+                                              }
+                                            });
+                                            _savePreferences();
                                           }
                                         : null,
                                   ),

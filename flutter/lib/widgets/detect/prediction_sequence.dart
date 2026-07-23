@@ -45,6 +45,8 @@ class PredictedFrameSequencePanelState
   bool _advancingFrame = false;
   int _frameRequestSerial = 0;
   int _index = 0;
+  final Map<String, FileImage> _frameProviders = {};
+  final List<String> _frameProviderOrder = [];
 
   @override
   void initState() {
@@ -64,6 +66,7 @@ class PredictedFrameSequencePanelState
   void dispose() {
     _timer?.cancel();
     _pollTimer?.cancel();
+    _evictAllFrameImages();
     super.dispose();
   }
 
@@ -77,13 +80,19 @@ class PredictedFrameSequencePanelState
     _index = 0;
     _paused = false;
     _scrubFrame = null;
-    _refreshManifest(resetPlayback: true);
-    _pollTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {
-      _refreshManifest(resetPlayback: false);
-    });
+    _evictAllFrameImages();
+    final shouldPoll = _refreshManifest(resetPlayback: true);
+    if (shouldPoll) {
+      _pollTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {
+        if (!_refreshManifest(resetPlayback: false)) {
+          _pollTimer?.cancel();
+          _pollTimer = null;
+        }
+      });
+    }
   }
 
-  void _refreshManifest({required bool resetPlayback}) {
+  bool _refreshManifest({required bool resetPlayback}) {
     try {
       final manifest = PredictionFrameManifest.load(widget.manifestPath);
       final previous = _manifest;
@@ -97,7 +106,7 @@ class PredictedFrameSequencePanelState
           previous.totalFrames != manifest.totalFrames ||
           previous.startFrame != manifest.startFrame;
       if (!changed) {
-        return;
+        return !manifest.complete && !manifest.canceled;
       }
       setState(() {
         _manifest = manifest;
@@ -109,11 +118,43 @@ class PredictedFrameSequencePanelState
       if (resetPlayback || previousLength <= 1 && manifest.frames.length > 1) {
         _startPlayback(manifest);
       }
+      return !manifest.complete && !manifest.canceled;
     } on Object catch (error) {
       setState(() {
         _manifest = null;
         _error = '$error';
       });
+      return widget.predicting;
+    }
+  }
+
+  FileImage _frameProvider(String path) {
+    final existing = _frameProviders[path];
+    if (existing != null) {
+      _frameProviderOrder
+        ..remove(path)
+        ..add(path);
+      return existing;
+    }
+    final provider = FileImage(File(path));
+    _frameProviders[path] = provider;
+    _frameProviderOrder.add(path);
+    while (_frameProviderOrder.length > 3) {
+      final expiredPath = _frameProviderOrder.removeAt(0);
+      final expired = _frameProviders.remove(expiredPath);
+      if (expired != null) {
+        unawaited(expired.evict());
+      }
+    }
+    return provider;
+  }
+
+  void _evictAllFrameImages() {
+    final providers = _frameProviders.values.toList(growable: false);
+    _frameProviders.clear();
+    _frameProviderOrder.clear();
+    for (final provider in providers) {
+      unawaited(provider.evict());
     }
   }
 
@@ -156,7 +197,7 @@ class PredictedFrameSequencePanelState
     _advancingFrame = true;
     try {
       await precacheImage(
-        FileImage(File(current.frames[nextIndex].path)),
+        _frameProvider(current.frames[nextIndex].path),
         context,
       );
     } on Object {
@@ -281,10 +322,11 @@ class PredictedFrameSequencePanelState
         children: [
           Padding(
             padding: const EdgeInsets.all(12),
-            child: Image.file(
-              File(frame.path),
+            child: Image(
+              image: _frameProvider(frame.path),
               fit: BoxFit.contain,
-              gaplessPlayback: true,
+              gaplessPlayback: false,
+              filterQuality: FilterQuality.low,
             ),
           ),
           if (waitingForNextFrame)

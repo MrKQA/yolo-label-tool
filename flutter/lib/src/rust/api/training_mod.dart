@@ -6,7 +6,7 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `active_elapsed_seconds`, `append_log_line`, `append_running_heartbeat`, `civil_from_days`, `cleanup_finished_training`, `compute_elapsed_seconds`, `expected_run_dir`, `file_name_eq`, `finite_python_number`, `is_safe_log_date`, `json_escape`, `local_log_date_string`, `log_timestamp`, `preload_training_modules_opt`, `preload_training_modules`, `project_directory`, `python_bool`, `python_string_literal`, `read_last_csv_line`, `read_results_csv_columns`, `run_dir_from_checkpoint`, `run_training_thread`, `run_training_with_embedded_python`, `safe_log_date`, `set_status`, `string_array_json`, `training_code_with_locals`, `training_log_path`, `training_logs_directory`, `unix_millis_now`
+// These functions are ignored because they are not marked as `pub`: `active_elapsed_seconds`, `append_log_bytes`, `append_log_line`, `civil_from_days`, `cleanup_finished_training`, `compute_elapsed_seconds`, `configure_python_child_environment`, `dedupe_pathbufs`, `expected_run_dir`, `file_name_eq`, `finite_python_number`, `is_safe_log_date`, `json_escape`, `kill_active_training_child`, `local_log_date_string`, `log_timestamp`, `project_directory`, `python_bool`, `python_string_literal`, `read_last_csv_line`, `read_results_csv_columns`, `run_dir_from_checkpoint`, `run_training_subprocess`, `run_training_thread`, `safe_log_date`, `sanitize_terminal_text`, `set_status`, `spawn_child_output_logger`, `string_array_json`, `training_code_with_locals`, `training_log_path`, `training_logs_directory`, `training_script_path`, `unix_millis_now`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `fmt`, `fmt`
 
 Future<String> startTraining({required TrainingConfig config}) =>
@@ -50,6 +50,7 @@ Future<String> deleteTrainingLogsByDateRangeJson({
 class TrainingConfig {
   final String pythonPath;
   final String modelPath;
+  final String architectureVariant;
   final String dataYamlPath;
   final String projectDir;
   final String experimentName;
@@ -86,6 +87,7 @@ class TrainingConfig {
   const TrainingConfig({
     required this.pythonPath,
     required this.modelPath,
+    required this.architectureVariant,
     required this.dataYamlPath,
     required this.projectDir,
     required this.experimentName,
@@ -124,6 +126,7 @@ class TrainingConfig {
   int get hashCode =>
       pythonPath.hashCode ^
       modelPath.hashCode ^
+      architectureVariant.hashCode ^
       dataYamlPath.hashCode ^
       projectDir.hashCode ^
       experimentName.hashCode ^
@@ -164,6 +167,7 @@ class TrainingConfig {
           runtimeType == other.runtimeType &&
           pythonPath == other.pythonPath &&
           modelPath == other.modelPath &&
+          architectureVariant == other.architectureVariant &&
           dataYamlPath == other.dataYamlPath &&
           projectDir == other.projectDir &&
           experimentName == other.experimentName &&

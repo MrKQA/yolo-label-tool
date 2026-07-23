@@ -25,6 +25,30 @@ class DetectResult {
   final int labelCount;
 }
 
+class BatchDetectItem {
+  const BatchDetectItem({
+    required this.inputPath,
+    required this.outputPath,
+    required this.labelCount,
+  });
+
+  final String inputPath;
+  final String outputPath;
+  final int labelCount;
+}
+
+class BatchDetectResult {
+  const BatchDetectResult({
+    required this.items,
+    required this.labelCount,
+    required this.device,
+  });
+
+  final List<BatchDetectItem> items;
+  final int labelCount;
+  final String device;
+}
+
 class DetectModelTaskResult {
   const DetectModelTaskResult({
     required this.ok,
@@ -37,6 +61,90 @@ class DetectModelTaskResult {
   final String task;
   final String folder;
   final String? error;
+}
+
+class CamAnalysisOutput {
+  const CamAnalysisOutput({
+    required this.id,
+    required this.label,
+    required this.path,
+    required this.durationMs,
+    required this.targetLayerIndex,
+    required this.targetLayerName,
+  });
+
+  final String id;
+  final String label;
+  final String path;
+  final int durationMs;
+  final int targetLayerIndex;
+  final String targetLayerName;
+}
+
+class CamAnalysisOptions {
+  const CamAnalysisOptions({
+    required this.mode,
+    required this.smoothing,
+    required this.targetClassId,
+    required this.threshold,
+  });
+
+  final String mode;
+  final String smoothing;
+  final int targetClassId;
+  final double threshold;
+}
+
+class CamTargetLayerOption {
+  const CamTargetLayerOption({
+    required this.index,
+    required this.moduleIndex,
+    required this.name,
+  });
+
+  final int index;
+  final int moduleIndex;
+  final String name;
+}
+
+class CamAnalysisResult {
+  const CamAnalysisResult({
+    required this.family,
+    required this.task,
+    required this.device,
+    required this.ultralyticsVersion,
+    required this.targetLayers,
+    required this.availableTargetLayers,
+    required this.targetLayerIndex,
+    required this.outputs,
+    required this.durationMs,
+    required this.detectedBoxes,
+    required this.analyzedBoxes,
+    required this.minimumMatchIou,
+    required this.mode,
+    required this.smoothing,
+    required this.targetClassId,
+    required this.targetClassName,
+    required this.threshold,
+  });
+
+  final String family;
+  final String task;
+  final String device;
+  final String ultralyticsVersion;
+  final List<String> targetLayers;
+  final List<String> availableTargetLayers;
+  final int targetLayerIndex;
+  final List<CamAnalysisOutput> outputs;
+  final int durationMs;
+  final int detectedBoxes;
+  final int analyzedBoxes;
+  final double minimumMatchIou;
+  final String mode;
+  final String smoothing;
+  final int targetClassId;
+  final String targetClassName;
+  final double threshold;
 }
 
 class ModelExportResult {
@@ -61,10 +169,15 @@ class AiModelClass {
 }
 
 class AiModelClassesResult {
-  const AiModelClassesResult({required this.task, required this.classes});
+  const AiModelClassesResult({
+    required this.task,
+    required this.classes,
+    this.targetLayers = const [],
+  });
 
   final String task;
   final List<AiModelClass> classes;
+  final List<CamTargetLayerOption> targetLayers;
 }
 
 class AiPredictionBox {
