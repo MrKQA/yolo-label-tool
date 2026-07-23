@@ -218,46 +218,6 @@ List<TrainingMetricPoint> trimTrainingMetricPoints(
   return points.sublist(points.length - trainingChartPointLimit);
 }
 
-Future<List<TrainingDeviceOption>> detectNvidiaDevices() async {
-  try {
-    final result =
-        await Process.run('nvidia-smi', [
-          '--query-gpu=index,name',
-          '--format=csv,noheader',
-        ]).timeout(
-          const Duration(seconds: 2),
-          onTimeout: () => ProcessResult(0, 124, '', 'nvidia-smi timeout'),
-        );
-    if (result.exitCode != 0) {
-      return const [];
-    }
-    final output = result.stdout.toString().trim();
-    if (output.isEmpty) {
-      return const [];
-    }
-    return output
-        .split(RegExp(r'\r?\n'))
-        .map((line) {
-          final parts = line.split(',');
-          final id = parts.first.trim();
-          final name = parts.length > 1
-              ? parts.sublist(1).join(',').trim()
-              : '';
-          if (id.isEmpty) {
-            return null;
-          }
-          return TrainingDeviceOption(
-            id: id,
-            label: name.isEmpty ? 'GPU $id' : 'GPU $id - $name',
-          );
-        })
-        .whereType<TrainingDeviceOption>()
-        .toList();
-  } on Object {
-    return const [];
-  }
-}
-
 Future<OpenVinoDeviceInfo> detectOpenVinoDevices(String pythonPath) async {
   final executable = resolvePythonExecutable(pythonPath);
   if (executable == null) {

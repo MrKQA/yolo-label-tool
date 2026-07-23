@@ -948,7 +948,7 @@ class DetectVideoPageState extends State<DetectVideoPage> {
       return;
     }
     final results = await Future.wait<Object>([
-      detectNvidiaDevices(),
+      detectNvidiaDevices(widget.settings.pythonPath.trim()),
       detectOpenVinoDevices(widget.settings.pythonPath.trim()),
     ]);
     final devices = results[0] as List<TrainingDeviceOption>;

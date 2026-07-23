@@ -117,6 +117,8 @@ class TrainPageState extends State<TrainPage> {
   List<TrainingDeviceOption> _deviceOptions = const [
     TrainingDeviceOption(id: 'cpu', label: 'CPU'),
   ];
+  int _deviceProbeGeneration = 0;
+  bool _deviceOptionsLoading = false;
   Set<String> _selectedDeviceIds = const {'cpu'};
   YoloExportSettings _exportSettings = const YoloExportSettings();
   bool _exportingModel = false;
@@ -361,9 +363,15 @@ class TrainPageState extends State<TrainPage> {
   }
 
   Future<void> _loadDeviceOptions() async {
-    if (resolvePythonExecutable(widget.settings.pythonPath.trim()) == null) {
+    final generation = ++_deviceProbeGeneration;
+    if (mounted) {
+      setState(() => _deviceOptionsLoading = true);
+    }
+    final pythonPath = widget.settings.pythonPath.trim();
+    if (resolvePythonExecutable(pythonPath) == null) {
       if (mounted) {
         setState(() {
+          _deviceOptionsLoading = false;
           _deviceOptions = const [
             TrainingDeviceOption(id: 'cpu', label: 'CPU'),
           ];
@@ -372,12 +380,13 @@ class TrainPageState extends State<TrainPage> {
       }
       return;
     }
-    final devices = await detectNvidiaDevices();
+    final devices = await detectNvidiaDevices(pythonPath);
     devices.sort((a, b) => naturalCompare(a.id, b.id));
-    if (!mounted) {
+    if (!mounted || generation != _deviceProbeGeneration) {
       return;
     }
     setState(() {
+      _deviceOptionsLoading = false;
       if (devices.isEmpty) {
         _deviceOptions = const [TrainingDeviceOption(id: 'cpu', label: 'CPU')];
       } else {
@@ -1401,45 +1410,6 @@ class TrainPageState extends State<TrainPage> {
                               ),
                             ),
                           ),
-                          Tooltip(
-                            message: _useResumeTraining
-                                ? t('train.architectureResumeHelp')
-                                : t('train.architectureHelp'),
-                            child: SegmentedButton<String>(
-                              segments: [
-                                ButtonSegment(
-                                  value: 'standard',
-                                  label: Text(t('train.architectureStandard')),
-                                ),
-                                const ButtonSegment(
-                                  value: 'p2',
-                                  label: Text('P2'),
-                                ),
-                                const ButtonSegment(
-                                  value: 'p6',
-                                  label: Text('P6'),
-                                ),
-                              ],
-                              selected: {_architectureVariant},
-                              showSelectedIcon: false,
-                              onSelectionChanged:
-                                  _datasetLoading ||
-                                      _trainingRunning ||
-                                      _trainingStopping ||
-                                      _useResumeTraining
-                                  ? null
-                                  : (selection) {
-                                      if (selection.isEmpty) {
-                                        return;
-                                      }
-                                      setState(
-                                        () => _architectureVariant =
-                                            selection.first,
-                                      );
-                                      _savePreferences();
-                                    },
-                            ),
-                          ),
                           OutlinedButton.icon(
                             onPressed: _datasetLoading ? null : _chooseModel,
                             icon: const Icon(Icons.folder_open),
@@ -1691,16 +1661,30 @@ class TrainPageState extends State<TrainPage> {
                         ? TrainingParameterPanel(
                             parameters: _parameters,
                             stringParameters: _stringParameters,
+                            architectureVariant: _architectureVariant,
+                            architectureEnabled:
+                                !_datasetLoading &&
+                                !_trainingRunning &&
+                                !_trainingStopping &&
+                                !_useResumeTraining,
+                            architectureHelp: _useResumeTraining
+                                ? t('train.architectureResumeHelp')
+                                : t('train.architectureHelp'),
                             batchMode: _batchMode,
                             batchSize: _batchSize,
                             batchRatio: _batchRatio,
                             ampEnabled: _ampEnabled,
                             deviceOptions: _deviceOptions,
+                            deviceOptionsLoading: _deviceOptionsLoading,
                             selectedDeviceIds: _selectedDeviceIds,
                             batchArgument: _batchArgument,
                             deviceArgument: _deviceArgument,
                             onChanged: _setParameter,
                             onStringChanged: _setStringParameter,
+                            onArchitectureChanged: (value) {
+                              setState(() => _architectureVariant = value);
+                              _savePreferences();
+                            },
                             onBatchModeChanged: (value) {
                               setState(() => _batchMode = value);
                               _savePreferences();
@@ -1721,6 +1705,8 @@ class TrainPageState extends State<TrainPage> {
                               _toggleTrainingDevice(id, selected);
                               _savePreferences();
                             },
+                            onRefreshDevices: () =>
+                                unawaited(_loadDeviceOptions()),
                             onReset: _resetParameters,
                           )
                         : const SizedBox.expand(),

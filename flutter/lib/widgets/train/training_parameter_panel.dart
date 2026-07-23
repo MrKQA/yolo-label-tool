@@ -21,21 +21,27 @@ class TrainingParameterPanel extends StatelessWidget {
   const TrainingParameterPanel({
     required this.parameters,
     required this.stringParameters,
+    required this.architectureVariant,
+    required this.architectureEnabled,
+    required this.architectureHelp,
     required this.batchMode,
     required this.batchSize,
     required this.batchRatio,
     required this.ampEnabled,
     required this.deviceOptions,
+    required this.deviceOptionsLoading,
     required this.selectedDeviceIds,
     required this.batchArgument,
     required this.deviceArgument,
     required this.onChanged,
     required this.onStringChanged,
+    required this.onArchitectureChanged,
     required this.onBatchModeChanged,
     required this.onBatchSizeChanged,
     required this.onBatchRatioChanged,
     required this.onAmpChanged,
     required this.onDeviceChanged,
+    required this.onRefreshDevices,
     required this.onReset,
   });
 
@@ -43,21 +49,27 @@ class TrainingParameterPanel extends StatelessWidget {
 
   final Map<String, double> parameters;
   final Map<String, String> stringParameters;
+  final String architectureVariant;
+  final bool architectureEnabled;
+  final String architectureHelp;
   final BatchMode batchMode;
   final double batchSize;
   final double batchRatio;
   final bool ampEnabled;
   final List<TrainingDeviceOption> deviceOptions;
+  final bool deviceOptionsLoading;
   final Set<String> selectedDeviceIds;
   final String batchArgument;
   final String deviceArgument;
   final void Function(String key, double value) onChanged;
   final void Function(String key, String value) onStringChanged;
+  final ValueChanged<String> onArchitectureChanged;
   final ValueChanged<BatchMode> onBatchModeChanged;
   final ValueChanged<double> onBatchSizeChanged;
   final ValueChanged<double> onBatchRatioChanged;
   final ValueChanged<bool> onAmpChanged;
   final void Function(String id, bool selected) onDeviceChanged;
+  final VoidCallback onRefreshDevices;
 
   @override
   Widget build(BuildContext context) {
@@ -75,6 +87,12 @@ class TrainingParameterPanel extends StatelessWidget {
             child: ListView(
               children: [
                 ParameterSectionTitle(title: t('train.coreParameters')),
+                _ArchitectureVariantEditor(
+                  value: architectureVariant,
+                  enabled: architectureEnabled,
+                  help: architectureHelp,
+                  onChanged: onArchitectureChanged,
+                ),
                 _BatchParameterEditor(
                   mode: batchMode,
                   batchSize: batchSize,
@@ -87,9 +105,11 @@ class TrainingParameterPanel extends StatelessWidget {
                 _AmpParameterEditor(value: ampEnabled, onChanged: onAmpChanged),
                 _DeviceParameterEditor(
                   options: deviceOptions,
+                  loading: deviceOptionsLoading,
                   selectedIds: selectedDeviceIds,
                   argumentValue: deviceArgument,
                   onChanged: onDeviceChanged,
+                  onRefresh: onRefreshDevices,
                 ),
                 for (final entry in parameters.entries)
                   _ParameterEditor(
@@ -121,6 +141,60 @@ class TrainingParameterPanel extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ArchitectureVariantEditor extends StatelessWidget {
+  const _ArchitectureVariantEditor({
+    required this.value,
+    required this.enabled,
+    required this.help,
+    required this.onChanged,
+  });
+
+  final String value;
+  final bool enabled;
+  final String help;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      waitDuration: const Duration(milliseconds: 500),
+      message: help,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 14),
+        child: DropdownButtonFormField<String>(
+          key: ValueKey(value),
+          initialValue: value,
+          isDense: true,
+          isExpanded: true,
+          decoration: InputDecoration(
+            labelText: t('train.architecture'),
+            border: const OutlineInputBorder(),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 10,
+              vertical: 10,
+            ),
+          ),
+          items: [
+            DropdownMenuItem(
+              value: 'standard',
+              child: Text(t('train.architectureStandard')),
+            ),
+            const DropdownMenuItem(value: 'p2', child: Text('P2')),
+            const DropdownMenuItem(value: 'p6', child: Text('P6')),
+          ],
+          onChanged: enabled
+              ? (next) {
+                  if (next != null) {
+                    onChanged(next);
+                  }
+                }
+              : null,
+        ),
       ),
     );
   }
@@ -247,15 +321,19 @@ class _AmpParameterEditor extends StatelessWidget {
 class _DeviceParameterEditor extends StatelessWidget {
   const _DeviceParameterEditor({
     required this.options,
+    required this.loading,
     required this.selectedIds,
     required this.argumentValue,
     required this.onChanged,
+    required this.onRefresh,
   });
 
   final List<TrainingDeviceOption> options;
+  final bool loading;
   final Set<String> selectedIds;
   final String argumentValue;
   final void Function(String id, bool selected) onChanged;
+  final VoidCallback onRefresh;
 
   @override
   Widget build(BuildContext context) {
@@ -267,7 +345,29 @@ class _DeviceParameterEditor extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            ParameterHeader(name: 'device', value: 'device=$argumentValue'),
+            Row(
+              children: [
+                Expanded(
+                  child: ParameterHeader(
+                    name: 'device',
+                    value: 'device=$argumentValue',
+                  ),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  tooltip: t('train.refreshDevices'),
+                  visualDensity: VisualDensity.compact,
+                  onPressed: loading ? null : onRefresh,
+                  icon: loading
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.refresh, size: 18),
+                ),
+              ],
+            ),
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
@@ -287,7 +387,15 @@ class _DeviceParameterEditor extends StatelessWidget {
                   ),
               ],
             ),
-            if (options.length == 1 && options.first.id == 'cpu')
+            if (loading)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  t('train.detectingGpu'),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              )
+            else if (options.length == 1 && options.first.id == 'cpu')
               Padding(
                 padding: const EdgeInsets.only(top: 6),
                 child: Text(
@@ -483,9 +591,7 @@ class _TrainingTuningTips extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: appControlColor(
-          Theme.of(context).brightness == Brightness.dark,
-        ),
+        color: appControlColor(Theme.of(context).brightness == Brightness.dark),
         border: Border.all(
           color: appBorderColor(
             Theme.of(context).brightness == Brightness.dark,
@@ -618,10 +724,8 @@ class _ParameterEditor extends StatelessWidget {
               min: min,
               max: max,
               integer: integerLike,
-              normalize: (input) => normalizeTrainingParameterValue(
-                name,
-                input,
-              ),
+              normalize: (input) =>
+                  normalizeTrainingParameterValue(name, input),
               onSubmitted: onChanged,
             ),
           ],
