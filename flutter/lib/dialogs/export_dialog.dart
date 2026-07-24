@@ -54,8 +54,10 @@ class _ExportDialogState extends State<ExportDialog> {
   bool _skipEmpty = true;
   bool _exportImages = true;
   bool _trainAfterExport = false;
+  bool _redistribute = true;
   RangeValues _splitBoundaries = const RangeValues(80, 100);
   late final TextEditingController _folderNameController;
+  String? _folderNameError;
 
   double get _trainPercent => _splitBoundaries.start;
   double get _valPercent => _splitBoundaries.end - _splitBoundaries.start;
@@ -75,14 +77,24 @@ class _ExportDialogState extends State<ExportDialog> {
 
   void _confirm() {
     final name = _folderNameController.text.trim();
+    final folderName = name.isEmpty ? 'dataset' : name;
+    if (folderName == '.' ||
+        folderName == '..' ||
+        folderName.contains('/') ||
+        folderName.contains('\\') ||
+        folderName.contains(':')) {
+      setState(() => _folderNameError = t('export.invalidFolderName'));
+      return;
+    }
     Navigator.of(context).pop(
       DatasetExportConfig(
         skipEmpty: _skipEmpty,
         exportImages: _exportImages,
+        redistribute: _redistribute,
         trainRatio: _trainPercent / 100,
         valRatio: _valPercent / 100,
         testRatio: _testPercent / 100,
-        folderName: name.isEmpty ? 'dataset' : name,
+        folderName: folderName,
         trainAfterExport: _trainAfterExport,
       ),
     );
@@ -93,6 +105,7 @@ class _ExportDialogState extends State<ExportDialog> {
     return DialogPrimaryAction(
       onInvoke: _confirm,
       child: AlertDialog(
+        scrollable: true,
         title: Text(t('export.title')),
         content: SizedBox(
           width: 480,
@@ -107,8 +120,14 @@ class _ExportDialogState extends State<ExportDialog> {
               const SizedBox(height: 12),
               TextField(
                 controller: _folderNameController,
+                onChanged: (_) {
+                  if (_folderNameError != null) {
+                    setState(() => _folderNameError = null);
+                  }
+                },
                 decoration: InputDecoration(
                   labelText: t('export.folderName'),
+                  errorText: _folderNameError,
                   isDense: true,
                   border: const OutlineInputBorder(),
                 ),
@@ -140,9 +159,22 @@ class _ExportDialogState extends State<ExportDialog> {
                 controlAffinity: ListTileControlAffinity.leading,
               ),
               const SizedBox(height: 16),
+              CheckboxListTile(
+                value: _redistribute,
+                onChanged: (value) =>
+                    setState(() => _redistribute = value ?? true),
+                title: Text(t('export.redistribute')),
+                subtitle: Text(t('export.redistributeHint')),
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                controlAffinity: ListTileControlAffinity.leading,
+              ),
+              const SizedBox(height: 8),
               Text(
                 t('export.splitRatio'),
-                style: Theme.of(context).textTheme.labelLarge,
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: _redistribute ? null : Theme.of(context).disabledColor,
+                ),
               ),
               const SizedBox(height: 8),
               Row(
@@ -179,8 +211,9 @@ class _ExportDialogState extends State<ExportDialog> {
                   'train ${_trainPercent.round()}%',
                   'test ${_testPercent.round()}%',
                 ),
-                onChanged: (values) =>
-                    setState(() => _splitBoundaries = values),
+                onChanged: _redistribute
+                    ? (values) => setState(() => _splitBoundaries = values)
+                    : null,
               ),
             ],
           ),

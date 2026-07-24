@@ -40,13 +40,21 @@ class WorkspaceExportActions {
       overwriteImported = overwrite;
     }
 
-    final workflow = await export.exportDataset(
-      config: config,
-      exportRoot: settings.settings.exportPath,
-      overwriteImported: overwriteImported,
-      displaySizeForImagePath: project.displaySizeForPath,
-      ensureDisplaySizeForImagePath: project.ensureDisplaySizeForPath,
-    );
+    DatasetExportWorkflowResult workflow;
+    try {
+      workflow = await export.exportDataset(
+        config: config,
+        exportRoot: settings.settings.exportPath,
+        overwriteImported: overwriteImported,
+        displaySizeForImagePath: project.displaySizeForPath,
+        ensureDisplaySizeForImagePath: project.ensureDisplaySizeForPath,
+      );
+    } on Object catch (error) {
+      if (mounted()) {
+        showMessage('${t('export.failed')}: $error');
+      }
+      return;
+    }
     if (!mounted()) return;
     final result = workflow.result;
     if (result == null) {

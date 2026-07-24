@@ -21,6 +21,7 @@ class TopMenuBar extends StatelessWidget {
   const TopMenuBar({
     super.key,
     required this.visible,
+    required this.applicationDisplayName,
     required this.recentFolders,
     required this.recentFiles,
     required this.languageOptions,
@@ -50,6 +51,7 @@ class TopMenuBar extends StatelessWidget {
   });
 
   final bool visible;
+  final String applicationDisplayName;
   final List<String> recentFolders;
   final List<String> recentFiles;
   final List<LanguageOption> languageOptions;
@@ -105,7 +107,7 @@ class TopMenuBar extends StatelessWidget {
                   SizedBox(width: compact ? 4 : 12),
                   if (!compact) ...[
                     Text(
-                      t('app.title'),
+                      applicationDisplayName,
                       style: Theme.of(context).textTheme.titleSmall,
                     ),
                     const SizedBox(width: 12),

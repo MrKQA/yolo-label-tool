@@ -186,23 +186,55 @@ class _SplitSelector extends StatelessWidget {
   final bool enabled;
   final ValueChanged<String> onChanged;
 
+  static const _unselectedColor = Color(0xFFFFFFFF);
+  static const _trainColor = Color(0xFF2563EB);
+  static const _valColor = Color(0xFF16803A);
+  static const _testColor = Color(0xFFE85D04);
+  static const _unselectedForeground = Color(0xFF15141A);
+
+  Color _splitColor(String? split) => switch (split) {
+    'train' => _trainColor,
+    'val' => _valColor,
+    'test' => _testColor,
+    _ => _unselectedColor,
+  };
+
   @override
   Widget build(BuildContext context) {
-    final selected = datasetSplits.contains(value) ? value : 'train';
+    final selected = datasetSplits.contains(value) ? value : null;
+    final backgroundColor = _splitColor(selected);
+    final foregroundColor = selected == null
+        ? _unselectedForeground
+        : Colors.white;
+    final unselectedLabel = t('label.splitUnselected');
+    final unselectedText = Text(
+      unselectedLabel,
+      style: Theme.of(
+        context,
+      ).textTheme.labelLarge?.copyWith(color: _unselectedForeground),
+    );
     return SizedBox(
       height: 36,
       child: DecoratedBox(
         decoration: BoxDecoration(
           border: Border.all(color: borderColor(context)),
           borderRadius: BorderRadius.circular(6),
-          color: controlColor(context),
+          color: backgroundColor,
         ),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8),
           child: DropdownButtonHideUnderline(
             child: DropdownButton<String>(
               value: selected,
+              hint: unselectedText,
+              disabledHint: unselectedText,
               isDense: true,
+              dropdownColor: panelColor(context),
+              iconEnabledColor: foregroundColor,
+              iconDisabledColor: foregroundColor,
+              style: Theme.of(
+                context,
+              ).textTheme.labelLarge?.copyWith(color: foregroundColor),
               onChanged: enabled
                   ? (value) {
                       if (value != null) {
@@ -212,7 +244,29 @@ class _SplitSelector extends StatelessWidget {
                   : null,
               items: [
                 for (final split in datasetSplits)
-                  DropdownMenuItem(value: split, child: Text(split)),
+                  DropdownMenuItem(
+                    value: split,
+                    child: Text(
+                      split,
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: _splitColor(split),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+              ],
+              selectedItemBuilder: (context) => [
+                for (final split in datasetSplits)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      split,
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),

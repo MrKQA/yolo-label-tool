@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -8,6 +10,7 @@ import '../services/config_store.dart';
 import '../services/i18n.dart';
 import '../services/path_utils.dart';
 import '../services/shortcut_runtime.dart';
+import '../services/window_branding.dart';
 import 'collaboration_controller.dart';
 
 typedef ShortcutConfigLoader = ShortcutConfig Function();
@@ -82,6 +85,7 @@ class WorkspaceSettingsController extends ChangeNotifier {
     _settingsSaver(settings);
     _themeModeApplier(darkMode);
     _logLevelApplier(settings.logLevelIndex);
+    unawaited(applyWindowBranding(settings));
     _notifyChanged();
   }
 
@@ -116,6 +120,7 @@ class WorkspaceSettingsController extends ChangeNotifier {
     darkMode = settings.darkMode;
     _themeModeApplier(darkMode);
     _settingsSaver(settings);
+    unawaited(applyWindowBranding(settings));
     _notifyChanged();
   }
 

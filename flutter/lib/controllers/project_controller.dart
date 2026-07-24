@@ -110,7 +110,7 @@ class ProjectController extends ChangeNotifier {
 
   String get selectedImageSplit {
     final key = selectedImageKey;
-    return key == null ? 'train' : imageSplits[key] ?? 'train';
+    return key == null ? '' : imageSplits[key] ?? 'train';
   }
 
   List<AnnotationRegion> annotationsForPath(String path) {

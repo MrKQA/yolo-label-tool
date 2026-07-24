@@ -45,6 +45,8 @@ class SettingsDialog extends StatefulWidget {
 }
 
 class _SettingsDialogState extends State<SettingsDialog> {
+  late final TextEditingController _displayNameController;
+  late final TextEditingController _iconController;
   late final TextEditingController _pythonController;
   late final TextEditingController _outputController;
   late final TextEditingController _exportController;
@@ -54,10 +56,17 @@ class _SettingsDialogState extends State<SettingsDialog> {
   bool _checkingPython = false;
   int _pythonCheckGeneration = 0;
   String _lastCheckedPythonPath = '';
+  String? _brandingError;
 
   @override
   void initState() {
     super.initState();
+    _displayNameController = TextEditingController(
+      text: widget.initialSettings.applicationDisplayName,
+    );
+    _iconController = TextEditingController(
+      text: widget.initialSettings.applicationIconPath,
+    );
     _pythonController = TextEditingController(
       text: widget.initialSettings.pythonPath,
     );
@@ -77,6 +86,8 @@ class _SettingsDialogState extends State<SettingsDialog> {
 
   @override
   void dispose() {
+    _displayNameController.dispose();
+    _iconController.dispose();
     _pythonController.removeListener(_handlePythonPathChanged);
     _pythonController.dispose();
     _outputController.dispose();
@@ -178,6 +189,21 @@ class _SettingsDialogState extends State<SettingsDialog> {
     }
   }
 
+  Future<void> _chooseApplicationIcon() async {
+    final file = await openFile(
+      acceptedTypeGroups: const [
+        XTypeGroup(label: 'Windows icon', extensions: ['ico']),
+      ],
+    );
+    if (file == null) {
+      return;
+    }
+    setState(() {
+      _iconController.text = file.path;
+      _brandingError = null;
+    });
+  }
+
   Future<void> _clearCache() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -209,11 +235,20 @@ class _SettingsDialogState extends State<SettingsDialog> {
   }
 
   void _save() {
+    final iconPath = _iconController.text.trim();
+    if (iconPath.isNotEmpty &&
+        (!iconPath.toLowerCase().endsWith('.ico') ||
+            !File(iconPath).existsSync())) {
+      setState(() => _brandingError = t('settings.applicationIconInvalid'));
+      return;
+    }
     widget.onSave(
       AppSettings(
         pythonPath: _pythonController.text.trim(),
         outputPath: _outputController.text.trim(),
         exportPath: _exportController.text.trim(),
+        applicationDisplayName: _displayNameController.text.trim(),
+        applicationIconPath: iconPath,
         logLevelIndex: _logLevelIndex,
         darkMode: widget.initialSettings.darkMode,
         collaborationHostId: widget.initialSettings.collaborationHostId,
@@ -232,95 +267,136 @@ class _SettingsDialogState extends State<SettingsDialog> {
         title: Text(t('settings.title')),
         content: SizedBox(
           width: 560,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _SettingsReadOnlyRow(
-                label: t('settings.configPath'),
-                value: ConfigStore.databaseFile.path,
-              ),
-              const SizedBox(height: 12),
-              _PathSettingRow(
-                label: t('settings.pythonPath'),
-                controller: _pythonController,
-                buttonLabel: t('settings.choosePython'),
-                onPressed: _choosePythonExecutable,
-                secondaryButtonLabel: t('settings.chooseFolder'),
-                onSecondaryPressed: _choosePythonFolder,
-                trailing: _PythonCheckIndicator(
-                  checking: _checkingPython,
-                  check: _pythonCheck,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _SettingsReadOnlyRow(
+                  label: t('settings.configPath'),
+                  value: ConfigStore.databaseFile.path,
                 ),
-                statusText: _checkingPython
-                    ? t('settings.pythonChecking')
-                    : _pythonCheck?.message,
-              ),
-              const SizedBox(height: 12),
-              _PathSettingRow(
-                label: t('settings.outputPath'),
-                controller: _outputController,
-                buttonLabel: t('settings.chooseFolder'),
-                onPressed: _chooseOutputFolder,
-              ),
-              const SizedBox(height: 12),
-              _PathSettingRow(
-                label: t('settings.exportPath'),
-                controller: _exportController,
-                buttonLabel: t('settings.chooseFolder'),
-                onPressed: () async {
-                  final folder = await getDirectoryPath();
-                  if (folder != null) {
-                    _exportController.text = folder;
-                  }
-                },
-              ),
-              const SizedBox(height: 12),
-              Text(
-                t('settings.logLevel'),
-                style: Theme.of(context).textTheme.labelLarge,
-              ),
-              const SizedBox(height: 4),
-              Wrap(
-                spacing: 8,
-                children: [
-                  for (var i = 0; i < 4; i++)
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Radio<int>(
-                          value: i,
-                          groupValue: _logLevelIndex,
-                          onChanged: (v) {
-                            if (v != null) setState(() => _logLevelIndex = v);
-                          },
-                          visualDensity: VisualDensity.compact,
-                        ),
-                        GestureDetector(
-                          onTap: () => setState(() => _logLevelIndex = i),
-                          child: Text(
-                            const ['Debug', 'Info', 'Warning', 'Error'][i],
+                const SizedBox(height: 16),
+                Text(
+                  t('settings.applicationBranding'),
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  t('settings.applicationDisplayName'),
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: _displayNameController,
+                  maxLength: 80,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: defaultApplicationDisplayName,
+                    counterText: '',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _PathSettingRow(
+                  label: t('settings.applicationIcon'),
+                  controller: _iconController,
+                  buttonLabel: t('settings.chooseIcon'),
+                  onPressed: _chooseApplicationIcon,
+                  secondaryButtonLabel: t('settings.restoreDefault'),
+                  onSecondaryPressed: () {
+                    setState(() {
+                      _iconController.clear();
+                      _brandingError = null;
+                    });
+                  },
+                  statusText:
+                      _brandingError ?? t('settings.applicationIconHint'),
+                  statusIsError: _brandingError != null,
+                ),
+                const SizedBox(height: 16),
+                _PathSettingRow(
+                  label: t('settings.pythonPath'),
+                  controller: _pythonController,
+                  buttonLabel: t('settings.choosePython'),
+                  onPressed: _choosePythonExecutable,
+                  secondaryButtonLabel: t('settings.chooseFolder'),
+                  onSecondaryPressed: _choosePythonFolder,
+                  trailing: _PythonCheckIndicator(
+                    checking: _checkingPython,
+                    check: _pythonCheck,
+                  ),
+                  statusText: _checkingPython
+                      ? t('settings.pythonChecking')
+                      : _pythonCheck?.message,
+                ),
+                const SizedBox(height: 12),
+                _PathSettingRow(
+                  label: t('settings.outputPath'),
+                  controller: _outputController,
+                  buttonLabel: t('settings.chooseFolder'),
+                  onPressed: _chooseOutputFolder,
+                ),
+                const SizedBox(height: 12),
+                _PathSettingRow(
+                  label: t('settings.exportPath'),
+                  controller: _exportController,
+                  buttonLabel: t('settings.chooseFolder'),
+                  onPressed: () async {
+                    final folder = await getDirectoryPath();
+                    if (folder != null) {
+                      _exportController.text = folder;
+                    }
+                  },
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  t('settings.logLevel'),
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                const SizedBox(height: 4),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    for (var i = 0; i < 4; i++)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Radio<int>(
+                            value: i,
+                            groupValue: _logLevelIndex,
+                            onChanged: (v) {
+                              if (v != null) {
+                                setState(() => _logLevelIndex = v);
+                              }
+                            },
+                            visualDensity: VisualDensity.compact,
                           ),
-                        ),
-                      ],
+                          GestureDetector(
+                            onTap: () => setState(() => _logLevelIndex = i),
+                            child: Text(
+                              const ['Debug', 'Info', 'Warning', 'Error'][i],
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${t('settings.cacheSize')}: ${_formatBytes(_cacheSizeBytes)}',
+                      ),
                     ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      '${t('settings.cacheSize')}: ${_formatBytes(_cacheSizeBytes)}',
+                    OutlinedButton(
+                      onPressed: _clearCache,
+                      child: Text(t('settings.clearCache')),
                     ),
-                  ),
-                  OutlinedButton(
-                    onPressed: _clearCache,
-                    child: Text(t('settings.clearCache')),
-                  ),
-                ],
-              ),
-            ],
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
         actions: [
@@ -364,6 +440,7 @@ class _PathSettingRow extends StatelessWidget {
     this.onSecondaryPressed,
     this.trailing,
     this.statusText,
+    this.statusIsError = false,
   });
 
   final String label;
@@ -374,6 +451,7 @@ class _PathSettingRow extends StatelessWidget {
   final VoidCallback? onSecondaryPressed;
   final Widget? trailing;
   final String? statusText;
+  final bool statusIsError;
 
   @override
   Widget build(BuildContext context) {
@@ -404,7 +482,12 @@ class _PathSettingRow extends StatelessWidget {
         ),
         if (statusText != null && statusText!.isNotEmpty) ...[
           const SizedBox(height: 6),
-          Text(statusText!, style: Theme.of(context).textTheme.bodySmall),
+          Text(
+            statusText!,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: statusIsError ? Theme.of(context).colorScheme.error : null,
+            ),
+          ),
         ],
       ],
     );

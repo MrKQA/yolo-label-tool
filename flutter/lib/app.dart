@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 import 'models/app_status.dart';
 import 'services/app_runtime.dart';
 import 'services/i18n.dart';
+import 'services/window_branding.dart';
 import 'src/rust/api.dart';
 import 'theme/app_theme.dart';
 import 'theme/theme_transition.dart';
@@ -29,30 +30,35 @@ class YoloLabelApp extends StatelessWidget {
         return ValueListenableBuilder<ThemeMode>(
           valueListenable: themeModeNotifier,
           builder: (context, themeMode, _) {
-            return MaterialApp(
-              debugShowCheckedModeBanner: false,
-              title: t('app.title'),
-              themeMode: themeMode,
-              theme: buildAppTheme(Brightness.light),
-              darkTheme: buildAppTheme(Brightness.dark),
-              themeAnimationDuration: Duration.zero,
-              themeAnimationCurve: appMotionCurve,
-              scrollBehavior: const AppScrollBehavior(),
-              builder: (context, child) {
-                final media = MediaQuery.of(context);
-                return AppThemeRippleTransition(
-                  child: MediaQuery(
-                    data: media.copyWith(
-                      textScaler: media.textScaler.clamp(
-                        minScaleFactor: 0.90,
-                        maxScaleFactor: 1.30,
+            return ValueListenableBuilder<WindowBranding>(
+              valueListenable: windowBrandingNotifier,
+              builder: (context, branding, _) {
+                return MaterialApp(
+                  debugShowCheckedModeBanner: false,
+                  title: branding.displayName,
+                  themeMode: themeMode,
+                  theme: buildAppTheme(Brightness.light),
+                  darkTheme: buildAppTheme(Brightness.dark),
+                  themeAnimationDuration: Duration.zero,
+                  themeAnimationCurve: appMotionCurve,
+                  scrollBehavior: const AppScrollBehavior(),
+                  builder: (context, child) {
+                    final media = MediaQuery.of(context);
+                    return AppThemeRippleTransition(
+                      child: MediaQuery(
+                        data: media.copyWith(
+                          textScaler: media.textScaler.clamp(
+                            minScaleFactor: 0.90,
+                            maxScaleFactor: 1.30,
+                          ),
+                        ),
+                        child: child ?? const SizedBox.shrink(),
                       ),
-                    ),
-                    child: child ?? const SizedBox.shrink(),
-                  ),
+                    );
+                  },
+                  home: const HomePage(),
                 );
               },
-              home: const HomePage(),
             );
           },
         );

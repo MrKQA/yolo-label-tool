@@ -12,6 +12,7 @@
 import 'export.dart';
 
 const configRecentHistoryLimit = 20;
+const defaultApplicationDisplayName = 'YOLO Label Tool';
 
 class RecentEntry {
   const RecentEntry({required this.path, required this.timestamp});
@@ -174,6 +175,8 @@ class AppSettings {
     required this.pythonPath,
     required this.outputPath,
     required this.exportPath,
+    this.applicationDisplayName = '',
+    this.applicationIconPath = '',
     this.logLevelIndex = 2,
     this.darkMode = false,
     this.collaborationHostId = '',
@@ -184,6 +187,8 @@ class AppSettings {
     : pythonPath = '',
       outputPath = '',
       exportPath = '',
+      applicationDisplayName = '',
+      applicationIconPath = '',
       logLevelIndex = 2,
       darkMode = false,
       collaborationHostId = '',
@@ -192,15 +197,24 @@ class AppSettings {
   final String pythonPath;
   final String outputPath;
   final String exportPath;
+  final String applicationDisplayName;
+  final String applicationIconPath;
   final int logLevelIndex;
   final bool darkMode;
   final String collaborationHostId;
   final String collaborationUserId;
 
+  String get effectiveApplicationDisplayName {
+    final value = applicationDisplayName.trim();
+    return value.isEmpty ? defaultApplicationDisplayName : value;
+  }
+
   AppSettings copyWith({
     String? pythonPath,
     String? outputPath,
     String? exportPath,
+    String? applicationDisplayName,
+    String? applicationIconPath,
     int? logLevelIndex,
     bool? darkMode,
     String? collaborationHostId,
@@ -210,6 +224,9 @@ class AppSettings {
       pythonPath: pythonPath ?? this.pythonPath,
       outputPath: outputPath ?? this.outputPath,
       exportPath: exportPath ?? this.exportPath,
+      applicationDisplayName:
+          applicationDisplayName ?? this.applicationDisplayName,
+      applicationIconPath: applicationIconPath ?? this.applicationIconPath,
       logLevelIndex: logLevelIndex ?? this.logLevelIndex,
       darkMode: darkMode ?? this.darkMode,
       collaborationHostId: collaborationHostId ?? this.collaborationHostId,
@@ -221,6 +238,8 @@ class AppSettings {
     'pythonPath': pythonPath,
     'outputPath': outputPath,
     'exportPath': exportPath,
+    'applicationDisplayName': applicationDisplayName,
+    'applicationIconPath': applicationIconPath,
     'logLevelIndex': logLevelIndex,
     'darkMode': darkMode,
     'collaborationHostId': collaborationHostId,
@@ -247,6 +266,12 @@ class AppSettings {
     return AppSettings(
       pythonPath: value['pythonPath'] is String
           ? value['pythonPath'] as String
+          : '',
+      applicationDisplayName: value['applicationDisplayName'] is String
+          ? value['applicationDisplayName'] as String
+          : '',
+      applicationIconPath: value['applicationIconPath'] is String
+          ? value['applicationIconPath'] as String
           : '',
       outputPath: outputPath is String && outputPath.isNotEmpty
           ? outputPath

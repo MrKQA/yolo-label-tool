@@ -18,6 +18,7 @@ import 'navigation.dart';
 class WorkspaceTopMenuData {
   const WorkspaceTopMenuData({
     required this.visible,
+    required this.applicationDisplayName,
     required this.recentFolders,
     required this.recentFiles,
     required this.languageOptions,
@@ -26,6 +27,7 @@ class WorkspaceTopMenuData {
   });
 
   final bool visible;
+  final String applicationDisplayName;
   final List<String> recentFolders;
   final List<String> recentFiles;
   final List<LanguageOption> languageOptions;
@@ -95,6 +97,7 @@ class WorkspaceTopMenu extends StatelessWidget {
   Widget build(BuildContext context) {
     return TopMenuBar(
       visible: data.visible,
+      applicationDisplayName: data.applicationDisplayName,
       recentFolders: data.recentFolders,
       recentFiles: data.recentFiles,
       languageOptions: data.languageOptions,

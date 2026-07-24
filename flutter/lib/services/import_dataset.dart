@@ -54,8 +54,7 @@ String datasetYamlContent(
     'path: ${dataset.rootPath.replaceAll('\\', '/')}',
     'train: ${pathForDataYaml(dataset.rootPath, dataset.imageDirForSplit('train'))}',
     'val: ${pathForDataYaml(dataset.rootPath, dataset.imageDirForSplit('val'))}',
-    if ((grouped['test']?.isNotEmpty ?? false) ||
-        dataset.splitImageDirs.containsKey('test'))
+    if (grouped['test']?.isNotEmpty ?? false)
       'test: ${pathForDataYaml(dataset.rootPath, dataset.imageDirForSplit('test'))}',
     '',
     'nc: ${labelClasses.length}',
@@ -127,8 +126,8 @@ Future<ImportedYoloProject?> loadImportedYoloProject({
         LabelClass(
           id: index,
           name: name,
-          colorValue:
-              labelColorPalette[index % labelColorPalette.length].toARGB32(),
+          colorValue: labelColorPalette[index % labelColorPalette.length]
+              .toARGB32(),
         ),
       );
     }
@@ -156,9 +155,7 @@ Future<ImportedYoloProject?> loadImportedYoloProject({
   }
 
   return ImportedYoloProject(
-    images: [
-      for (final entry in uniqueEntries) ImageItem.fromPath(entry.path),
-    ],
+    images: [for (final entry in uniqueEntries) ImageItem.fromPath(entry.path)],
     labelClasses: importedClasses,
     annotationsByImage: importedAnnotations,
     imageSplits: importedSplits,
@@ -172,9 +169,7 @@ Future<ImportedYoloProject?> loadImportedYoloProject({
   );
 }
 
-List<DatasetImageEntry> _dedupeDatasetEntries(
-  List<DatasetImageEntry> entries,
-) {
+List<DatasetImageEntry> _dedupeDatasetEntries(List<DatasetImageEntry> entries) {
   final seen = <String>{};
   final result = <DatasetImageEntry>[];
   for (final entry in entries) {
@@ -358,18 +353,6 @@ String labelPathForImagePath(String imagePath) {
     directoryName(imagePath),
     '${baseNameWithoutExtension(imagePath)}.txt',
   );
-}
-
-String _labelDirForImageDir(String imageDir, String rootPath, String split) {
-  final normalized = imageDir.replaceAll('\\', '/');
-  final parts = normalized.split('/');
-  for (var i = parts.length - 1; i >= 0; i--) {
-    if (parts[i].toLowerCase() == 'images') {
-      parts[i] = 'labels';
-      return parts.join('\\');
-    }
-  }
-  return joinPath(rootPath, 'labels\\$split');
 }
 
 String _firstImageDirectoryForSplit(

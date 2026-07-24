@@ -97,6 +97,8 @@ class WorkspaceShellContent extends StatelessWidget {
               topMenu: WorkspaceTopMenu(
                 data: WorkspaceTopMenuData(
                   visible: topMenuVisible,
+                  applicationDisplayName:
+                      settings.settings.effectiveApplicationDisplayName,
                   recentFolders: project.recentFolders
                       .map((entry) => entry.path)
                       .toList(),

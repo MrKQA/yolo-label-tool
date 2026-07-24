@@ -16,6 +16,7 @@ typedef NewDatasetExporter =
       required List<ImageItem> images,
       required List<LabelClass> labelClasses,
       required Map<String, List<AnnotationRegion>> annotationsByImage,
+      required Map<String, String> imageSplits,
       required Size? Function(String imagePath) displaySizeForImagePath,
       required Future<Size> Function(String imagePath)
       ensureDisplaySizeForImagePath,
@@ -76,7 +77,7 @@ class ExportController {
       if (mode == DatasetExportMode.overwriteImported) {
         logApp(
           'EXPORT',
-          'Overwrite imported dataset started: yaml=${dataset!.dataYamlPath}',
+          'Overwrite imported dataset started: yaml=${dataset!.dataYamlPath}, redistribute=${config.redistribute}',
         );
         result = await _importedDatasetExporter(
           config: config,
@@ -91,7 +92,7 @@ class ExportController {
       } else {
         logApp(
           'EXPORT',
-          'Export started: ${config.folderName} (train=${config.trainRatio.toStringAsFixed(0)}% val=${config.valRatio.toStringAsFixed(0)}% test=${config.testRatio.toStringAsFixed(0)}%)',
+          'Export started: ${config.folderName} (redistribute=${config.redistribute}, train=${config.trainRatio.toStringAsFixed(0)}% val=${config.valRatio.toStringAsFixed(0)}% test=${config.testRatio.toStringAsFixed(0)}%)',
         );
         result = await _newDatasetExporter(
           config: config,
@@ -99,6 +100,7 @@ class ExportController {
           images: project.images,
           labelClasses: project.labelClasses,
           annotationsByImage: project.annotationsByImage,
+          imageSplits: project.imageSplits,
           displaySizeForImagePath: displaySizeForImagePath,
           ensureDisplaySizeForImagePath: ensureDisplaySizeForImagePath,
         );

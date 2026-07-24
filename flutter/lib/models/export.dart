@@ -11,6 +11,7 @@ class DatasetExportConfig {
   const DatasetExportConfig({
     required this.skipEmpty,
     required this.exportImages,
+    required this.redistribute,
     required this.trainRatio,
     required this.valRatio,
     required this.testRatio,
@@ -20,6 +21,7 @@ class DatasetExportConfig {
 
   final bool skipEmpty;
   final bool exportImages;
+  final bool redistribute;
   final double trainRatio;
   final double valRatio;
   final double testRatio;
